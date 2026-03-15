@@ -10,7 +10,7 @@
   <div class="app">
     <!-- Sidebar -->
     <aside class="sidebar">
-      <div class="sidebar-header">
+      <div class="sidebar-header" onclick="goHome()" style="cursor:pointer" title="กลับหน้าหลัก">
         <div class="logo">🏢</div>
         <div class="logo-text">
           <h1>AI Office</h1>
@@ -18,17 +18,14 @@
         </div>
       </div>
 
-      <!-- Mode tabs -->
-      <div class="mode-tabs">
-        <button class="mode-tab active" id="tabChat" onclick="switchMode('chat')">💬 สนทนา</button>
-        <button class="mode-tab" id="tabDispatch" onclick="switchMode('dispatch')">🚀 แจกจ่ายงาน</button>
-      </div>
+      <!-- Sidebar section label -->
+      <div class="sidebar-section-label" id="sidebarLabel">คุยโดยตรง 1:1</div>
 
       <nav class="agent-list" id="agentList">
         <div class="loading-agents">กำลังโหลด...</div>
       </nav>
       <div class="sidebar-footer">
-        <button class="btn-clear" id="clearBtn">🗑️ ล้างประวัติ</button>
+        <button class="btn-clear" id="clearBtn" style="display:none">🗑️ ล้างประวัติ</button>
       </div>
     </aside>
 
@@ -36,44 +33,44 @@
     <main class="main">
       <header class="chat-header">
         <div class="agent-info">
+          <button class="back-home-btn" id="backBtn" onclick="goHome()">🏠 หน้าหลัก</button>
           <span class="agent-emoji" id="headerEmoji">🏢</span>
           <div>
-            <h2 id="headerName">เลือกผู้ช่วย AI</h2>
-            <p id="headerTitle">เลือกผู้ช่วยจากเมนูด้านซ้าย</p>
+            <h2 id="headerName">AI Command Center</h2>
+            <p id="headerTitle">พิมพ์งานที่ต้องการ — ระบบจัดทีม AI ทำงานให้อัตโนมัติ</p>
           </div>
         </div>
         <span class="model-badge">Claude Opus 4.6</span>
       </header>
 
-      <!-- ── Chat mode ── -->
-      <div class="chat-area" id="chatArea">
-        <div class="welcome-screen" id="welcomeScreen">
-          <div class="welcome-icon">🏢</div>
-          <h2>ยินดีต้อนรับสู่ AI Office</h2>
-          <p>ระบบผู้ช่วย AI หลายตัว สำหรับงานสำนักงานทุกด้าน</p>
-          <div class="welcome-agents" id="welcomeAgents"></div>
-        </div>
-        <div class="messages" id="messages" style="display:none"></div>
-      </div>
-
-      <!-- ── Dispatch mode ── -->
-      <div class="dispatch-area" id="dispatchArea" style="display:none">
-        <div class="dispatch-header">
-          <div class="dispatch-title">
-            <span class="dispatch-icon">🚀</span>
-            <div>
-              <h2>แจกจ่ายงานอัตโนมัติ</h2>
-              <p>AI จะวิเคราะห์งานและส่งต่อให้ผู้เชี่ยวชาญที่เหมาะสมโดยอัตโนมัติ</p>
+      <!-- ── Home / Auto-dispatch mode ── -->
+      <div class="dispatch-area" id="dispatchArea">
+        <div class="dispatch-body" id="dispatchBody">
+          <div class="dispatch-placeholder" id="dispatchPlaceholder">
+            <div class="home-hero">
+              <div class="home-hero-icon">🏢</div>
+              <h2>AI Office</h2>
+              <p>บอกสิ่งที่ต้องการ — ระบบจะวิเคราะห์งานและส่งให้ AI ที่เหมาะสมทำงานให้โดยอัตโนมัติ</p>
+              <div class="home-examples">
+                <span onclick="useExample(this)">📊 วิเคราะห์ตลาด EV ในไทย</span>
+                <span onclick="useExample(this)">✍️ เขียนโพสต์ LinkedIn เปิดตัวสินค้า</span>
+                <span onclick="useExample(this)">💻 ออกแบบ API สำหรับระบบ booking</span>
+                <span onclick="useExample(this)">🎨 แนะนำ brand identity สำหรับ startup</span>
+                <span onclick="useExample(this)">👥 วางแผนสรรหาพนักงาน developer 3 คน</span>
+              </div>
             </div>
           </div>
         </div>
-        <div class="dispatch-body" id="dispatchBody">
-          <div class="dispatch-placeholder">
-            <div class="placeholder-icon">🎯</div>
-            <p>พิมพ์งานที่ต้องการด้านล่าง</p>
-            <p class="placeholder-sub">ระบบจะวิเคราะห์และส่งงานให้ AI ที่เหมาะสมทำงานร่วมกัน</p>
-          </div>
+      </div>
+
+      <!-- ── Direct chat mode ── -->
+      <div class="chat-area" id="chatArea" style="display:none">
+        <div class="welcome-screen" id="welcomeScreen">
+          <div class="welcome-icon" id="welcomeAgentEmoji">🤖</div>
+          <h2 id="welcomeAgentName">ผู้ช่วย AI</h2>
+          <p id="welcomeAgentDesc">พร้อมช่วยงาน</p>
         </div>
+        <div class="messages" id="messages" style="display:none"></div>
       </div>
 
       <!-- Session warning banner -->
@@ -84,26 +81,26 @@
         <button class="banner-close" id="bannerClose">✕</button>
       </div>
 
-      <!-- Chat input -->
-      <div class="input-area" id="chatInputArea">
+      <!-- Auto-dispatch input (home) -->
+      <div class="input-area home-input" id="dispatchInputArea">
         <div class="input-wrapper">
-          <textarea id="messageInput" placeholder="พิมพ์ข้อความถึงผู้ช่วย AI..." rows="1" disabled></textarea>
+          <textarea id="dispatchInput" placeholder="พิมพ์งานที่ต้องการ เช่น: วิเคราะห์คู่แข่ง แล้วเขียนรายงานให้ผู้บริหาร..." rows="1"></textarea>
+          <button id="dispatchBtn" title="ส่งงาน (Enter)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+        <p class="input-hint">Enter เพื่อส่ง — AI จะจัดทีมและทำงานให้โดยอัตโนมัติ | Shift+Enter ขึ้นบรรทัดใหม่</p>
+      </div>
+
+      <!-- Direct chat input -->
+      <div class="input-area" id="chatInputArea" style="display:none">
+        <div class="input-wrapper">
+          <textarea id="messageInput" placeholder="พิมพ์ข้อความ..." rows="1" disabled></textarea>
           <button id="sendBtn" disabled>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </div>
         <p class="input-hint" id="inputHint">เลือกผู้ช่วย AI เพื่อเริ่มการสนทนา</p>
-      </div>
-
-      <!-- Dispatch input -->
-      <div class="input-area" id="dispatchInputArea" style="display:none">
-        <div class="input-wrapper">
-          <textarea id="dispatchInput" placeholder="อธิบายงานที่ต้องการ เช่น: วิเคราะห์ตลาด AI ในไทย แล้วเขียนรายงานสำหรับผู้บริหาร..." rows="1"></textarea>
-          <button id="dispatchBtn">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-          </button>
-        </div>
-        <p class="input-hint">อธิบายงานแล้วกด Enter — AI จะจัดทีมทำงานให้อัตโนมัติ</p>
       </div>
     </main>
   </div>

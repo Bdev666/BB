@@ -1,6 +1,6 @@
 let currentAgent = null;
 let agents = [];
-let currentMode = 'chat';
+let currentMode = 'home'; // 'home' | 'chat'
 const SESSION_ID = 'sess_' + Math.random().toString(36).slice(2);
 
 const displayHistory = {};
@@ -8,28 +8,26 @@ const displayHistory = {};
 // ── Forward state ──
 const forwardTexts = new Map();
 let forwardIdCounter = 0;
-let pendingForward = null; // { text, fromAgentName, fromAgentEmoji }
+let pendingForward = null;
 
 const $ = id => document.getElementById(id);
-const agentList   = $('agentList');
-const welcomeScreen = $('welcomeScreen');
-const welcomeAgents = $('welcomeAgents');
-const messages    = $('messages');
-const chatArea    = $('chatArea');
-const messageInput = $('messageInput');
-const sendBtn     = $('sendBtn');
-const clearBtn    = $('clearBtn');
-const headerEmoji = $('headerEmoji');
-const headerName  = $('headerName');
-const headerTitle = $('headerTitle');
-const inputHint   = $('inputHint');
-
-const dispatchArea      = $('dispatchArea');
-const dispatchBody      = $('dispatchBody');
-const dispatchInput     = $('dispatchInput');
-const dispatchBtn       = $('dispatchBtn');
-const chatInputArea     = $('chatInputArea');
+const agentList      = $('agentList');
+const messages       = $('messages');
+const chatArea       = $('chatArea');
+const dispatchArea   = $('dispatchArea');
+const dispatchBody   = $('dispatchBody');
+const dispatchInput  = $('dispatchInput');
+const dispatchBtn    = $('dispatchBtn');
+const chatInputArea  = $('chatInputArea');
 const dispatchInputArea = $('dispatchInputArea');
+const messageInput   = $('messageInput');
+const sendBtn        = $('sendBtn');
+const clearBtn       = $('clearBtn');
+const headerEmoji    = $('headerEmoji');
+const headerName     = $('headerName');
+const headerTitle    = $('headerTitle');
+const inputHint      = $('inputHint');
+const backBtn        = $('backBtn');
 
 // ── Init ──
 async function init() {
@@ -37,7 +35,7 @@ async function init() {
     const res = await fetch('/api/agents');
     agents = await res.json();
     renderSidebar();
-    renderWelcome();
+    goHome();
   } catch {
     agentList.innerHTML = '<div class="loading-agents" style="color:#ef4444">โหลดไม่สำเร็จ — ตรวจสอบ server</div>';
   }
@@ -55,42 +53,55 @@ function renderSidebar() {
     </div>`).join('');
 }
 
-function renderWelcome() {
-  welcomeAgents.innerHTML = agents.map(a => `
-    <div class="wac" style="--c:${a.color}" onclick="selectAgent('${a.id}')">
-      <div class="wac-emoji">${a.emoji}</div>
-      <div class="wac-name">${a.name}</div>
-      <div class="wac-desc">${a.description}</div>
-    </div>`).join('');
+// ── Home (auto-dispatch) ──
+function goHome() {
+  currentMode = 'home';
+  currentAgent = null;
+  clearForward();
+
+  // Show dispatch area, hide chat
+  dispatchArea.style.display = 'flex';
+  chatArea.style.display = 'none';
+  dispatchInputArea.style.display = '';
+  chatInputArea.style.display = 'none';
+  clearBtn.style.display = 'none';
+  backBtn.style.display = 'none';
+
+  // Header: command center
+  headerEmoji.textContent = '🏢';
+  headerName.textContent  = 'AI Command Center';
+  headerTitle.textContent = 'พิมพ์งานที่ต้องการ — ระบบจัดทีม AI ทำงานให้อัตโนมัติ';
+
+  // Deselect all agents in sidebar
+  document.querySelectorAll('.agent-item').forEach(el => {
+    el.classList.remove('active');
+    el.querySelector('.active-dot')?.remove();
+  });
+
+  $('sidebarLabel').textContent = 'คุยโดยตรง 1:1';
+  dispatchInput.focus();
 }
 
-// ── Mode Switch ──
-function switchMode(mode) {
-  currentMode = mode;
-  $('tabChat').classList.toggle('active', mode === 'chat');
-  $('tabDispatch').classList.toggle('active', mode === 'dispatch');
-  if (mode === 'chat') {
-    chatArea.style.display = '';
-    dispatchArea.style.display = 'none';
-    chatInputArea.style.display = '';
-    dispatchInputArea.style.display = 'none';
-    clearBtn.style.display = '';
-  } else {
-    chatArea.style.display = 'none';
-    dispatchArea.style.display = 'flex';
-    chatInputArea.style.display = 'none';
-    dispatchInputArea.style.display = '';
-    clearBtn.style.display = 'none';
-    dispatchInput.focus();
-  }
-}
-
-// ── Select Agent ──
+// ── Direct chat: select agent ──
 function selectAgent(id) {
-  if (currentMode !== 'chat') switchMode('chat');
+  currentMode = 'chat';
   currentAgent = agents.find(a => a.id === id);
   if (!currentAgent) return;
 
+  // Show chat, hide dispatch
+  chatArea.style.display = '';
+  dispatchArea.style.display = 'none';
+  chatInputArea.style.display = '';
+  dispatchInputArea.style.display = 'none';
+  clearBtn.style.display = '';
+  backBtn.style.display = '';
+
+  // Header: current agent
+  headerEmoji.textContent = currentAgent.emoji;
+  headerName.textContent  = currentAgent.name;
+  headerTitle.textContent = currentAgent.title;
+
+  // Sidebar: mark active
   document.querySelectorAll('.agent-item').forEach(el => {
     el.classList.toggle('active', el.dataset.id === id);
     el.querySelector('.active-dot')?.remove();
@@ -98,11 +109,11 @@ function selectAgent(id) {
   document.querySelector(`.agent-item[data-id="${id}"]`)
     ?.insertAdjacentHTML('beforeend', '<div class="active-dot"></div>');
 
-  headerEmoji.textContent = currentAgent.emoji;
-  headerName.textContent  = currentAgent.name;
-  headerTitle.textContent = currentAgent.title;
+  $('sidebarLabel').textContent = '— กำลังคุยกับ ' + currentAgent.name;
 
-  welcomeScreen.style.display = 'none';
+  // Show messages
+  const ws = $('welcomeScreen');
+  ws.style.display = 'none';
   messages.style.display = 'flex';
   messages.innerHTML = '';
 
@@ -112,18 +123,41 @@ function selectAgent(id) {
       if (m.type === 'ai' && m.text) addForwardButton(div, m.text);
     });
   } else {
-    appendBubble('ai', `สวัสดีครับ/ค่ะ! ผม/หนูคือ **${currentAgent.name}** (${currentAgent.title}) 👋\n\nพร้อมช่วยเรื่อง${currentAgent.description} และสามารถ**ค้นหาข้อมูลจากอินเทอร์เน็ต**ได้แบบ real-time ด้วยนะครับ/ค่ะ\n\nมีอะไรให้ช่วยไหมครับ/ค่ะ?`);
+    // Show welcome
+    ws.style.display = '';
+    messages.style.display = 'none';
+    $('welcomeAgentEmoji').textContent = currentAgent.emoji;
+    $('welcomeAgentName').textContent  = currentAgent.name;
+    $('welcomeAgentDesc').textContent  = currentAgent.description;
   }
 
   messageInput.disabled = false;
   sendBtn.disabled = false;
   inputHint.textContent = `คุยกับ ${currentAgent.name} — Enter ส่ง | Shift+Enter ขึ้นบรรทัดใหม่`;
-  messageInput.focus();
+
+  // If there's a pending forward, show its banner
+  if (pendingForward) showForwardBanner();
+  else messageInput.focus();
+}
+
+// ── Example chips ──
+function useExample(el) {
+  // Strip emoji prefix
+  const text = el.textContent.replace(/^[\p{Emoji}\s]+/u, '').trim();
+  dispatchInput.value = el.textContent.trim();
+  autoResizeTextarea(dispatchInput);
+  dispatchInput.focus();
 }
 
 // ── Bubble helpers ──
 function appendBubble(role, text, streaming = false) {
   const isUser = role === 'user';
+  // Make sure messages area is visible
+  const ws = $('welcomeScreen');
+  if (ws && ws.style.display !== 'none') {
+    ws.style.display = 'none';
+    messages.style.display = 'flex';
+  }
   const div = document.createElement('div');
   div.className = `message ${isUser ? 'user' : 'ai'}`;
   div.innerHTML = `
@@ -133,7 +167,7 @@ function appendBubble(role, text, streaming = false) {
       <div class="msg-bubble">${isUser ? esc(text) : md(text)}${streaming ? '<span class="cursor"></span>' : ''}</div>
     </div>`;
   messages.appendChild(div);
-  scrollDown();
+  scrollChat();
   return div;
 }
 
@@ -142,7 +176,7 @@ function showStatus(text) {
   pill.className = 'status-pill';
   pill.innerHTML = `<span class="status-spin">⟳</span> ${esc(text)}`;
   messages.appendChild(pill);
-  scrollDown();
+  scrollChat();
   return pill;
 }
 
@@ -151,14 +185,18 @@ function addForwardButton(msgDiv, text) {
   if (!text?.trim()) return;
   const fid = ++forwardIdCounter;
   forwardTexts.set(fid, text);
-
   const bar = document.createElement('div');
   bar.className = 'msg-forward-bar';
-  bar.innerHTML = `
+  bar.innerHTML = buildForwardMenuHTML(fid);
+  msgDiv.querySelector('.msg-body').appendChild(bar);
+}
+
+function buildForwardMenuHTML(fid) {
+  return `
     <button class="forward-btn" onclick="toggleForwardMenu(${fid}, this)">🔀 ส่งต่อ ▾</button>
     <div class="forward-menu" id="fmenu-${fid}">
       <div class="fmenu-header">ส่งต่อให้...</div>
-      <div class="fmenu-item fmenu-dispatch" onclick="forwardToDispatch(${fid})">
+      <div class="fmenu-item fmenu-dispatch" onclick="forwardToHome(${fid})">
         <span>🚀</span><span>แจกจ่ายให้ทีมอัตโนมัติ</span>
       </div>
       <div class="fmenu-divider"></div>
@@ -167,7 +205,6 @@ function addForwardButton(msgDiv, text) {
         <span class="fmenu-role">${a.title}</span>
       </div>`).join('')}
     </div>`;
-  msgDiv.querySelector('.msg-body').appendChild(bar);
 }
 
 function toggleForwardMenu(fid, btn) {
@@ -176,11 +213,10 @@ function toggleForwardMenu(fid, btn) {
   closeAllForwardMenus();
   if (!isOpen) {
     menu.classList.add('open');
-    // Flip up if near bottom
     const rect = btn.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    menu.style.bottom = spaceBelow < 260 ? 'calc(100% + 4px)' : '';
-    menu.style.top    = spaceBelow < 260 ? '' : 'calc(100% + 4px)';
+    menu.style.bottom = spaceBelow < 280 ? 'calc(100% + 4px)' : 'auto';
+    menu.style.top    = spaceBelow < 280 ? 'auto' : 'calc(100% + 4px)';
   }
 }
 
@@ -198,23 +234,19 @@ function forwardToAgent(agentId, fid) {
     fromAgentEmoji: fromAgent?.emoji || '🤖'
   };
   selectAgent(agentId);
-  showForwardBanner();
 }
 
-function forwardToDispatch(fid) {
+function forwardToHome(fid) {
   closeAllForwardMenus();
   const text = forwardTexts.get(fid);
-  switchMode('dispatch');
+  goHome();
   dispatchInput.value = text.length > 600 ? text.slice(0, 600) + '...' : text;
   autoResizeTextarea(dispatchInput);
   dispatchInput.focus();
-  // Scroll to end of input
-  dispatchInput.setSelectionRange(dispatchInput.value.length, dispatchInput.value.length);
 }
 
 // ── Forward Banner ──
 function showForwardBanner() {
-  if (!pendingForward) return;
   let banner = $('forwardBanner');
   if (!banner) {
     banner = document.createElement('div');
@@ -233,20 +265,17 @@ function showForwardBanner() {
       <button class="fwd-banner-close" onclick="clearForward()">✕</button>
     </div>`;
   banner.style.display = '';
-  // Update placeholder hint
-  inputHint.textContent = `พิมพ์คำสั่งเพิ่มเติม (หรือ Enter เพื่อส่งต่อทันที)`;
+  inputHint.textContent = `พิมพ์คำสั่งเพิ่ม (หรือ Enter เพื่อส่งต่อทันที)`;
+  messageInput.focus();
 }
 
 function clearForward() {
   pendingForward = null;
   const banner = $('forwardBanner');
   if (banner) banner.style.display = 'none';
-  if (currentAgent) {
-    inputHint.textContent = `คุยกับ ${currentAgent.name} — Enter ส่ง | Shift+Enter ขึ้นบรรทัดใหม่`;
-  }
+  if (currentAgent) inputHint.textContent = `คุยกับ ${currentAgent.name} — Enter ส่ง | Shift+Enter ขึ้นบรรทัดใหม่`;
 }
 
-// Close menus on outside click
 document.addEventListener('click', e => {
   if (!e.target.closest('.msg-forward-bar')) closeAllForwardMenus();
 });
@@ -255,11 +284,9 @@ document.addEventListener('click', e => {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
 function md(text) {
   let h = esc(text);
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,l,c) =>
-    `<pre><code class="${l||'plaintext'}">${c.trim()}</code></pre>`);
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,l,c) => `<pre><code class="${l||'plaintext'}">${c.trim()}</code></pre>`);
   h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
@@ -271,8 +298,7 @@ function md(text) {
   h = h.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
   h = h.replace(/^\d+\. (.+)$/gm, '<oli>$1</oli>');
-  h = h.replace(/(<oli>[\s\S]*?<\/oli>\n?)+/g, m =>
-    `<ol>${m.replace(/<\/?oli>/g, t => t.replace('oli','li'))}</ol>`);
+  h = h.replace(/(<oli>[\s\S]*?<\/oli>\n?)+/g, m => `<ol>${m.replace(/<\/?oli>/g, t => t.replace('oli','li'))}</ol>`);
   h = h.replace(/\|(.+)\|\n\|[-|:\s]+\|\n((?:\|.+\|\n?)+)/g, (_, hdr, rows) => {
     const th = hdr.split('|').filter(s=>s.trim()).map(s=>`<th>${s.trim()}</th>`).join('');
     const trs = rows.trim().split('\n').map(r => {
@@ -287,40 +313,32 @@ function md(text) {
   return h;
 }
 
-function scrollDown() {
-  requestAnimationFrame(() => { chatArea.scrollTop = chatArea.scrollHeight; });
-}
-function scrollDispatchDown() {
-  requestAnimationFrame(() => { dispatchBody.scrollTop = dispatchBody.scrollHeight; });
-}
+function scrollChat()     { requestAnimationFrame(() => { chatArea.scrollTop     = chatArea.scrollHeight; }); }
+function scrollDispatch() { requestAnimationFrame(() => { dispatchBody.scrollTop = dispatchBody.scrollHeight; }); }
 function autoResizeTextarea(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 150) + 'px';
 }
-
 async function typeOut(bubble, text, chunkSize = 6) {
   let i = 0;
   bubble.innerHTML = '<span class="cursor"></span>';
   while (i < text.length) {
     i = Math.min(i + chunkSize, text.length);
     bubble.innerHTML = md(text.slice(0, i)) + (i < text.length ? '<span class="cursor"></span>' : '');
-    scrollDown();
+    scrollChat();
     await new Promise(r => setTimeout(r, 8));
   }
   bubble.innerHTML = md(text);
 }
 
-// ── Send (single agent chat) ──
+// ── Send: direct agent chat ──
 async function send() {
-  const text = messageInput.value.trim();
-  // Allow empty input if there's a pending forward (send the forward alone)
   if (!currentAgent) return;
+  const text = messageInput.value.trim();
   if (!text && !pendingForward) return;
 
-  // Build the actual message to send — include forwarded context if present
+  let displayText = text || `[ส่งต่อจาก ${pendingForward.fromAgentEmoji} ${pendingForward.fromAgentName}]`;
   let actualMessage = text;
-  let displayText = text || `[ส่งต่อผลงานจาก ${pendingForward.fromAgentEmoji} ${pendingForward.fromAgentName}]`;
-
   if (pendingForward) {
     const fwd = pendingForward;
     actualMessage = text
@@ -337,11 +355,10 @@ async function send() {
   const agentId = currentAgent.id;
   if (!displayHistory[agentId]) displayHistory[agentId] = [];
   displayHistory[agentId].push({ type: 'user', text: displayText });
-
   appendBubble('user', displayText);
 
-  const aiDiv = appendBubble('ai', '', true);
-  const bubble = aiDiv.querySelector('.msg-bubble');
+  const aiDiv   = appendBubble('ai', '', true);
+  const bubble  = aiDiv.querySelector('.msg-bubble');
   let full = '';
   let statusPill = null;
 
@@ -351,51 +368,35 @@ async function send() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agentId, message: actualMessage, sessionId: SESSION_ID })
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || res.statusText);
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
-
+      const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         try {
           const d = JSON.parse(line.slice(6));
-
           if (d.type === 'status') {
-            if (!statusPill) {
-              statusPill = showStatus(d.text);
-              messages.insertBefore(statusPill, aiDiv);
-            } else {
-              statusPill.innerHTML = `<span class="status-spin">⟳</span> ${esc(d.text)}`;
-            }
+            if (!statusPill) { statusPill = showStatus(d.text); messages.insertBefore(statusPill, aiDiv); }
+            else statusPill.innerHTML = `<span class="status-spin">⟳</span> ${esc(d.text)}`;
           }
           if (d.type === 'delta') {
             full += d.text;
             if (statusPill) { statusPill.remove(); statusPill = null; }
             bubble.innerHTML = md(full) + '<span class="cursor"></span>';
-            scrollDown();
+            scrollChat();
           }
           if (d.type === 'done') {
             if (statusPill) { statusPill.remove(); statusPill = null; }
             const finalText = full || d.text || '';
-            if (!full && finalText) {
-              await typeOut(bubble, finalText);
-              full = finalText;
-            } else {
-              bubble.innerHTML = md(full);
-            }
+            if (!full && finalText) { await typeOut(bubble, finalText); full = finalText; }
+            else bubble.innerHTML = md(full);
             displayHistory[agentId].push({ type: 'ai', text: full });
             addForwardButton(aiDiv, full);
           }
@@ -406,22 +407,20 @@ async function send() {
         } catch {}
       }
     }
-
-    if (!full) bubble.innerHTML = '<span style="color:#f59e0b">⚠️ ไม่ได้รับคำตอบ — ลองใหม่อีกครั้ง</span>';
-
+    if (!full) bubble.innerHTML = '<span style="color:#f59e0b">⚠️ ไม่ได้รับคำตอบ</span>';
   } catch (err) {
-    if (statusPill) { statusPill.remove(); }
-    bubble.innerHTML = `<span style="color:#ef4444">⚠️ เกิดข้อผิดพลาด: ${esc(err.message)}</span>`;
+    if (statusPill) statusPill.remove();
+    bubble.innerHTML = `<span style="color:#ef4444">⚠️ ${esc(err.message)}</span>`;
     displayHistory[agentId].pop();
   } finally {
     messageInput.disabled = false;
     sendBtn.disabled = false;
     messageInput.focus();
-    scrollDown();
+    scrollChat();
   }
 }
 
-// ── Dispatch: multi-agent workflow ──
+// ── Dispatch: auto-route task ──
 async function dispatch() {
   const task = dispatchInput.value.trim();
   if (!task) return;
@@ -431,18 +430,27 @@ async function dispatch() {
   dispatchInput.disabled = true;
   dispatchBtn.disabled = true;
 
-  dispatchBody.innerHTML = '';
+  // Hide placeholder
+  const placeholder = $('dispatchPlaceholder');
+  if (placeholder) placeholder.style.display = 'none';
 
+  // Task card header
+  const taskCard = document.createElement('div');
+  taskCard.className = 'task-request-card';
+  taskCard.innerHTML = `<span class="task-request-label">📝 งานที่ได้รับ</span><p>${esc(task)}</p>`;
+  dispatchBody.appendChild(taskCard);
+  scrollDispatch();
+
+  // Planning indicator
   const planningEl = document.createElement('div');
   planningEl.className = 'plan-card';
   planningEl.innerHTML = `
     <div class="plan-card-header">
       <span class="plan-badge">🎯 Orchestrator</span>
-      <span style="font-size:12px;color:var(--text2)">กำลังวางแผนงาน...</span>
     </div>
     <div class="step-inline-status"><span class="step-spin">⟳</span> กำลังวิเคราะห์งานและจัดทีม...</div>`;
   dispatchBody.appendChild(planningEl);
-  scrollDispatchDown();
+  scrollDispatch();
 
   const stepCards = {};
 
@@ -452,11 +460,7 @@ async function dispatch() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task, sessionId: SESSION_ID })
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }));
-      throw new Error(err.error || res.statusText);
-    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
 
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -466,22 +470,18 @@ async function dispatch() {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop();
+      const lines = buf.split('\n'); buf = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         try {
           const d = JSON.parse(line.slice(6));
 
-          if (d.type === 'plan_start') {
-            planningEl.querySelector('.step-inline-status').innerHTML =
-              `<span class="step-spin">⟳</span> PM กำลังวางแผนการทำงาน...`;
-          }
           if (d.type === 'status') {
             planningEl.querySelector('.step-inline-status').innerHTML =
               `<span class="step-spin">⟳</span> ${esc(d.text)}`;
           }
+
           if (d.type === 'plan') {
             const plan = d.plan;
             planningEl.innerHTML = `
@@ -494,11 +494,12 @@ async function dispatch() {
                   const a = agents.find(x => x.id === s.agentId);
                   return `<div class="plan-step-chip">
                     <span class="step-num">${i+1}</span>
-                    <span>${a ? a.emoji : '🤖'} ${a ? a.name : s.agentId}</span>
+                    <span>${a?.emoji || '🤖'} ${a?.name || s.agentId}</span>
                   </div>`;
                 }).join('')}
               </div>`;
           }
+
           if (d.type === 'step_start') {
             const { index, agentId, agentName, agentEmoji } = d;
             const a = agents.find(x => x.id === agentId);
@@ -518,33 +519,34 @@ async function dispatch() {
                 <div class="step-inline-status"><span class="step-spin">⟳</span> รอผลลัพธ์...</div>
               </div>`;
             dispatchBody.appendChild(card);
-            scrollDispatchDown();
+            scrollDispatch();
             stepCards[index] = {
               card,
               bodyEl:   card.querySelector(`#step-body-${index}`),
               statusEl: card.querySelector(`#step-status-${index}`),
               badgeEl:  card.querySelector(`#step-badge-${index}`),
-              full: ''
+              full: '', hasContent: false
             };
           }
+
           if (d.type === 'step_status') {
             const sc = stepCards[d.index];
             if (sc) {
               sc.statusEl.textContent = d.text;
-              if (!sc.hasContent)
-                sc.bodyEl.innerHTML = `<div class="step-inline-status"><span class="step-spin">⟳</span> ${esc(d.text)}</div>`;
+              if (!sc.hasContent) sc.bodyEl.innerHTML = `<div class="step-inline-status"><span class="step-spin">⟳</span> ${esc(d.text)}</div>`;
             }
-            scrollDispatchDown();
+            scrollDispatch();
           }
+
           if (d.type === 'step_delta') {
             const sc = stepCards[d.index];
             if (sc) {
-              sc.full += d.text;
-              sc.hasContent = true;
+              sc.full += d.text; sc.hasContent = true;
               sc.bodyEl.innerHTML = md(sc.full) + '<span class="cursor"></span>';
-              scrollDispatchDown();
+              scrollDispatch();
             }
           }
+
           if (d.type === 'step_done') {
             const sc = stepCards[d.index];
             if (sc) {
@@ -555,48 +557,33 @@ async function dispatch() {
               sc.badgeEl.className = 'step-badge done';
               sc.badgeEl.textContent = '✓ เสร็จแล้ว';
               sc.statusEl.textContent = 'ดำเนินการเสร็จสิ้น';
-
-              // Add "forward" button on each completed step
+              // Forward button on each step
               if (finalText) {
-                const fwd = document.createElement('div');
-                fwd.style.cssText = 'padding:6px 16px 10px;';
                 const fid = ++forwardIdCounter;
                 forwardTexts.set(fid, finalText);
-                // Find agent name for this step
-                const agentStep = agents.find(x => x.id === d.agentId) || {};
-                fwd.innerHTML = `
-                  <div class="msg-forward-bar" style="margin-top:0">
-                    <button class="forward-btn" onclick="toggleForwardMenu(${fid}, this)">🔀 ส่งต่อ ▾</button>
-                    <div class="forward-menu" id="fmenu-${fid}">
-                      <div class="fmenu-header">ส่งต่อให้...</div>
-                      <div class="fmenu-item fmenu-dispatch" onclick="forwardToDispatch(${fid})">
-                        <span>🚀</span><span>แจกจ่ายให้ทีมอัตโนมัติ</span>
-                      </div>
-                      <div class="fmenu-divider"></div>
-                      ${agents.map(a => `<div class="fmenu-item" onclick="forwardToAgent('${a.id}',${fid})">
-                        <span>${a.emoji}</span><span>${a.name}</span>
-                        <span class="fmenu-role">${a.title}</span>
-                      </div>`).join('')}
-                    </div>
-                  </div>`;
-                sc.card.appendChild(fwd);
+                const fwdDiv = document.createElement('div');
+                fwdDiv.style.cssText = 'padding:6px 16px 10px';
+                fwdDiv.innerHTML = `<div class="msg-forward-bar" style="margin-top:0">${buildForwardMenuHTML(fid)}</div>`;
+                sc.card.appendChild(fwdDiv);
               }
-              scrollDispatchDown();
+              scrollDispatch();
             }
           }
+
           if (d.type === 'dispatch_done') {
             const doneCard = document.createElement('div');
             doneCard.className = 'dispatch-done-card';
-            doneCard.innerHTML = `<span style="font-size:20px">✅</span> <span>งานทั้งหมดเสร็จสิ้นแล้ว — ทีม AI ดำเนินการครบทุกขั้นตอน</span>`;
+            doneCard.innerHTML = `<span style="font-size:20px">✅</span><span>งานทั้งหมดเสร็จสิ้น — พิมพ์งานใหม่เพื่อเริ่มอีกครั้ง</span>`;
             dispatchBody.appendChild(doneCard);
-            scrollDispatchDown();
+            scrollDispatch();
           }
+
           if (d.type === 'error') {
             const errCard = document.createElement('div');
             errCard.style.cssText = 'background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px 16px;color:#fca5a5;font-size:13px;';
-            errCard.textContent = `⚠️ เกิดข้อผิดพลาด: ${d.message}`;
+            errCard.textContent = `⚠️ ${d.message}`;
             dispatchBody.appendChild(errCard);
-            scrollDispatchDown();
+            scrollDispatch();
           }
         } catch {}
       }
@@ -604,9 +591,9 @@ async function dispatch() {
   } catch (err) {
     const errCard = document.createElement('div');
     errCard.style.cssText = 'background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px 16px;color:#fca5a5;font-size:13px;';
-    errCard.textContent = `⚠️ เกิดข้อผิดพลาด: ${err.message}`;
+    errCard.textContent = `⚠️ ${err.message}`;
     dispatchBody.appendChild(errCard);
-    scrollDispatchDown();
+    scrollDispatch();
   } finally {
     dispatchInput.disabled = false;
     dispatchBtn.disabled = false;
@@ -614,7 +601,7 @@ async function dispatch() {
   }
 }
 
-// ── Session Expiry Monitor ──
+// ── Session Monitor ──
 const sessionBanner = $('sessionBanner');
 const bannerText    = $('bannerText');
 const bannerExtend  = $('bannerExtend');
@@ -622,54 +609,41 @@ const bannerClose   = $('bannerClose');
 let bannerDismissed = false;
 
 function fmtTime(sec) {
-  if (sec >= 60) {
-    const m = Math.floor(sec / 60), s = sec % 60;
-    return s > 0 ? `${m} นาที ${s} วินาที` : `${m} นาที`;
-  }
+  if (sec >= 60) { const m = Math.floor(sec/60), s = sec%60; return s > 0 ? `${m} นาที ${s} วินาที` : `${m} นาที`; }
   return `${sec} วินาที`;
 }
-
 async function checkSession() {
   try {
     const r = await fetch(`/api/session-status/${SESSION_ID}`);
     const d = await r.json();
     if (d.expired) {
       Object.keys(displayHistory).forEach(k => { displayHistory[k] = []; });
-      sessionBanner.style.display = 'flex';
-      sessionBanner.classList.add('critical');
-      bannerText.textContent = '⚠️ Session หมดอายุแล้ว — ประวัติการสนทนาถูกล้างอัตโนมัติ กรุณาเริ่มสนทนาใหม่';
+      sessionBanner.style.display = 'flex'; sessionBanner.classList.add('critical');
+      bannerText.textContent = '⚠️ Session หมดอายุแล้ว — ประวัติถูกล้างอัตโนมัติ';
       bannerExtend.style.display = 'none';
-      if (currentAgent) {
+      if (currentMode === 'chat' && currentAgent) {
         messages.innerHTML = '';
-        appendBubble('ai', '🔄 Session หมดอายุแล้วครับ/ค่ะ ประวัติถูกล้างอัตโนมัติ — พิมพ์ข้อความใหม่ได้เลยครับ/ค่ะ');
+        appendBubble('ai', '🔄 Session หมดอายุแล้วครับ/ค่ะ — พิมพ์ข้อความใหม่ได้เลยครับ/ค่ะ');
       }
       return;
     }
     if (d.warningSoon && !bannerDismissed) {
-      const sec = d.ttlSec;
       sessionBanner.style.display = 'flex';
-      sessionBanner.classList.toggle('critical', sec <= 60);
+      sessionBanner.classList.toggle('critical', d.ttlSec <= 60);
       bannerExtend.style.display = '';
-      const resetAt = new Date(d.expiresAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
-      bannerText.textContent = `Session จะหมดอายุใน ${fmtTime(sec)} (เวลา ${resetAt}) — ประวัติสนทนาจะถูกล้างอัตโนมัติ`;
+      const at = new Date(d.expiresAt).toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit' });
+      bannerText.textContent = `Session จะหมดอายุใน ${fmtTime(d.ttlSec)} (เวลา ${at})`;
     } else if (!d.warningSoon) {
-      sessionBanner.style.display = 'none';
-      bannerDismissed = false;
+      sessionBanner.style.display = 'none'; bannerDismissed = false;
     }
   } catch {}
 }
-
 bannerExtend.addEventListener('click', async () => {
-  await fetch(`/api/session-touch/${SESSION_ID}`, { method: 'POST' }).catch(() => {});
-  bannerDismissed = false;
-  sessionBanner.style.display = 'none';
-  bannerText.textContent = '';
+  await fetch(`/api/session-touch/${SESSION_ID}`, { method:'POST' }).catch(()=>{});
+  bannerDismissed = false; sessionBanner.style.display = 'none';
   setTimeout(checkSession, 500);
 });
-bannerClose.addEventListener('click', () => {
-  bannerDismissed = true;
-  sessionBanner.style.display = 'none';
-});
+bannerClose.addEventListener('click', () => { bannerDismissed = true; sessionBanner.style.display = 'none'; });
 setInterval(checkSession, 30_000);
 setTimeout(checkSession, 5_000);
 
@@ -677,23 +651,19 @@ setTimeout(checkSession, 5_000);
 clearBtn.addEventListener('click', async () => {
   if (!currentAgent) return;
   if (!confirm(`ล้างประวัติการสนทนากับ ${currentAgent.name}?`)) return;
-  await fetch(`/api/chat/${SESSION_ID}/${currentAgent.id}`, { method: 'DELETE' }).catch(() => {});
+  await fetch(`/api/chat/${SESSION_ID}/${currentAgent.id}`, { method:'DELETE' }).catch(()=>{});
   displayHistory[currentAgent.id] = [];
   messages.innerHTML = '';
-  appendBubble('ai', `ล้างประวัติแล้วครับ/ค่ะ 🗑️ มีอะไรให้ช่วยไหม?`);
+  $('welcomeScreen').style.display = '';
+  messages.style.display = 'none';
 });
 
-// ── Input: chat ──
-messageInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-});
+// ── Inputs ──
+messageInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 messageInput.addEventListener('input', () => autoResizeTextarea(messageInput));
 sendBtn.addEventListener('click', send);
 
-// ── Input: dispatch ──
-dispatchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatch(); }
-});
+dispatchInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); dispatch(); } });
 dispatchInput.addEventListener('input', () => autoResizeTextarea(dispatchInput));
 dispatchBtn.addEventListener('click', dispatch);
 
