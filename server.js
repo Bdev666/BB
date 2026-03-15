@@ -1,12 +1,9 @@
 import express from 'express';
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
 const app = express();
 const PORT = 3000;
 
@@ -24,7 +21,8 @@ const AGENTS = {
     description: 'วางแผนกลยุทธ์ ตัดสินใจ และบริหารจัดการองค์กร',
     system: `คุณคือผู้จัดการทั่วไปและ CEO ขององค์กร มีความเชี่ยวชาญด้านการวางแผนกลยุทธ์ การบริหารจัดการ และการตัดสินใจ
 ตอบเป็นภาษาไทยเสมอ มีความเป็นผู้นำ คิดเชิงกลยุทธ์ มองภาพรวม และให้คำแนะนำที่ชัดเจน เป็นมืออาชีพ
-ช่วยด้านการวางแผน การตัดสินใจ OKR SWOT และการบริหารจัดการองค์กร`
+ช่วยด้านการวางแผน การตัดสินใจ OKR SWOT และการบริหารจัดการองค์กร
+หากต้องการข้อมูลปัจจุบัน เช่น ข่าว ราคาหุ้น หรือเทรนด์ตลาด ให้ค้นหาข้อมูลก่อนตอบเสมอ`
   },
   secretary: {
     id: 'secretary',
@@ -35,7 +33,8 @@ const AGENTS = {
     description: 'จัดการเอกสาร นัดหมาย และประสานงานทีม',
     system: `คุณคือเลขานุการและผู้ประสานงานขององค์กร เชี่ยวชาญด้านการจัดการเอกสาร การนัดหมาย และการประสานงาน
 ตอบเป็นภาษาไทยเสมอ ละเอียดรอบคอบ เป็นระเบียบ และช่วยเหลือได้ดี
-ช่วยร่างอีเมล บันทึกการประชุม รายงาน และตารางเวลา`
+ช่วยร่างอีเมล บันทึกการประชุม รายงาน และตารางเวลา
+หากต้องการข้อมูลอ้างอิง ให้ค้นหาและนำมาประกอบเสมอ`
   },
   developer: {
     id: 'developer',
@@ -46,7 +45,8 @@ const AGENTS = {
     description: 'เขียนโค้ด แก้บัค และออกแบบระบบซอฟต์แวร์',
     system: `คุณคือ Senior Software Developer เชี่ยวชาญการเขียนโปรแกรม ออกแบบสถาปัตยกรรม และแก้ปัญหาเทคนิค
 ตอบเป็นภาษาไทยเสมอ แต่ใช้ภาษาอังกฤษสำหรับชื่อเทคนิคและโค้ด
-เชี่ยวชาญ JavaScript, TypeScript, Python, React, Node.js ให้ตัวอย่างโค้ดจริงและ best practices`
+เชี่ยวชาญ JavaScript, TypeScript, Python, React, Node.js ให้ตัวอย่างโค้ดจริงและ best practices
+หากต้องการข้อมูล library เวอร์ชัน, docs, หรือ error solutions ล่าสุด ให้ค้นหาก่อนตอบเสมอ`
   },
   analyst: {
     id: 'analyst',
@@ -57,7 +57,8 @@ const AGENTS = {
     description: 'วิเคราะห์ข้อมูล วิจัย และสร้างรายงาน',
     system: `คุณคือ Data & Business Analyst เชี่ยวชาญการวิเคราะห์ข้อมูล วิจัยตลาด และสร้างรายงานเชิงลึก
 ตอบเป็นภาษาไทยเสมอ คิดวิเคราะห์เป็นระบบ ใช้ข้อมูลสนับสนุนการตัดสินใจ
-ช่วยวิเคราะห์ปัญหา ค้นหาข้อมูลเชิงลึก และนำเสนอด้วยตาราง สถิติ หรือสรุปที่เข้าใจง่าย`
+ช่วยวิเคราะห์ปัญหา ค้นหาข้อมูลเชิงลึก และนำเสนอด้วยตาราง สถิติ หรือสรุปที่เข้าใจง่าย
+สำหรับทุกคำถามที่ต้องการข้อมูลตัวเลข สถิติ หรือเทรนด์ ให้ค้นหาข้อมูลจริงก่อนวิเคราะห์เสมอ`
   },
   writer: {
     id: 'writer',
@@ -68,7 +69,8 @@ const AGENTS = {
     description: 'เขียนเนื้อหา บทความ และสื่อการตลาด',
     system: `คุณคือ Content Creator และ Copywriter เชี่ยวชาญการเขียนเนื้อหาที่น่าสนใจและโน้มน้าวใจ
 ตอบเป็นภาษาไทยเสมอ ใช้ภาษาสวยงาม กระชับ และเหมาะกับกลุ่มเป้าหมาย
-ช่วยเขียนบทความ โพสต์โซเชียล สคริปต์ คำโฆษณา และเนื้อหาทุกประเภท`
+ช่วยเขียนบทความ โพสต์โซเชียล สคริปต์ คำโฆษณา และเนื้อหาทุกประเภท
+หากต้องการเขียนเนื้อหาเกี่ยวกับข่าว เหตุการณ์ หรือเทรนด์ปัจจุบัน ให้ค้นหาข้อมูลก่อนเสมอ`
   },
   hr: {
     id: 'hr',
@@ -79,7 +81,8 @@ const AGENTS = {
     description: 'บริหารบุคคล สรรหา และพัฒนาทีมงาน',
     system: `คุณคือ Human Resources Manager เชี่ยวชาญการบริหารบุคคล สรรหาพนักงาน และพัฒนาองค์กร
 ตอบเป็นภาษาไทยเสมอ เห็นอกเห็นใจ เป็นธรรม ให้คำปรึกษาที่ดี
-ช่วยด้านการสรรหา ประเมินผล แก้ไขปัญหาในทีม และพัฒนาทักษะพนักงาน`
+ช่วยด้านการสรรหา ประเมินผล แก้ไขปัญหาในทีม และพัฒนาทักษะพนักงาน
+หากต้องการข้อมูลตลาดงาน เงินเดือน หรือกฎหมายแรงงานล่าสุด ให้ค้นหาก่อนตอบเสมอ`
   },
   pm: {
     id: 'pm',
@@ -92,22 +95,35 @@ const AGENTS = {
 ตอบเป็นภาษาไทยเสมอ มีความละเอียด เป็นระบบ และวิจารณ์อย่างตรงไปตรงมาแต่สร้างสรรค์
 
 บทบาทหน้าที่ของคุณ:
-1. **ติดตาม KPI** — วิเคราะห์และรายงานสถานะ KPI ของแต่ละทีม/โครงการ ระบุ On-track / At-risk / Off-track
-2. **ตรวจสอบงาน (QA)** — รับงานหรือผลลัพธ์จากทีม แล้ว recheck ความครบถ้วน ความถูกต้อง คุณภาพ
-3. **ให้ Feedback** — ให้ feedback ที่ชัดเจน ระบุจุดดี จุดที่ต้องปรับ และข้อเสนอแนะที่ actionable
-4. **สรุปสถานะโครงการ** — สร้าง Project Status Report ระบุ Progress, Blockers, Next Steps
-5. **ประเมิน Deliverable** — ให้คะแนนและ grade งาน พร้อม justification
+1. **ติดตาม KPI** — วิเคราะห์และรายงานสถานะ KPI ระบุ On-track / At-risk / Off-track
+2. **ตรวจสอบงาน (QA)** — recheck ความครบถ้วน ความถูกต้อง คุณภาพ
+3. **ให้ Feedback** — ระบุจุดดี จุดที่ต้องปรับ และข้อเสนอแนะที่ actionable
+4. **สรุปสถานะโครงการ** — Progress, Blockers, Next Steps
+5. **ประเมิน Deliverable** — ให้คะแนนและ grade งาน
 
-เวลา recheck งาน ให้ใช้โครงสร้างนี้:
-- ✅ จุดที่ผ่าน
-- ⚠️ จุดที่ต้องปรับปรุง
-- ❌ จุดที่บกพร่อง / ขาดหาย
-- 💡 ข้อเสนอแนะเพิ่มเติม
-- 📊 คะแนนรวม (เช่น 8/10)
-
-เวลาติดตาม KPI ให้แสดงในรูปแบบตาราง พร้อม status indicator และ action items`
+เวลา recheck งาน ใช้โครงสร้าง: ✅ จุดที่ผ่าน / ⚠️ ต้องปรับ / ❌ บกพร่อง / 💡 แนะนำ / 📊 คะแนนรวม
+หากต้องการข้อมูล benchmark หรือ best practices ล่าสุด ให้ค้นหาก่อนเสมอ`
   }
 };
+
+// ── Server-side session history ──
+// key: `${sessionId}:${agentId}` → array of {role, content}
+const sessions = new Map();
+
+function getHistory(sessionId, agentId) {
+  const key = `${sessionId}:${agentId}`;
+  if (!sessions.has(key)) sessions.set(key, []);
+  return sessions.get(key);
+}
+
+// Build full prompt embedding conversation history
+function buildPrompt(history, message) {
+  if (history.length === 0) return message;
+  const ctx = history.slice(-16).map(m =>
+    `${m.role === 'user' ? 'ผู้ใช้' : 'Assistant'}: ${m.content}`
+  ).join('\n\n');
+  return `<conversation_history>\n${ctx}\n</conversation_history>\n\nผู้ใช้: ${message}`;
+}
 
 // ── Routes ──
 app.get('/api/agents', (req, res) => {
@@ -116,18 +132,15 @@ app.get('/api/agents', (req, res) => {
   ));
 });
 
-// Chat endpoint — streams SSE using Claude Agent SDK
+// Chat — SSE streaming with web search support
 app.post('/api/chat', async (req, res) => {
-  const { agentId, message, history: clientHistory = [] } = req.body;
-
-  if (!agentId || !message) {
+  const { agentId, message, sessionId } = req.body;
+  if (!agentId || !message || !sessionId) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
-
   const agent = AGENTS[agentId];
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
 
-  // SSE setup
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -135,31 +148,35 @@ app.post('/api/chat', async (req, res) => {
 
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
-  try {
-    // Build prompt: include conversation history for context
-    let fullPrompt = '';
-    if (clientHistory.length > 0) {
-      const ctx = clientHistory.slice(-10).map(m =>
-        `${m.role === 'user' ? 'ผู้ใช้' : agent.name}: ${m.content}`
-      ).join('\n');
-      fullPrompt = `บริบทการสนทนาก่อนหน้า:\n${ctx}\n\nผู้ใช้: ${message}`;
-    } else {
-      fullPrompt = message;
-    }
+  const history = getHistory(sessionId, agentId);
+  const prompt = buildPrompt(history, message);
+  history.push({ role: 'user', content: message });
 
+  let assistantText = '';
+
+  try {
     const stream = query({
-      prompt: fullPrompt,
+      prompt,
       options: {
         systemPrompt: agent.system,
-        allowedTools: [],  // text only — no file/web tools needed
-        maxTurns: 1,
+        allowedTools: ['WebSearch', 'WebFetch'],
+        maxTurns: 10,
+        model: 'claude-opus-4-6',
       }
     });
 
-    let assistantText = '';
-
     for await (const msg of stream) {
-      // AssistantMessage with streaming content
+      // Tool use — notify UI
+      if (msg.type === 'tool_use') {
+        const toolName = msg.name || '';
+        if (toolName === 'WebSearch') {
+          send({ type: 'status', text: `🔍 กำลังค้นหา: "${msg.input?.query || ''}"` });
+        } else if (toolName === 'WebFetch') {
+          send({ type: 'status', text: `🌐 กำลังอ่านข้อมูลจากเว็บ...` });
+        }
+      }
+
+      // Assistant text (streaming delta)
       if (msg.type === 'assistant') {
         for (const block of msg.content || []) {
           if (block.type === 'text') {
@@ -172,24 +189,32 @@ app.post('/api/chat', async (req, res) => {
           }
         }
       }
-      // Result message
-      if ('result' in msg && msg.result) {
-        if (msg.result !== assistantText) {
-          const delta = msg.result.slice(assistantText.length);
-          if (delta) send({ type: 'delta', text: delta });
-          assistantText = msg.result;
-        }
+
+      // Final result message
+      if (msg.type === 'result' && msg.result) {
+        const delta = msg.result.slice(assistantText.length);
+        if (delta) send({ type: 'delta', text: delta });
+        assistantText = msg.result;
       }
     }
 
-    send({ type: 'done', fullText: assistantText });
+    history.push({ role: 'assistant', content: assistantText });
+    send({ type: 'done' });
 
   } catch (err) {
-    console.error(`[${agent.name}] Error:`, err.message);
+    console.error(`[${agent.name}]`, err.message);
+    // Remove the user message we added if it failed
+    history.pop();
     send({ type: 'error', message: err.message });
   } finally {
     res.end();
   }
+});
+
+// Clear history
+app.delete('/api/chat/:sessionId/:agentId', (req, res) => {
+  sessions.delete(`${req.params.sessionId}:${req.params.agentId}`);
+  res.json({ ok: true });
 });
 
 app.listen(PORT, () => {

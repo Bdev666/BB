@@ -1,7 +1,9 @@
 let currentAgent = null;
 let agents = [];
-// Client-side history per agent
-const histories = {};
+const SESSION_ID = 'sess_' + Math.random().toString(36).slice(2);
+
+// Client-side message display only (history stored server-side)
+const displayHistory = {};
 
 const $ = id => document.getElementById(id);
 const agentList = $('agentList');
@@ -55,14 +57,12 @@ function selectAgent(id) {
   currentAgent = agents.find(a => a.id === id);
   if (!currentAgent) return;
 
-  if (!histories[id]) histories[id] = [];
-
   document.querySelectorAll('.agent-item').forEach(el => {
     el.classList.toggle('active', el.dataset.id === id);
     el.querySelector('.active-dot')?.remove();
   });
-  const activeEl = document.querySelector(`.agent-item[data-id="${id}"]`);
-  if (activeEl) activeEl.insertAdjacentHTML('beforeend', '<div class="active-dot"></div>');
+  document.querySelector(`.agent-item[data-id="${id}"]`)
+    ?.insertAdjacentHTML('beforeend', '<div class="active-dot"></div>');
 
   headerEmoji.textContent = currentAgent.emoji;
   headerName.textContent = currentAgent.name;
@@ -72,11 +72,14 @@ function selectAgent(id) {
   messages.style.display = 'flex';
   messages.innerHTML = '';
 
-  // Restore previous messages
-  if (histories[id].length > 0) {
-    histories[id].forEach(m => appendMessage(m.role, m.content, false, true));
+  // Restore display messages for this agent
+  if (displayHistory[id]?.length) {
+    displayHistory[id].forEach(m => {
+      if (m.type === 'user') appendBubble('user', m.text);
+      else appendBubble('ai', m.text);
+    });
   } else {
-    appendMessage('ai', `สวัสดีครับ/ค่ะ! ผม/หนูคือ **${currentAgent.name}** (${currentAgent.title}) 👋\n\nพร้อมช่วยเรื่อง${currentAgent.description}แล้ว มีอะไรให้ช่วยไหมครับ/ค่ะ?`, false, true);
+    appendBubble('ai', `สวัสดีครับ/ค่ะ! ผม/หนูคือ **${currentAgent.name}** (${currentAgent.title}) 👋\n\nพร้อมช่วยเรื่อง${currentAgent.description} และสามารถ**ค้นหาข้อมูลจากอินเทอร์เน็ต**ได้แบบ real-time ด้วยนะครับ/ค่ะ\n\nมีอะไรให้ช่วยไหมครับ/ค่ะ?`);
   }
 
   messageInput.disabled = false;
@@ -85,8 +88,8 @@ function selectAgent(id) {
   messageInput.focus();
 }
 
-// ── Messages ──
-function appendMessage(role, text, streaming = false, skipHistory = false) {
+// ── Bubble helpers ──
+function appendBubble(role, text, streaming = false) {
   const isUser = role === 'user';
   const div = document.createElement('div');
   div.className = `message ${isUser ? 'user' : 'ai'}`;
@@ -101,24 +104,57 @@ function appendMessage(role, text, streaming = false, skipHistory = false) {
   return div;
 }
 
+// Status pill (searching indicator) — replaces itself with nothing when done
+function showStatus(text) {
+  const pill = document.createElement('div');
+  pill.className = 'status-pill';
+  pill.innerHTML = `<span class="status-spin">⟳</span> ${esc(text)}`;
+  messages.appendChild(pill);
+  scrollDown();
+  return pill;
+}
+
+// ── Markdown + escape ──
 function esc(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function md(text) {
   let h = esc(text);
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,l,c) => `<pre><code>${c.trim()}</code></pre>`);
-  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Code blocks
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_,l,c) =>
+    `<pre><code class="${l||'plaintext'}">${c.trim()}</code></pre>`);
+  // Inline code
+  h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // Bold
   h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  h = h.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  // Italic
+  h = h.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  // Headers
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Blockquote
   h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-  h = h.replace(/^---$/gm, '<hr>');
+  // HR
+  h = h.replace(/^---+$/gm, '<hr>');
+  // Unordered list
   h = h.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
-  h = h.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
-  h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>[\s\S]*?<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+  // Ordered list
+  h = h.replace(/^\d+\. (.+)$/gm, '<oli>$1</oli>');
+  h = h.replace(/(<oli>[\s\S]*?<\/oli>\n?)+/g, m =>
+    `<ol>${m.replace(/<\/?oli>/g, t => t.replace('oli','li'))}</ol>`);
+  // Basic table
+  h = h.replace(/\|(.+)\|\n\|[-|:\s]+\|\n((?:\|.+\|\n?)+)/g, (_, hdr, rows) => {
+    const th = hdr.split('|').filter(s=>s.trim()).map(s=>`<th>${s.trim()}</th>`).join('');
+    const trs = rows.trim().split('\n').map(r => {
+      const tds = r.split('|').filter(s=>s.trim()).map(s=>`<td>${s.trim()}</td>`).join('');
+      return `<tr>${tds}</tr>`;
+    }).join('');
+    return `<table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>`;
+  });
+  // Paragraphs
   h = h.replace(/\n\n+/g, '</p><p>');
   h = h.replace(/\n/g, '<br>');
   if (!h.match(/^<(h[1-3]|ul|ol|pre|blockquote|table|hr)/)) h = `<p>${h}</p>`;
@@ -140,27 +176,22 @@ async function send() {
   sendBtn.disabled = true;
 
   const agentId = currentAgent.id;
-  const history = histories[agentId] || [];
+  if (!displayHistory[agentId]) displayHistory[agentId] = [];
+  displayHistory[agentId].push({ type: 'user', text });
 
-  // Add to local history
-  history.push({ role: 'user', content: text });
-  histories[agentId] = history;
+  appendBubble('user', text);
 
-  appendMessage('user', text);
-
-  const aiDiv = appendMessage('ai', '', true);
+  // AI bubble (streaming)
+  const aiDiv = appendBubble('ai', '', true);
   const bubble = aiDiv.querySelector('.msg-bubble');
   let full = '';
+  let statusPill = null;
 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agentId,
-        message: text,
-        history: history.slice(-20) // send last 20 turns for context
-      })
+      body: JSON.stringify({ agentId, message: text, sessionId: SESSION_ID })
     });
 
     if (!res.ok) {
@@ -183,16 +214,34 @@ async function send() {
         if (!line.startsWith('data: ')) continue;
         try {
           const d = JSON.parse(line.slice(6));
+
+          if (d.type === 'status') {
+            // Show / update searching pill above the AI bubble
+            if (!statusPill) {
+              statusPill = showStatus(d.text);
+              // Insert pill before the AI message div
+              messages.insertBefore(statusPill, aiDiv);
+            } else {
+              statusPill.innerHTML = `<span class="status-spin">⟳</span> ${esc(d.text)}`;
+            }
+          }
+
           if (d.type === 'delta') {
+            // Remove searching indicator once answer starts
+            if (statusPill) { statusPill.remove(); statusPill = null; }
             full += d.text;
             bubble.innerHTML = md(full) + '<span class="cursor"></span>';
             scrollDown();
-          } else if (d.type === 'done') {
-            if (d.fullText) full = d.fullText;
+          }
+
+          if (d.type === 'done') {
+            if (statusPill) { statusPill.remove(); statusPill = null; }
             bubble.innerHTML = md(full);
-            // Save to history
-            histories[agentId].push({ role: 'assistant', content: full });
-          } else if (d.type === 'error') {
+            displayHistory[agentId].push({ type: 'ai', text: full });
+          }
+
+          if (d.type === 'error') {
+            if (statusPill) { statusPill.remove(); statusPill = null; }
             bubble.innerHTML = `<span style="color:#ef4444">⚠️ ${esc(d.message)}</span>`;
           }
         } catch {}
@@ -202,9 +251,9 @@ async function send() {
     if (!full) bubble.innerHTML = '<span style="color:#f59e0b">⚠️ ไม่ได้รับคำตอบ — ลองใหม่อีกครั้ง</span>';
 
   } catch (err) {
+    if (statusPill) { statusPill.remove(); }
     bubble.innerHTML = `<span style="color:#ef4444">⚠️ เกิดข้อผิดพลาด: ${esc(err.message)}</span>`;
-    // Remove failed user message from history
-    histories[agentId].pop();
+    displayHistory[agentId].pop(); // remove failed user msg
   } finally {
     messageInput.disabled = false;
     sendBtn.disabled = false;
@@ -214,12 +263,13 @@ async function send() {
 }
 
 // ── Clear ──
-clearBtn.addEventListener('click', () => {
+clearBtn.addEventListener('click', async () => {
   if (!currentAgent) return;
   if (!confirm(`ล้างประวัติการสนทนากับ ${currentAgent.name}?`)) return;
-  histories[currentAgent.id] = [];
+  await fetch(`/api/chat/${SESSION_ID}/${currentAgent.id}`, { method: 'DELETE' }).catch(() => {});
+  displayHistory[currentAgent.id] = [];
   messages.innerHTML = '';
-  appendMessage('ai', `ล้างประวัติแล้วครับ/ค่ะ 🗑️ มีอะไรให้ช่วยไหม?`);
+  appendBubble('ai', `ล้างประวัติแล้วครับ/ค่ะ 🗑️ มีอะไรให้ช่วยไหม?`);
 });
 
 // ── Input ──
