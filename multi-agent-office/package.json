@@ -1,0 +1,19 @@
+{
+  "name": "multi-agent-office",
+  "version": "1.0.0",
+  "description": "Multi-Agent AI Office — ระบบ AI อัจฉริยะ 5 ตัว ทำงานพร้อมกัน",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}

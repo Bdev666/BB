@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏢 Multi-Agent AI Office</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: 1px solid #334155;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .header h1 { font-size: 1.5rem; font-weight: 700; }
+    .header .subtitle { color: #94a3b8; font-size: 0.85rem; margin-top: 2px; }
+    .header-actions { margin-left: auto; display: flex; gap: 10px; }
+
+    /* Broadcast bar */
+    .broadcast-bar {
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+      padding: 12px 24px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .broadcast-bar .label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .broadcast-bar input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: #e2e8f0;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .broadcast-bar input:focus { border-color: #6366f1; }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 18px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-success { background: #059669; color: white; }
+    .btn-success:hover { background: #047857; }
+    .btn-danger { background: #dc2626; color: white; font-size: 0.75rem; padding: 5px 10px; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-ghost { background: #334155; color: #94a3b8; }
+    .btn-ghost:hover { background: #475569; color: #e2e8f0; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 16px;
+      padding: 20px 24px;
+    }
+
+    /* Agent Card */
+    .agent-card {
+      background: #1e293b;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.3s;
+    }
+    .agent-card.working { border-color: var(--agent-color); }
+    .agent-card.error { border-color: #dc2626; }
+
+    .card-header {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid #334155;
+    }
+    .agent-emoji { font-size: 1.6rem; line-height: 1; }
+    .agent-info { flex: 1 }
+    .agent-name { font-weight: 700; font-size: 0.95rem; }
+    .agent-status {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+      margin-top: 3px;
+      display: inline-block;
+    }
+    .status-idle { background: #1e3a2f; color: #4ade80; }
+    .status-working { background: #312e81; color: #a5b4fc; animation: pulse 1.5s infinite; }
+    .status-error { background: #7f1d1d; color: #fca5a5; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .card-actions { display: flex; gap: 6px; align-items: center; }
+
+    /* Input area */
+    .card-input {
+      padding: 10px;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      gap: 8px;
+    }
+    .card-input textarea {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+      resize: none;
+      outline: none;
+      height: 60px;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    .card-input textarea:focus { border-color: var(--agent-color); }
+    .card-input .send-btn {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      font-size: 1.1rem;
+      background: var(--agent-color);
+      color: white;
+      transition: all 0.15s;
+      align-self: flex-end;
+    }
+    .card-input .send-btn:hover { filter: brightness(1.15); }
+    .card-input .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Chat output */
+    .chat-output {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+      max-height: 380px;
+      min-height: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .message {
+      max-width: 95%;
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+    .message.user {
+      background: #334155;
+      align-self: flex-end;
+      color: #e2e8f0;
+      border-bottom-right-radius: 3px;
+    }
+    .message.assistant {
+      background: #0f172a;
+      border: 1px solid #334155;
+      align-self: flex-start;
+      border-bottom-left-radius: 3px;
+      white-space: pre-wrap;
+    }
+    .message.streaming {
+      border-color: var(--agent-color);
+    }
+    .message .msg-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: var(--agent-color);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .message.user .msg-label { color: #94a3b8; }
+
+    .cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background: var(--agent-color);
+      margin-left: 2px;
+      animation: blink 0.8s infinite;
+      vertical-align: text-bottom;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    .empty-state {
+      text-align: center;
+      color: #475569;
+      font-size: 0.8rem;
+      padding: 30px 20px;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+    }
+    .toast {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      max-width: 300px;
+      animation: slideIn 0.2s ease;
+    }
+    .toast.success { border-color: #059669; color: #4ade80; }
+    .toast.error { border-color: #dc2626; color: #f87171; }
+    .toast.info { border-color: #6366f1; color: #a5b4fc; }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 5px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🏢 Multi-Agent AI Office</h1>
+    <div class="subtitle">ระบบ AI อัจฉริยะ 5 ตัว ทำงานพร้อมกัน — สั่งงานได้เลยทันที</div>
+  </div>
+  <div class="header-actions">
+    <button class="btn btn-ghost" onclick="clearAllHistory()">🗑️ ล้างทุก Chat</button>
+  </div>
+</div>
+
+<div class="broadcast-bar">
+  <span class="label">📢 สั่งงานทุก Agent:</span>
+  <input type="text" id="broadcastInput" placeholder="พิมพ์ข้อความเพื่อส่งให้ทุก agent พร้อมกัน..."
+         onkeydown="if(event.key==='Enter') broadcastMessage()">
+  <button class="btn btn-success" onclick="broadcastMessage()">ส่งทุกตัว ⚡</button>
+</div>
+
+<div class="grid" id="agentsGrid"></div>
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+const socket = io();
+const agentData = {};
+const chatHistories = {};
+
+// Initialize agents from server
+socket.on('init', ({ agents }) => {
+  agents.forEach(agent => {
+    agentData[agent.id] = agent;
+    chatHistories[agent.id] = [];
+    renderAgentCard(agent);
+  });
+});
+
+// Render agent card
+function renderAgentCard(agent) {
+  const grid = document.getElementById('agentsGrid');
+  const card = document.createElement('div');
+  card.className = 'agent-card';
+  card.id = `card-${agent.id}`;
+  card.style.setProperty('--agent-color', agent.color);
+
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="agent-emoji">${agent.emoji}</span>
+      <div class="agent-info">
+        <div class="agent-name">${agent.name}</div>
+        <span class="agent-status status-idle" id="status-${agent.id}">✅ พร้อมทำงาน</span>
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-danger" onclick="clearChat('${agent.id}')" title="ล้าง Chat">🗑️</button>
+      </div>
+    </div>
+    <div class="card-input">
+      <textarea id="input-${agent.id}"
+        placeholder="สั่งงาน ${agent.name}..."
+        onkeydown="handleKeyDown(event, '${agent.id}')"></textarea>
+      <button class="send-btn" id="send-${agent.id}" onclick="sendTask('${agent.id}')" title="ส่งงาน">➤</button>
+    </div>
+    <div class="chat-output" id="chat-${agent.id}">
+      <div class="empty-state">ยังไม่มีการสนทนา<br>พิมพ์ข้อความเพื่อเริ่มสั่งงาน</div>
+    </div>
+  `;
+  grid.appendChild(card);
+}
+
+// Send task to specific agent
+async function sendTask(agentId) {
+  const input = document.getElementById(`input-${agentId}`);
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = '';
+  addMessage(agentId, 'user', message);
+
+  try {
+    const res = await fetch(`/api/agents/${agentId}/task`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    if (!res.ok) showToast(data.error || 'เกิดข้อผิดพลาด', 'error');
+  } catch (e) {
+    showToast('ไม่สามารถเชื่อมต่อ server', 'error');
+  }
+}
+
+// Broadcast to all agents
+async function broadcastMessage() {
+  const input = document.getElementById('broadcastInput');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value = '';
+
+  // Add user message to all chats
+  Object.keys(agentData).forEach(id => addMessage(id, 'user', message));
+
+  try {
+    const res = await fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showToast(data.message, 'success');
+    } else {
+      showToast(data.error || 'เกิดข้อผิดพลาด', 'error');
+    }
+  } catch (e) {
+    showToast('ไม่สามารถเชื่อมต่อ server', 'error');
+  }
+}
+
+// Add message to chat
+function addMessage(agentId, role, text) {
+  const chat = document.getElementById(`chat-${agentId}`);
+
+  // Remove empty state
+  const empty = chat.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const msg = document.createElement('div');
+  msg.className = `message ${role}`;
+  msg.dataset.role = role;
+
+  const label = role === 'user' ? '👤 คุณ' : `${agentData[agentId]?.emoji || ''} ${agentData[agentId]?.name || agentId}`;
+  msg.innerHTML = `<div class="msg-label">${label}</div><div class="msg-content">${escapeHtml(text)}</div>`;
+
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+  return msg;
+}
+
+// Handle streaming tokens
+let streamingMessages = {};
+
+socket.on('agentToken', ({ agentId, token }) => {
+  if (!streamingMessages[agentId]) {
+    const chat = document.getElementById(`chat-${agentId}`);
+    if (!chat) return;
+    const empty = chat.querySelector('.empty-state');
+    if (empty) empty.remove();
+
+    const msg = document.createElement('div');
+    msg.className = `message assistant streaming`;
+    msg.style.setProperty('--agent-color', agentData[agentId]?.color || '#6366f1');
+    const label = `${agentData[agentId]?.emoji || ''} ${agentData[agentId]?.name || agentId}`;
+    msg.innerHTML = `<div class="msg-label">${label}</div><div class="msg-content"></div><span class="cursor"></span>`;
+    chat.appendChild(msg);
+    streamingMessages[agentId] = msg;
+  }
+
+  const content = streamingMessages[agentId].querySelector('.msg-content');
+  content.textContent += token;
+
+  const chat = document.getElementById(`chat-${agentId}`);
+  if (chat) chat.scrollTop = chat.scrollHeight;
+});
+
+socket.on('agentDone', ({ agentId }) => {
+  if (streamingMessages[agentId]) {
+    streamingMessages[agentId].classList.remove('streaming');
+    const cursor = streamingMessages[agentId].querySelector('.cursor');
+    if (cursor) cursor.remove();
+    streamingMessages[agentId] = null;
+  }
+});
+
+// Agent status updates
+socket.on('agentStatus', ({ agentId, status, task }) => {
+  const statusEl = document.getElementById(`status-${agentId}`);
+  const card = document.getElementById(`card-${agentId}`);
+  const sendBtn = document.getElementById(`send-${agentId}`);
+
+  if (!statusEl) return;
+
+  statusEl.className = `agent-status status-${status}`;
+  if (card) card.className = `agent-card ${status !== 'idle' ? status : ''}`;
+
+  if (status === 'working') {
+    statusEl.textContent = '⚡ กำลังทำงาน...';
+    if (sendBtn) sendBtn.disabled = true;
+  } else if (status === 'error') {
+    statusEl.textContent = '❌ เกิดข้อผิดพลาด';
+    if (sendBtn) sendBtn.disabled = false;
+  } else {
+    statusEl.textContent = '✅ พร้อมทำงาน';
+    if (sendBtn) sendBtn.disabled = false;
+  }
+});
+
+socket.on('agentError', ({ agentId, error }) => {
+  if (streamingMessages[agentId]) {
+    streamingMessages[agentId].remove();
+    streamingMessages[agentId] = null;
+  }
+  showToast(`${agentData[agentId]?.name || agentId}: ${error}`, 'error');
+});
+
+// Clear chat
+async function clearChat(agentId) {
+  const chat = document.getElementById(`chat-${agentId}`);
+  if (chat) {
+    chat.innerHTML = '<div class="empty-state">ยังไม่มีการสนทนา<br>พิมพ์ข้อความเพื่อเริ่มสั่งงาน</div>';
+  }
+  streamingMessages[agentId] = null;
+
+  await fetch(`/api/agents/${agentId}/clear`, { method: 'POST' });
+  showToast(`ล้างประวัติ ${agentData[agentId]?.name || agentId} แล้ว`, 'info');
+}
+
+async function clearAllHistory() {
+  for (const agentId of Object.keys(agentData)) {
+    await clearChat(agentId);
+  }
+  showToast('ล้างประวัติทุก agent แล้ว', 'success');
+}
+
+// Keyboard shortcuts
+function handleKeyDown(event, agentId) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendTask(agentId);
+  }
+}
+
+// Escape HTML
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+// Toast notifications
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+</script>
+</body>
+</html>
