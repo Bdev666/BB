@@ -1,0 +1,14 @@
+{
+  "name": "multi-agent-office",
+  "version": "1.0.0",
+  "description": "Multi-Agent AI Office powered by Claude Code SDK",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "express": "^4.19.2"
+  }
+}
