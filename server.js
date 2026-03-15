@@ -107,13 +107,45 @@ const AGENTS = {
 };
 
 // ── Server-side session history ──
+const SESSION_TTL_MS = 30 * 60 * 1000;      // 30 min inactivity → expire
+const WARN_BEFORE_MS  =  5 * 60 * 1000;     // warn 5 min before expiry
+
+// key: sessionId → { lastActive: Date, timer: NodeJS.Timeout }
+const sessionMeta = new Map();
+
 // key: `${sessionId}:${agentId}` → array of {role, content}
 const sessions = new Map();
 
+function touchSession(sessionId) {
+  const now = Date.now();
+  if (sessionMeta.has(sessionId)) {
+    clearTimeout(sessionMeta.get(sessionId).timer);
+  }
+  const timer = setTimeout(() => expireSession(sessionId), SESSION_TTL_MS);
+  sessionMeta.set(sessionId, { lastActive: now, timer });
+}
+
+function expireSession(sessionId) {
+  // Delete all agent histories for this session
+  for (const key of sessions.keys()) {
+    if (key.startsWith(sessionId + ':')) sessions.delete(key);
+  }
+  sessionMeta.delete(sessionId);
+  console.log(`[session] expired: ${sessionId}`);
+}
+
 function getHistory(sessionId, agentId) {
+  touchSession(sessionId);
   const key = `${sessionId}:${agentId}`;
   if (!sessions.has(key)) sessions.set(key, []);
   return sessions.get(key);
+}
+
+// Returns ms until expiry (0 if not tracked)
+function msUntilExpiry(sessionId) {
+  const meta = sessionMeta.get(sessionId);
+  if (!meta) return SESSION_TTL_MS;
+  return Math.max(0, meta.lastActive + SESSION_TTL_MS - Date.now());
 }
 
 // Build full prompt embedding conversation history
@@ -211,9 +243,30 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Extend session (reset inactivity timer)
+app.post('/api/session-touch/:sessionId', (req, res) => {
+  touchSession(req.params.sessionId);
+  res.json({ ok: true, ttlMs: SESSION_TTL_MS });
+});
+
+// Session status — ttl, expiresAt, warningSoon
+app.get('/api/session-status/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const ms = msUntilExpiry(sessionId);
+  const expiresAt = Date.now() + ms;
+  res.json({
+    ttlMs: ms,
+    ttlSec: Math.floor(ms / 1000),
+    expiresAt,
+    warningSoon: ms > 0 && ms <= WARN_BEFORE_MS,
+    expired: ms === 0
+  });
+});
+
 // Clear history
 app.delete('/api/chat/:sessionId/:agentId', (req, res) => {
   sessions.delete(`${req.params.sessionId}:${req.params.agentId}`);
+  touchSession(req.params.sessionId);   // reset timer on manual clear
   res.json({ ok: true });
 });
 

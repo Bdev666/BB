@@ -262,6 +262,73 @@ async function send() {
   }
 }
 
+// ── Session Expiry Monitor ──
+const sessionBanner = $('sessionBanner');
+const bannerText    = $('bannerText');
+const bannerExtend  = $('bannerExtend');
+const bannerClose   = $('bannerClose');
+let bannerDismissed = false;
+
+function fmtTime(sec) {
+  if (sec >= 60) {
+    const m = Math.floor(sec / 60), s = sec % 60;
+    return s > 0 ? `${m} นาที ${s} วินาที` : `${m} นาที`;
+  }
+  return `${sec} วินาที`;
+}
+
+async function checkSession() {
+  try {
+    const r = await fetch(`/api/session-status/${SESSION_ID}`);
+    const d = await r.json();
+
+    if (d.expired) {
+      // Session gone — clear display and notify
+      Object.keys(displayHistory).forEach(k => { displayHistory[k] = []; });
+      sessionBanner.style.display = 'flex';
+      sessionBanner.classList.add('critical');
+      bannerText.textContent = '⚠️ Session หมดอายุแล้ว — ประวัติการสนทนาถูกล้างอัตโนมัติ กรุณาเริ่มสนทนาใหม่';
+      bannerExtend.style.display = 'none';
+      if (currentAgent) {
+        messages.innerHTML = '';
+        appendBubble('ai', '🔄 Session หมดอายุแล้วครับ/ค่ะ ประวัติถูกล้างอัตโนมัติ — พิมพ์ข้อความใหม่ได้เลยครับ/ค่ะ');
+      }
+      return;
+    }
+
+    if (d.warningSoon && !bannerDismissed) {
+      const sec = d.ttlSec;
+      const isCritical = sec <= 60;
+      sessionBanner.style.display = 'flex';
+      sessionBanner.classList.toggle('critical', isCritical);
+      bannerExtend.style.display = '';
+      const resetAt = new Date(d.expiresAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+      bannerText.textContent = `Session จะหมดอายุใน ${fmtTime(sec)} (เวลา ${resetAt}) — ประวัติสนทนาจะถูกล้างอัตโนมัติ`;
+    } else if (!d.warningSoon) {
+      sessionBanner.style.display = 'none';
+      bannerDismissed = false;
+    }
+  } catch {}
+}
+
+// Extend session by sending a no-op touch (just re-fetch session status touches it server-side via getHistory on next message)
+bannerExtend.addEventListener('click', async () => {
+  await fetch(`/api/session-touch/${SESSION_ID}`, { method: 'POST' }).catch(() => {});
+  bannerDismissed = false;
+  sessionBanner.style.display = 'none';
+  bannerText.textContent = '';
+  setTimeout(checkSession, 500);
+});
+
+bannerClose.addEventListener('click', () => {
+  bannerDismissed = true;
+  sessionBanner.style.display = 'none';
+});
+
+// Poll every 30 seconds
+setInterval(checkSession, 30_000);
+setTimeout(checkSession, 5_000); // first check after 5s
+
 // ── Clear ──
 clearBtn.addEventListener('click', async () => {
   if (!currentAgent) return;
