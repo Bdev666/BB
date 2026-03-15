@@ -37,6 +37,7 @@ function renderSidebar() {
         <div class="agent-item-name">${a.name}</div>
         <div class="agent-item-desc">${a.description}</div>
       </div>
+      ${a.id === 'pm' ? '<span class="pm-badge">QC</span>' : ''}
     </div>`).join('');
 }
 

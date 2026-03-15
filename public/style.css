@@ -26,6 +26,7 @@ body{background:var(--bg);color:var(--text);overflow:hidden}
 .agent-item-name{font-size:14px;font-weight:600}
 .agent-item-desc{font-size:11px;color:var(--text2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .active-dot{width:8px;height:8px;border-radius:50%;background:var(--agent-color,var(--accent));flex-shrink:0;box-shadow:0 0 6px var(--agent-color,var(--accent))}
+.agent-item .pm-badge{font-size:9px;font-weight:700;padding:2px 6px;background:color-mix(in srgb,#0D9488 20%,transparent);color:#0D9488;border:1px solid color-mix(in srgb,#0D9488 40%,transparent);border-radius:10px;margin-left:auto;white-space:nowrap;flex-shrink:0}
 .sidebar-footer{padding:12px;border-top:1px solid var(--border)}
 .btn-clear{width:100%;padding:10px;background:transparent;border:1px solid var(--border);border-radius:var(--radius);color:var(--text2);cursor:pointer;font-size:13px;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:6px}
 .btn-clear:hover{background:#2a1f1f;border-color:#ef4444;color:#ef4444}
