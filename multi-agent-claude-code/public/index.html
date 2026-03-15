@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🏢 Multi-Agent Claude Code Office</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0a0f1e;
+      --surface: #111827;
+      --surface2: #1f2937;
+      --border: #374151;
+      --text: #f1f5f9;
+      --muted: #6b7280;
+      --green: #10b981;
+      --red: #ef4444;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+    header .badge {
+      font-size: 0.68rem;
+      background: #1e3a5f;
+      color: #60a5fa;
+      border: 1px solid #2563eb44;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    header .spacer { flex: 1; }
+    #connectionDot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--red); display: inline-block; margin-right: 6px;
+      transition: background 0.3s;
+    }
+    #connectionDot.connected { background: var(--green); }
+    #connectionLabel { font-size: 0.78rem; color: var(--muted); }
+
+    /* ── Broadcast bar ── */
+    .broadcast {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .broadcast-label {
+      font-size: 0.75rem; font-weight: 700;
+      color: var(--muted); white-space: nowrap;
+    }
+    .broadcast input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 14px;
+      color: var(--text);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .broadcast input:focus { border-color: #6366f1; }
+    .btn {
+      padding: 8px 16px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 0.8rem; font-weight: 600;
+      transition: filter 0.15s, transform 0.1s; white-space: nowrap;
+    }
+    .btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; filter: none; }
+    .btn-broadcast { background: #059669; color: #fff; }
+    .btn-reset     { background: var(--border); color: var(--muted); font-size: 0.72rem; padding: 5px 9px; }
+    .btn-send      { background: var(--agent-color, #6366f1); color: #fff; padding: 0 12px; font-size: 1rem; border-radius: 0 7px 7px 0; height: 100%; }
+
+    /* ── Grid ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+      gap: 14px;
+      padding: 16px 20px;
+      flex: 1;
+    }
+
+    /* ── Agent Card ── */
+    .card {
+      background: var(--surface);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: border-color 0.3s;
+    }
+    .card.working { border-color: var(--agent-color); box-shadow: 0 0 0 1px var(--agent-color)22; }
+    .card.error   { border-color: var(--red); }
+
+    .card-head {
+      padding: 11px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-emoji { font-size: 1.5rem; line-height: 1; }
+    .card-meta { flex: 1; }
+    .card-name { font-weight: 700; font-size: 0.9rem; }
+    .card-desc { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+    .card-tools {
+      font-size: 0.62rem;
+      color: var(--agent-color, #6366f1);
+      margin-top: 3px;
+      opacity: 0.8;
+    }
+
+    /* Status pill */
+    .pill {
+      font-size: 0.68rem; font-weight: 700; padding: 2px 8px;
+      border-radius: 20px; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .pill-idle    { background: #052e16; color: #4ade80; }
+    .pill-working { background: #1e1b4b; color: #a5b4fc; }
+    .pill-error   { background: #450a0a; color: #fca5a5; }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+    .pill-working .dot { animation: pulse-dot 1s infinite; }
+
+    /* Turn counter */
+    .turn-badge {
+      font-size: 0.65rem; background: var(--surface2);
+      border: 1px solid var(--border); color: var(--muted);
+      padding: 1px 7px; border-radius: 20px;
+    }
+
+    /* ── Input ── */
+    .card-input {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 0;
+    }
+    .card-input textarea {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-right: none;
+      border-radius: 7px 0 0 7px;
+      padding: 7px 11px;
+      color: var(--text);
+      font-size: 0.83rem;
+      resize: none;
+      outline: none;
+      height: 52px;
+      transition: border-color 0.15s;
+      font-family: inherit;
+      line-height: 1.4;
+    }
+    .card-input textarea:focus { border-color: var(--agent-color, #6366f1); }
+
+    /* ── Chat ── */
+    .chat {
+      flex: 1;
+      padding: 10px;
+      overflow-y: auto;
+      max-height: 360px;
+      min-height: 160px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .empty {
+      text-align: center; color: var(--muted);
+      font-size: 0.78rem; padding: 28px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 6px; flex: 1;
+      justify-content: center;
+    }
+    .empty-icon { font-size: 2rem; opacity: 0.4; }
+
+    /* Message bubbles */
+    .msg {
+      max-width: 96%;
+      padding: 7px 11px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-bottom-right-radius: 3px;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 3px;
+      white-space: pre-wrap;
+    }
+    .msg.assistant.streaming { border-color: var(--agent-color); }
+    .msg.tool-event {
+      align-self: flex-start;
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      font-size: 0.72rem;
+      padding: 4px 10px;
+      font-family: 'Consolas', monospace;
+    }
+    .msg .label {
+      font-size: 0.65rem; font-weight: 700;
+      margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+    .msg.assistant .label { color: var(--agent-color); }
+
+    /* Cursor blink */
+    .cursor {
+      display: inline-block; width: 2px; height: 0.9em;
+      background: var(--agent-color, #6366f1); margin-left: 1px;
+      animation: blink 0.75s infinite; vertical-align: text-bottom;
+    }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+    /* ── Toast ── */
+    #toasts {
+      position: fixed; bottom: 18px; right: 18px;
+      display: flex; flex-direction: column; gap: 7px; z-index: 9999;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 15px;
+      font-size: 0.82rem;
+      max-width: 280px;
+      animation: toastIn 0.2s ease;
+    }
+    .toast.ok   { border-color: var(--green); color: #4ade80; }
+    .toast.err  { border-color: var(--red);   color: #f87171; }
+    .toast.info { border-color: #6366f1;      color: #a5b4fc; }
+
+    @keyframes toastIn {
+      from { transform: translateX(110%); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:1.4rem">🏢</span>
+  <div>
+    <h1>Multi-Agent Claude Code Office</h1>
+  </div>
+  <span class="badge">⚡ Claude Code SDK</span>
+  <div class="spacer"></div>
+  <span id="connectionDot"></span>
+  <span id="connectionLabel">กำลังเชื่อมต่อ...</span>
+  <button class="btn btn-reset" onclick="resetAll()" style="margin-left:10px">🔄 Reset ทั้งหมด</button>
+</header>
+
+<div class="broadcast">
+  <span class="broadcast-label">📢 Broadcast ทุก Agent:</span>
+  <input id="broadcastInput" type="text"
+    placeholder="พิมพ์ข้อความส่งให้ทุก agent พร้อมกัน (Enter เพื่อส่ง)..."
+    onkeydown="if(event.key==='Enter')broadcastAll()">
+  <button class="btn btn-broadcast" onclick="broadcastAll()">⚡ ส่งทุกตัว</button>
+</div>
+
+<div class="grid" id="grid"></div>
+<div id="toasts"></div>
+
+<script>
+const socket = io();
+const agents = {};
+const streaming = {};
+
+/* ── Socket events ── */
+socket.on('connect', () => {
+  document.getElementById('connectionDot').className = 'connected';
+  document.getElementById('connectionLabel').textContent = 'เชื่อมต่อแล้ว';
+});
+socket.on('disconnect', () => {
+  document.getElementById('connectionDot').className = '';
+  document.getElementById('connectionLabel').textContent = 'ขาดการเชื่อมต่อ';
+});
+
+socket.on('init', ({ agents: list }) => {
+  list.forEach(a => {
+    agents[a.id] = a;
+    renderCard(a);
+    updateStatus(a.id, a.state?.status || 'idle');
+  });
+});
+
+socket.on('agentStatus', ({ agentId, status, task }) => {
+  updateStatus(agentId, status, task);
+});
+
+socket.on('agentToken', ({ agentId, token }) => {
+  appendToken(agentId, token);
+});
+
+socket.on('agentToolUse', ({ agentId, tool, input }) => {
+  finishStream(agentId);
+  appendToolEvent(agentId, tool, input);
+});
+
+socket.on('agentDone', ({ agentId, turnCount }) => {
+  finishStream(agentId);
+  if (turnCount != null) updateTurnCount(agentId, turnCount);
+});
+
+socket.on('agentError', ({ agentId, error }) => {
+  finishStream(agentId);
+  appendError(agentId, error);
+  toast(`${agents[agentId]?.emoji||''} ${error}`, 'err');
+});
+
+/* ── Render card ── */
+function renderCard(agent) {
+  const grid = document.getElementById('grid');
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.id = `card-${agent.id}`;
+  el.style.setProperty('--agent-color', agent.color);
+
+  el.innerHTML = `
+    <div class="card-head">
+      <span class="card-emoji">${agent.emoji}</span>
+      <div class="card-meta">
+        <div class="card-name">${agent.name}</div>
+        <div class="card-desc">${agent.description}</div>
+        <div class="card-tools">🔧 ${agent.allowedTools.join(' · ')}</div>
+      </div>
+      <span class="pill pill-idle" id="pill-${agent.id}">
+        <span class="dot">●</span> พร้อม
+      </span>
+      <span class="turn-badge" id="turn-${agent.id}" title="จำนวนรอบสนทนา">0 รอบ</span>
+      <button class="btn btn-reset" onclick="resetAgent('${agent.id}')" title="Reset session">↺</button>
+    </div>
+    <div class="card-input">
+      <textarea id="ta-${agent.id}"
+        placeholder="สั่งงาน ${agent.name}... (Shift+Enter ขึ้นบรรทัดใหม่)"
+        onkeydown="handleKey(event,'${agent.id}')"></textarea>
+      <button class="btn btn-send" id="send-${agent.id}"
+        onclick="sendTask('${agent.id}')" title="ส่งงาน">➤</button>
+    </div>
+    <div class="chat" id="chat-${agent.id}">
+      <div class="empty">
+        <div class="empty-icon">${agent.emoji}</div>
+        <div>ยังไม่มีการสนทนา<br><small style="opacity:.6">Claude Code รอรับคำสั่ง</small></div>
+      </div>
+    </div>
+  `;
+  grid.appendChild(el);
+}
+
+/* ── Send task ── */
+async function sendTask(agentId) {
+  const ta = document.getElementById(`ta-${agentId}`);
+  const msg = ta.value.trim();
+  if (!msg) return;
+  ta.value = '';
+
+  appendUserMsg(agentId, msg);
+
+  try {
+    const r = await fetch(`/api/agents/${agentId}/task`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ message: msg })
+    });
+    const d = await r.json();
+    if (!r.ok) toast(d.error || 'เกิดข้อผิดพลาด', 'err');
+  } catch { toast('ไม่สามารถเชื่อมต่อ server', 'err'); }
+}
+
+/* ── Broadcast ── */
+async function broadcastAll() {
+  const input = document.getElementById('broadcastInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+
+  Object.keys(agents).forEach(id => appendUserMsg(id, msg));
+
+  try {
+    const r = await fetch('/api/broadcast', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ message: msg })
+    });
+    const d = await r.json();
+    toast(d.message || d.error, r.ok ? 'ok' : 'err');
+  } catch { toast('ไม่สามารถเชื่อมต่อ server', 'err'); }
+}
+
+/* ── Reset ── */
+async function resetAgent(agentId) {
+  clearChat(agentId);
+  await fetch(`/api/agents/${agentId}/reset`, { method: 'POST' });
+  updateTurnCount(agentId, 0);
+  toast(`รีเซ็ต ${agents[agentId]?.name} แล้ว`, 'info');
+}
+
+async function resetAll() {
+  for (const id of Object.keys(agents)) await resetAgent(id);
+  toast('รีเซ็ตทุก agent แล้ว', 'info');
+}
+
+/* ── Chat helpers ── */
+function getChat(agentId) {
+  const el = document.getElementById(`chat-${agentId}`);
+  const empty = el?.querySelector('.empty');
+  if (empty) empty.remove();
+  return el;
+}
+
+function appendUserMsg(agentId, text) {
+  const chat = getChat(agentId);
+  if (!chat) return;
+  const msg = document.createElement('div');
+  msg.className = 'msg user';
+  msg.innerHTML = `<div class="label">👤 คุณ</div>${esc(text)}`;
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendToken(agentId, token) {
+  const chat = document.getElementById(`chat-${agentId}`);
+  const empty = chat?.querySelector('.empty');
+  if (empty) empty.remove();
+  if (!chat) return;
+
+  if (!streaming[agentId]) {
+    const msg = document.createElement('div');
+    msg.className = 'msg assistant streaming';
+    msg.style.setProperty('--agent-color', agents[agentId]?.color || '#6366f1');
+    msg.innerHTML = `<div class="label">${agents[agentId]?.emoji||'🤖'} ${agents[agentId]?.name||agentId}</div><span class="content"></span><span class="cursor"></span>`;
+    chat.appendChild(msg);
+    streaming[agentId] = msg;
+  }
+
+  const content = streaming[agentId].querySelector('.content');
+  content.textContent += token;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function finishStream(agentId) {
+  if (streaming[agentId]) {
+    streaming[agentId].classList.remove('streaming');
+    streaming[agentId].querySelector('.cursor')?.remove();
+    streaming[agentId] = null;
+  }
+}
+
+function appendToolEvent(agentId, tool, input) {
+  const chat = getChat(agentId);
+  if (!chat) return;
+  const toolIcons = {
+    Read:'📖', Write:'💾', Edit:'✏️', Bash:'⚡', Glob:'🔍',
+    Grep:'🔎', WebSearch:'🌐', WebFetch:'🌐', AskUserQuestion:'❓'
+  };
+  const icon = toolIcons[tool] || '🔧';
+  const msg = document.createElement('div');
+  msg.className = 'msg tool-event';
+  msg.textContent = `${icon} ${tool}${input ? ': ' + input : ''}`;
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendError(agentId, error) {
+  const chat = getChat(agentId);
+  if (!chat) return;
+  const msg = document.createElement('div');
+  msg.className = 'msg tool-event';
+  msg.style.borderColor = 'var(--red)';
+  msg.style.color = '#f87171';
+  msg.textContent = `❌ ${error}`;
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function clearChat(agentId) {
+  const chat = document.getElementById(`chat-${agentId}`);
+  if (!chat) return;
+  streaming[agentId] = null;
+  chat.innerHTML = `<div class="empty"><div class="empty-icon">${agents[agentId]?.emoji||'🤖'}</div><div>ล้าง session แล้ว<br><small style="opacity:.6">Claude Code พร้อมรับคำสั่งใหม่</small></div></div>`;
+}
+
+/* ── Status ── */
+function updateStatus(agentId, status, task) {
+  const pill = document.getElementById(`pill-${agentId}`);
+  const card = document.getElementById(`card-${agentId}`);
+  const send = document.getElementById(`send-${agentId}`);
+  if (!pill) return;
+
+  const labels = { idle:'พร้อม', working:'ทำงานอยู่...', error:'ผิดพลาด' };
+  const classes = { idle:'pill-idle', working:'pill-working', error:'pill-error' };
+
+  pill.className = `pill ${classes[status] || 'pill-idle'}`;
+  pill.innerHTML = `<span class="dot">●</span> ${labels[status] || status}`;
+  if (card) card.className = `card ${status !== 'idle' ? status : ''}`;
+  if (send) send.disabled = status === 'working';
+}
+
+function updateTurnCount(agentId, count) {
+  const el = document.getElementById(`turn-${agentId}`);
+  if (el) el.textContent = `${count} รอบ`;
+}
+
+/* ── Keyboard ── */
+function handleKey(e, agentId) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendTask(agentId); }
+}
+
+/* ── Toast ── */
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+/* ── Escape ── */
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>

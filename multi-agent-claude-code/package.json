@@ -1,0 +1,17 @@
+{
+  "name": "multi-agent-claude-code",
+  "version": "1.0.0",
+  "description": "Multi-Agent Office รัน Claude Code หลาย instance พร้อมกัน",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.76",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}
