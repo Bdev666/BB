@@ -1,5 +1,6 @@
 let currentAgent = null;
 let agents = [];
+let currentMode = 'chat';
 const SESSION_ID = 'sess_' + Math.random().toString(36).slice(2);
 
 // Client-side message display only (history stored server-side)
@@ -18,6 +19,14 @@ const headerEmoji = $('headerEmoji');
 const headerName = $('headerName');
 const headerTitle = $('headerTitle');
 const inputHint = $('inputHint');
+
+// Dispatch elements
+const dispatchArea = $('dispatchArea');
+const dispatchBody = $('dispatchBody');
+const dispatchInput = $('dispatchInput');
+const dispatchBtn = $('dispatchBtn');
+const chatInputArea = $('chatInputArea');
+const dispatchInputArea = $('dispatchInputArea');
 
 // ── Init ──
 async function init() {
@@ -52,8 +61,31 @@ function renderWelcome() {
     </div>`).join('');
 }
 
+// ── Mode Switch ──
+function switchMode(mode) {
+  currentMode = mode;
+  $('tabChat').classList.toggle('active', mode === 'chat');
+  $('tabDispatch').classList.toggle('active', mode === 'dispatch');
+
+  if (mode === 'chat') {
+    chatArea.style.display = '';
+    dispatchArea.style.display = 'none';
+    chatInputArea.style.display = '';
+    dispatchInputArea.style.display = 'none';
+    clearBtn.style.display = '';
+  } else {
+    chatArea.style.display = 'none';
+    dispatchArea.style.display = 'flex';
+    chatInputArea.style.display = 'none';
+    dispatchInputArea.style.display = '';
+    clearBtn.style.display = 'none';
+    dispatchInput.focus();
+  }
+}
+
 // ── Select Agent ──
 function selectAgent(id) {
+  if (currentMode !== 'chat') switchMode('chat');
   currentAgent = agents.find(a => a.id === id);
   if (!currentAgent) return;
 
@@ -165,7 +197,24 @@ function scrollDown() {
   requestAnimationFrame(() => { chatArea.scrollTop = chatArea.scrollHeight; });
 }
 
-// ── Send ──
+function scrollDispatchDown() {
+  requestAnimationFrame(() => { dispatchBody.scrollTop = dispatchBody.scrollHeight; });
+}
+
+// Simulate typing — reveals text char-by-char when SDK gives full result at once
+async function typeOut(bubble, text, chunkSize = 6) {
+  let i = 0;
+  bubble.innerHTML = '<span class="cursor"></span>';
+  while (i < text.length) {
+    i = Math.min(i + chunkSize, text.length);
+    bubble.innerHTML = md(text.slice(0, i)) + (i < text.length ? '<span class="cursor"></span>' : '');
+    scrollDown();
+    await new Promise(r => setTimeout(r, 8));
+  }
+  bubble.innerHTML = md(text);
+}
+
+// ── Send (single agent chat) ──
 async function send() {
   const text = messageInput.value.trim();
   if (!text || !currentAgent) return;
@@ -216,10 +265,8 @@ async function send() {
           const d = JSON.parse(line.slice(6));
 
           if (d.type === 'status') {
-            // Show / update searching pill above the AI bubble
             if (!statusPill) {
               statusPill = showStatus(d.text);
-              // Insert pill before the AI message div
               messages.insertBefore(statusPill, aiDiv);
             } else {
               statusPill.innerHTML = `<span class="status-spin">⟳</span> ${esc(d.text)}`;
@@ -227,16 +274,21 @@ async function send() {
           }
 
           if (d.type === 'delta') {
-            // Remove searching indicator once answer starts
-            if (statusPill) { statusPill.remove(); statusPill = null; }
             full += d.text;
+            if (statusPill) { statusPill.remove(); statusPill = null; }
             bubble.innerHTML = md(full) + '<span class="cursor"></span>';
             scrollDown();
           }
 
           if (d.type === 'done') {
             if (statusPill) { statusPill.remove(); statusPill = null; }
-            bubble.innerHTML = md(full);
+            const finalText = full || d.text || '';
+            if (!full && finalText) {
+              await typeOut(bubble, finalText);
+              full = finalText;
+            } else {
+              bubble.innerHTML = md(full);
+            }
             displayHistory[agentId].push({ type: 'ai', text: full });
           }
 
@@ -253,12 +305,193 @@ async function send() {
   } catch (err) {
     if (statusPill) { statusPill.remove(); }
     bubble.innerHTML = `<span style="color:#ef4444">⚠️ เกิดข้อผิดพลาด: ${esc(err.message)}</span>`;
-    displayHistory[agentId].pop(); // remove failed user msg
+    displayHistory[agentId].pop();
   } finally {
     messageInput.disabled = false;
     sendBtn.disabled = false;
     messageInput.focus();
     scrollDown();
+  }
+}
+
+// ── Dispatch: multi-agent workflow ──
+async function dispatch() {
+  const task = dispatchInput.value.trim();
+  if (!task) return;
+
+  dispatchInput.value = '';
+  dispatchInput.style.height = 'auto';
+  dispatchInput.disabled = true;
+  dispatchBtn.disabled = true;
+
+  // Clear and show workflow
+  dispatchBody.innerHTML = '';
+
+  // Planning indicator
+  const planningEl = document.createElement('div');
+  planningEl.className = 'plan-card';
+  planningEl.innerHTML = `
+    <div class="plan-card-header">
+      <span class="plan-badge">🎯 Orchestrator</span>
+      <span style="font-size:12px;color:var(--text2)">กำลังวางแผนงาน...</span>
+    </div>
+    <div class="step-inline-status"><span class="step-spin">⟳</span> กำลังวิเคราะห์งานและจัดทีม...</div>`;
+  dispatchBody.appendChild(planningEl);
+  scrollDispatchDown();
+
+  const stepCards = {}; // index -> { card, bodyEl, statusEl, full }
+
+  try {
+    const res = await fetch('/api/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task, sessionId: SESSION_ID })
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+
+          if (d.type === 'plan_start') {
+            planningEl.querySelector('.step-inline-status').innerHTML =
+              `<span class="step-spin">⟳</span> PM กำลังวางแผนการทำงาน...`;
+          }
+
+          if (d.type === 'status') {
+            planningEl.querySelector('.step-inline-status').innerHTML =
+              `<span class="step-spin">⟳</span> ${esc(d.text)}`;
+          }
+
+          if (d.type === 'plan') {
+            const plan = d.plan;
+            planningEl.innerHTML = `
+              <div class="plan-card-header">
+                <span class="plan-badge">🎯 แผนงาน</span>
+              </div>
+              <div class="plan-summary">${esc(plan.summary || '')}</div>
+              <div class="plan-steps-preview">
+                ${(plan.steps || []).map((s, i) => {
+                  const a = agents.find(x => x.id === s.agentId);
+                  return `<div class="plan-step-chip">
+                    <span class="step-num">${i+1}</span>
+                    <span>${a ? a.emoji : '🤖'} ${a ? a.name : s.agentId}</span>
+                  </div>`;
+                }).join('')}
+              </div>`;
+          }
+
+          if (d.type === 'step_start') {
+            const { index, agentId, agentName, agentEmoji } = d;
+            const a = agents.find(x => x.id === agentId);
+            const color = a?.color || '#4F46E5';
+
+            const card = document.createElement('div');
+            card.className = 'step-card working';
+            card.innerHTML = `
+              <div class="step-card-header">
+                <div class="step-agent-avatar" style="background:${color}20;border:1px solid ${color}40">${agentEmoji}</div>
+                <div class="step-agent-info">
+                  <div class="step-agent-name">${agentName}</div>
+                  <div class="step-agent-status" id="step-status-${index}">กำลังทำงาน...</div>
+                </div>
+                <span class="step-badge working" id="step-badge-${index}">⟳ กำลังทำงาน</span>
+              </div>
+              <div class="step-card-body" id="step-body-${index}">
+                <div class="step-inline-status"><span class="step-spin">⟳</span> รอผลลัพธ์...</div>
+              </div>`;
+            dispatchBody.appendChild(card);
+            scrollDispatchDown();
+
+            stepCards[index] = {
+              card,
+              bodyEl: card.querySelector(`#step-body-${index}`),
+              statusEl: card.querySelector(`#step-status-${index}`),
+              badgeEl: card.querySelector(`#step-badge-${index}`),
+              full: ''
+            };
+          }
+
+          if (d.type === 'step_status') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              sc.statusEl.textContent = d.text;
+              if (!sc.hasContent) {
+                sc.bodyEl.innerHTML = `<div class="step-inline-status"><span class="step-spin">⟳</span> ${esc(d.text)}</div>`;
+              }
+            }
+            scrollDispatchDown();
+          }
+
+          if (d.type === 'step_delta') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              sc.full += d.text;
+              sc.hasContent = true;
+              sc.bodyEl.innerHTML = md(sc.full) + '<span class="cursor"></span>';
+              scrollDispatchDown();
+            }
+          }
+
+          if (d.type === 'step_done') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              const finalText = sc.full || d.text || '';
+              sc.full = finalText;
+              sc.bodyEl.innerHTML = md(finalText);
+              sc.card.className = 'step-card done';
+              sc.badgeEl.className = 'step-badge done';
+              sc.badgeEl.textContent = '✓ เสร็จแล้ว';
+              sc.statusEl.textContent = 'ดำเนินการเสร็จสิ้น';
+              scrollDispatchDown();
+            }
+          }
+
+          if (d.type === 'dispatch_done') {
+            const doneCard = document.createElement('div');
+            doneCard.className = 'dispatch-done-card';
+            doneCard.innerHTML = `<span style="font-size:20px">✅</span> <span>งานทั้งหมดเสร็จสิ้นแล้ว — ทีม AI ดำเนินการครบทุกขั้นตอน</span>`;
+            dispatchBody.appendChild(doneCard);
+            scrollDispatchDown();
+          }
+
+          if (d.type === 'error') {
+            const errCard = document.createElement('div');
+            errCard.style.cssText = 'background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px 16px;color:#fca5a5;font-size:13px;';
+            errCard.textContent = `⚠️ เกิดข้อผิดพลาด: ${d.message}`;
+            dispatchBody.appendChild(errCard);
+            scrollDispatchDown();
+          }
+        } catch {}
+      }
+    }
+
+  } catch (err) {
+    const errCard = document.createElement('div');
+    errCard.style.cssText = 'background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:14px 16px;color:#fca5a5;font-size:13px;';
+    errCard.textContent = `⚠️ เกิดข้อผิดพลาด: ${err.message}`;
+    dispatchBody.appendChild(errCard);
+    scrollDispatchDown();
+  } finally {
+    dispatchInput.disabled = false;
+    dispatchBtn.disabled = false;
+    dispatchInput.focus();
   }
 }
 
@@ -283,7 +516,6 @@ async function checkSession() {
     const d = await r.json();
 
     if (d.expired) {
-      // Session gone — clear display and notify
       Object.keys(displayHistory).forEach(k => { displayHistory[k] = []; });
       sessionBanner.style.display = 'flex';
       sessionBanner.classList.add('critical');
@@ -311,7 +543,6 @@ async function checkSession() {
   } catch {}
 }
 
-// Extend session by sending a no-op touch (just re-fetch session status touches it server-side via getHistory on next message)
 bannerExtend.addEventListener('click', async () => {
   await fetch(`/api/session-touch/${SESSION_ID}`, { method: 'POST' }).catch(() => {});
   bannerDismissed = false;
@@ -325,9 +556,8 @@ bannerClose.addEventListener('click', () => {
   sessionBanner.style.display = 'none';
 });
 
-// Poll every 30 seconds
 setInterval(checkSession, 30_000);
-setTimeout(checkSession, 5_000); // first check after 5s
+setTimeout(checkSession, 5_000);
 
 // ── Clear ──
 clearBtn.addEventListener('click', async () => {
@@ -339,7 +569,7 @@ clearBtn.addEventListener('click', async () => {
   appendBubble('ai', `ล้างประวัติแล้วครับ/ค่ะ 🗑️ มีอะไรให้ช่วยไหม?`);
 });
 
-// ── Input ──
+// ── Input: chat ──
 messageInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -348,5 +578,15 @@ messageInput.addEventListener('input', () => {
   messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + 'px';
 });
 sendBtn.addEventListener('click', send);
+
+// ── Input: dispatch ──
+dispatchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); dispatch(); }
+});
+dispatchInput.addEventListener('input', () => {
+  dispatchInput.style.height = 'auto';
+  dispatchInput.style.height = Math.min(dispatchInput.scrollHeight, 150) + 'px';
+});
+dispatchBtn.addEventListener('click', dispatch);
 
 init();

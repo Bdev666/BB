@@ -17,6 +17,13 @@
           <p>Multi-Agent System</p>
         </div>
       </div>
+
+      <!-- Mode tabs -->
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tabChat" onclick="switchMode('chat')">💬 สนทนา</button>
+        <button class="mode-tab" id="tabDispatch" onclick="switchMode('dispatch')">🚀 แจกจ่ายงาน</button>
+      </div>
+
       <nav class="agent-list" id="agentList">
         <div class="loading-agents">กำลังโหลด...</div>
       </nav>
@@ -38,6 +45,7 @@
         <span class="model-badge">Claude Opus 4.6</span>
       </header>
 
+      <!-- ── Chat mode ── -->
       <div class="chat-area" id="chatArea">
         <div class="welcome-screen" id="welcomeScreen">
           <div class="welcome-icon">🏢</div>
@@ -48,6 +56,26 @@
         <div class="messages" id="messages" style="display:none"></div>
       </div>
 
+      <!-- ── Dispatch mode ── -->
+      <div class="dispatch-area" id="dispatchArea" style="display:none">
+        <div class="dispatch-header">
+          <div class="dispatch-title">
+            <span class="dispatch-icon">🚀</span>
+            <div>
+              <h2>แจกจ่ายงานอัตโนมัติ</h2>
+              <p>AI จะวิเคราะห์งานและส่งต่อให้ผู้เชี่ยวชาญที่เหมาะสมโดยอัตโนมัติ</p>
+            </div>
+          </div>
+        </div>
+        <div class="dispatch-body" id="dispatchBody">
+          <div class="dispatch-placeholder">
+            <div class="placeholder-icon">🎯</div>
+            <p>พิมพ์งานที่ต้องการด้านล่าง</p>
+            <p class="placeholder-sub">ระบบจะวิเคราะห์และส่งงานให้ AI ที่เหมาะสมทำงานร่วมกัน</p>
+          </div>
+        </div>
+      </div>
+
       <!-- Session warning banner -->
       <div class="session-banner" id="sessionBanner" style="display:none">
         <span class="banner-icon">⏳</span>
@@ -56,7 +84,8 @@
         <button class="banner-close" id="bannerClose">✕</button>
       </div>
 
-      <div class="input-area">
+      <!-- Chat input -->
+      <div class="input-area" id="chatInputArea">
         <div class="input-wrapper">
           <textarea id="messageInput" placeholder="พิมพ์ข้อความถึงผู้ช่วย AI..." rows="1" disabled></textarea>
           <button id="sendBtn" disabled>
@@ -64,6 +93,17 @@
           </button>
         </div>
         <p class="input-hint" id="inputHint">เลือกผู้ช่วย AI เพื่อเริ่มการสนทนา</p>
+      </div>
+
+      <!-- Dispatch input -->
+      <div class="input-area" id="dispatchInputArea" style="display:none">
+        <div class="input-wrapper">
+          <textarea id="dispatchInput" placeholder="อธิบายงานที่ต้องการ เช่น: วิเคราะห์ตลาด AI ในไทย แล้วเขียนรายงานสำหรับผู้บริหาร..." rows="1"></textarea>
+          <button id="dispatchBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          </button>
+        </div>
+        <p class="input-hint">อธิบายงานแล้วกด Enter — AI จะจัดทีมทำงานให้อัตโนมัติ</p>
       </div>
     </main>
   </div>
