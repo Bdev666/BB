@@ -1,14 +1,48 @@
 import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(join(__dirname, 'public')));
+
+// ── Persistent Memory ──
+const MEM_DIR  = join(__dirname, '.memory');
+const MEM_FILE = join(MEM_DIR, 'memory.json');
+if (!existsSync(MEM_DIR)) mkdirSync(MEM_DIR, { recursive: true });
+let memoryStore = {};
+try { if (existsSync(MEM_FILE)) memoryStore = JSON.parse(readFileSync(MEM_FILE, 'utf8')) || {}; } catch { memoryStore = {}; }
+function saveMemory() {
+  try { writeFileSync(MEM_FILE, JSON.stringify(memoryStore, null, 2)); } catch (e) { console.error('[memory] save failed:', e.message); }
+}
+function getMemory(sessionId) {
+  if (!memoryStore[sessionId]) memoryStore[sessionId] = { tasks: [], notes: [] };
+  return memoryStore[sessionId];
+}
+function rememberTask(sessionId, entry) {
+  const mem = getMemory(sessionId);
+  mem.tasks.push({ ...entry, at: new Date().toISOString() });
+  if (mem.tasks.length > 50) mem.tasks = mem.tasks.slice(-50);
+  saveMemory();
+}
+function memoryContext(sessionId) {
+  const mem = getMemory(sessionId);
+  if (!mem.tasks.length && !mem.notes.length) return '';
+  const recent = mem.tasks.slice(-5).map(t =>
+    `- [${t.at?.slice(0,10) || ''}] ${t.task} → ${(t.summary || '').slice(0, 120)}`
+  ).join('\n');
+  const notes = mem.notes.slice(-5).map(n => `- ${n}`).join('\n');
+  return `<long_term_memory>
+งานที่เคยทำของผู้ใช้ (recent):
+${recent || '(ไม่มี)'}
+${notes ? `\nบันทึกพิเศษ:\n${notes}` : ''}
+</long_term_memory>\n\n`;
+}
 
 // ── Agent Definitions ──
 const AGENTS = {
@@ -151,6 +185,50 @@ async function runAgent(agentId, prompt, onStatus) {
   return text;
 }
 
+// ── KPI Evaluation ──
+async function evaluateKPI({ task, instruction, output, agent }) {
+  const evalPrompt = `คุณคือผู้ประเมิน KPI คุณภาพงาน วิเคราะห์ผลงานต่อไปนี้และให้คะแนน
+
+โจทย์ของผู้ใช้: "${task}"
+ภารกิจที่มอบหมายให้ ${agent.name}: "${instruction}"
+
+ผลงานที่ส่งมอบ:
+"""${(output || '').slice(0, 4000)}"""
+
+ประเมิน 5 มิติ (0-100):
+- accuracy: ความถูกต้องของข้อมูล/ตรรกะ
+- relevance: ตรงกับโจทย์หรือไม่
+- completeness: ครบถ้วน/ละเอียดเพียงพอ
+- clarity: ชัดเจน อ่านเข้าใจง่าย
+- usefulness: ใช้งานได้จริง
+
+ตอบเป็น JSON เท่านั้น (ไม่มี markdown):
+{
+  "scores": { "accuracy": 0, "relevance": 0, "completeness": 0, "clarity": 0, "usefulness": 0 },
+  "overall": 0,
+  "issues": ["ข้อบกพร่องที่พบ", "..."],
+  "feedback": "ข้อเสนอแนะที่ตรงไปตรงมา 1-3 ประโยค สำหรับให้ agent แก้ไข",
+  "verdict": "pass" | "revise"
+}
+หากคะแนน overall < 70 ให้ verdict = "revise"`;
+  let raw = '';
+  try {
+    raw = await runAgent('pm', evalPrompt, () => {});
+  } catch (e) {
+    return { scores: {}, overall: 0, issues: [`ประเมินไม่ได้: ${e.message}`], feedback: '', verdict: 'pass' };
+  }
+  try {
+    const s = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const start = s.indexOf('{'), end = s.lastIndexOf('}');
+    const obj = JSON.parse(s.slice(start, end + 1));
+    obj.overall = Number(obj.overall) || 0;
+    obj.verdict = obj.overall < 70 ? 'revise' : (obj.verdict || 'pass');
+    return obj;
+  } catch {
+    return { scores: {}, overall: 75, issues: [], feedback: '', verdict: 'pass' };
+  }
+}
+
 // ── Routes: Agents & Session ──
 app.get('/api/agents', (req, res) => {
   res.json(Object.values(AGENTS).map(({ id, name, title, emoji, color, description }) =>
@@ -166,6 +244,24 @@ app.post('/api/session-touch/:id', (req, res) => {
   touchSession(req.params.id);
   res.json({ ok: true, ttlMs: SESSION_TTL_MS });
 });
+app.get('/api/memory/:sessionId', (req, res) => {
+  res.json(getMemory(req.params.sessionId));
+});
+app.delete('/api/memory/:sessionId', (req, res) => {
+  delete memoryStore[req.params.sessionId];
+  saveMemory();
+  res.json({ ok: true });
+});
+app.post('/api/memory/:sessionId/note', (req, res) => {
+  const { note } = req.body || {};
+  if (!note) return res.status(400).json({ error: 'Missing note' });
+  const mem = getMemory(req.params.sessionId);
+  mem.notes.push(String(note).slice(0, 500));
+  if (mem.notes.length > 30) mem.notes = mem.notes.slice(-30);
+  saveMemory();
+  res.json({ ok: true });
+});
+
 app.delete('/api/chat/:sessionId/:agentId', (req, res) => {
   sessions.delete(`${req.params.sessionId}:${req.params.agentId}`);
   touchSession(req.params.sessionId);
@@ -186,7 +282,8 @@ app.post('/api/chat', async (req, res) => {
   const send = d => res.write(`data: ${JSON.stringify(d)}\n\n`);
 
   const history = getHistory(sessionId, agentId);
-  const prompt = buildPrompt(history, message);
+  const memCtx  = memoryContext(sessionId);
+  const prompt  = memCtx + buildPrompt(history, message);
   history.push({ role: 'user', content: message });
 
   let assistantText = '';
@@ -245,7 +342,8 @@ app.post('/api/dispatch', async (req, res) => {
     // Step 1: Orchestrator plans the workflow
     send({ type: 'plan_start' });
 
-    const planPrompt = `คุณคือ Orchestrator ของ AI Office ทำหน้าที่วางแผนและแจกจ่ายงานให้ทีม
+    const memCtx = memoryContext(sessionId);
+    const planPrompt = `${memCtx}คุณคือ Orchestrator ของ AI Office ทำหน้าที่วางแผนและแจกจ่ายงานให้ทีม
 
 รายชื่อ agents ที่มีในทีม:
 ${agentList}
@@ -291,54 +389,165 @@ ${agentList}
 
     send({ type: 'plan', plan });
 
-    // Step 2: Execute each agent in sequence
+    // Step 2: Execute each agent in sequence with KPI eval + revision loop
     let previousOutput = '';
+    const stepResults = [];
+
+    async function runStep(index, agent, instruction, contextText, revisionFeedback) {
+      let prompt = `งานของคุณ: ${instruction}`;
+      if (contextText) prompt += `\n\nผลงานจากทีมก่อนหน้า:\n${contextText}`;
+      if (revisionFeedback) {
+        prompt += `\n\n⚠️ Feedback จาก PM (ต้องแก้ไข):\n${revisionFeedback}\n\nกรุณาปรับปรุงผลงานตาม feedback นี้`;
+      }
+      prompt += `\n\nกรุณาดำเนินงานอย่างละเอียดและใช้เครื่องมือค้นหาเมื่อจำเป็น`;
+
+      let stepText = '';
+      const stepStream = query({
+        prompt,
+        options: { systemPrompt: agent.system, allowedTools: ['WebSearch', 'WebFetch'], maxTurns: 10 }
+      });
+      for await (const msg of stepStream) {
+        if (msg.type === 'tool_use') {
+          const n = msg.name || '';
+          if (n === 'WebSearch') send({ type: 'step_status', index, text: `🔍 ค้นหา: "${msg.input?.query || ''}"` });
+          else if (n === 'WebFetch') send({ type: 'step_status', index, text: '🌐 อ่านข้อมูลจากเว็บ...' });
+        }
+        if (msg.type === 'assistant' && msg.message?.content) {
+          for (const b of msg.message.content) {
+            if (b.type === 'text' && b.text?.length > stepText.length) {
+              send({ type: 'step_delta', index, text: b.text.slice(stepText.length) });
+              stepText = b.text;
+            }
+          }
+        }
+        if (msg.type === 'result') {
+          const final = msg.result || stepText;
+          if (final.length > stepText.length) send({ type: 'step_delta', index, text: final.slice(stepText.length) });
+          stepText = final;
+        }
+      }
+      return stepText;
+    }
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
       const agent = AGENTS[step.agentId];
-
       send({ type: 'step_start', index: i, agentId: step.agentId, agentName: agent.name, agentEmoji: agent.emoji });
 
-      const agentPrompt = previousOutput
-        ? `งานของคุณ: ${step.instruction}\n\nผลงานจากทีมก่อนหน้า:\n${previousOutput}\n\nกรุณาดำเนินงานของคุณโดยใช้ผลงานข้างต้นเป็น context`
-        : `งานของคุณ: ${step.instruction}`;
-
       let stepText = '';
+      let kpi = null;
+      let revised = false;
       try {
-        const stepStream = query({
-          prompt: agentPrompt,
-          options: { systemPrompt: agent.system, allowedTools: ['WebSearch', 'WebFetch'], maxTurns: 10 }
-        });
+        stepText = await runStep(i, agent, step.instruction, previousOutput, null);
 
-        for await (const msg of stepStream) {
-          if (msg.type === 'tool_use') {
-            const n = msg.name || '';
-            if (n === 'WebSearch') send({ type: 'step_status', index: i, text: `🔍 ค้นหา: "${msg.input?.query || ''}"` });
-            else if (n === 'WebFetch') send({ type: 'step_status', index: i, text: '🌐 อ่านข้อมูลจากเว็บ...' });
-          }
-          if (msg.type === 'assistant' && msg.message?.content) {
-            for (const b of msg.message.content) {
-              if (b.type === 'text' && b.text?.length > stepText.length) {
-                send({ type: 'step_delta', index: i, text: b.text.slice(stepText.length) });
-                stepText = b.text;
-              }
-            }
-          }
-          if (msg.type === 'result') {
-            const final = msg.result || stepText;
-            if (final.length > stepText.length) send({ type: 'step_delta', index: i, text: final.slice(stepText.length) });
-            stepText = final;
+        // KPI evaluation
+        send({ type: 'step_status', index: i, text: '📊 PM กำลังประเมิน KPI และคุณภาพงาน...' });
+        kpi = await evaluateKPI({ task, instruction: step.instruction, output: stepText, agent });
+        send({ type: 'step_kpi', index: i, kpi, phase: 'initial' });
+
+        // Revision loop (1 retry max)
+        if (kpi.verdict === 'revise' && kpi.feedback) {
+          send({ type: 'step_status', index: i, text: '🔁 ส่ง Feedback ให้ agent แก้ไข...' });
+          send({ type: 'step_revising', index: i, feedback: kpi.feedback });
+          const revisedText = await runStep(i, agent, step.instruction, previousOutput, kpi.feedback);
+          if (revisedText && revisedText.trim()) {
+            stepText = revisedText;
+            revised = true;
+            send({ type: 'step_delta_replace', index: i, text: stepText });
+            // Re-evaluate after revision
+            send({ type: 'step_status', index: i, text: '📊 ประเมินงานที่แก้ไขแล้ว...' });
+            kpi = await evaluateKPI({ task, instruction: step.instruction, output: stepText, agent });
+            send({ type: 'step_kpi', index: i, kpi, phase: 'revised' });
           }
         }
       } catch (err) {
         stepText = `⚠️ เกิดข้อผิดพลาด: ${err.message}`;
       }
 
+      stepResults.push({
+        agentId: step.agentId, agentName: agent.name, agentEmoji: agent.emoji,
+        instruction: step.instruction, output: stepText, kpi, revised
+      });
       previousOutput = stepText;
-      send({ type: 'step_done', index: i, text: stepText });
+      send({ type: 'step_done', index: i, text: stepText, kpi, revised });
     }
 
+    // Step 3: Final user-facing summary
+    send({ type: 'summary_start' });
+    const overallScores = stepResults.map(r => r.kpi?.overall || 0).filter(x => x > 0);
+    const avgScore = overallScores.length ? Math.round(overallScores.reduce((a, b) => a + b, 0) / overallScores.length) : 0;
+    const revisionsCount = stepResults.filter(r => r.revised).length;
+    const allIssues = stepResults.flatMap(r => (r.kpi?.issues || []).map(it => `[${r.agentName}] ${it}`));
+
+    const summaryPrompt = `คุณคือ PM กำลังสรุปผลงานทั้งหมดให้ผู้ใช้ฟัง อย่างกระชับและเข้าใจง่าย
+
+โจทย์เดิมของผู้ใช้: "${task}"
+
+ผลการดำเนินงาน:
+${stepResults.map((r, i) => `
+ขั้นที่ ${i+1}: ${r.agentEmoji} ${r.agentName}
+- ภารกิจ: ${r.instruction}
+- KPI overall: ${r.kpi?.overall || 'N/A'}/100${r.revised ? ' (หลังแก้ไข)' : ''}
+- ปัญหาที่พบ: ${(r.kpi?.issues || []).join('; ') || 'ไม่มี'}
+- ผลงานสรุป: ${(r.output || '').slice(0, 500)}
+`).join('\n')}
+
+โปรดสรุปให้ผู้ใช้เป็นภาษาไทย ด้วยรูปแบบ:
+## สรุปงานที่ทำให้คุณ
+(2-3 ประโยคสรุปผลลัพธ์โดยรวม)
+
+## คะแนน KPI เฉลี่ย: ${avgScore}/100
+
+## สิ่งที่ทำเสร็จ
+- (รายการ bullet ของผลงานสำคัญ)
+
+## ข้อบกพร่องที่พบและแก้ไข
+- (อธิบายปัญหาและการแก้ไขด้วย feedback loop ระหว่าง agent — ถ้าไม่มีให้ระบุ "ไม่พบปัญหา")
+
+## ข้อเสนอแนะถัดไป
+- (1-3 ข้อ)
+
+ตอบกระชับ ตรงประเด็น ไม่ต้องใช้ web search`;
+
+    let summaryText = '';
+    try {
+      const sumStream = query({
+        prompt: summaryPrompt,
+        options: { systemPrompt: AGENTS.pm.system, allowedTools: [], maxTurns: 2 }
+      });
+      for await (const msg of sumStream) {
+        if (msg.type === 'assistant' && msg.message?.content) {
+          for (const b of msg.message.content) {
+            if (b.type === 'text' && b.text?.length > summaryText.length) {
+              send({ type: 'summary_delta', text: b.text.slice(summaryText.length) });
+              summaryText = b.text;
+            }
+          }
+        }
+        if (msg.type === 'result') {
+          const f = msg.result || summaryText;
+          if (f.length > summaryText.length) send({ type: 'summary_delta', text: f.slice(summaryText.length) });
+          summaryText = f;
+        }
+      }
+    } catch (e) {
+      summaryText = `สรุปไม่สำเร็จ: ${e.message}`;
+    }
+
+    // Save to long-term memory
+    rememberTask(sessionId, {
+      task,
+      summary: summaryText.slice(0, 400),
+      avgKPI: avgScore,
+      revisions: revisionsCount,
+      agents: stepResults.map(r => r.agentId)
+    });
+
+    send({
+      type: 'summary_done',
+      text: summaryText,
+      stats: { avgKPI: avgScore, revisions: revisionsCount, totalSteps: stepResults.length, issues: allIssues }
+    });
     send({ type: 'dispatch_done' });
 
   } catch (err) {

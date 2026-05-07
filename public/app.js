@@ -547,6 +547,51 @@ async function dispatch() {
             }
           }
 
+          if (d.type === 'step_delta_replace') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              sc.full = d.text;
+              sc.bodyEl.innerHTML = md(sc.full) + '<span class="cursor"></span>';
+              scrollDispatch();
+            }
+          }
+
+          if (d.type === 'step_kpi') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              const k = d.kpi || {};
+              const score = k.overall || 0;
+              const color = score >= 85 ? '#10b981' : score >= 70 ? '#f59e0b' : '#ef4444';
+              const label = d.phase === 'revised' ? '📊 KPI (หลังแก้ไข)' : '📊 KPI';
+              const kpiBox = document.createElement('div');
+              kpiBox.style.cssText = `margin:8px 16px;padding:10px 12px;background:rgba(0,0,0,.2);border-left:3px solid ${color};border-radius:6px;font-size:12px;`;
+              const sc_obj = k.scores || {};
+              kpiBox.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                  <strong>${label}</strong>
+                  <span style="font-size:18px;font-weight:700;color:${color}">${score}/100</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11px;opacity:.85;">
+                  ${Object.entries(sc_obj).map(([n,v]) => `<span style="padding:2px 6px;background:rgba(255,255,255,.05);border-radius:4px;">${n}: ${v}</span>`).join('')}
+                </div>
+                ${(k.issues && k.issues.length) ? `<div style="margin-top:6px;color:#fca5a5;">⚠️ ${esc(k.issues.join('; '))}</div>` : ''}
+                ${k.feedback ? `<div style="margin-top:6px;color:#fde68a;">💬 ${esc(k.feedback)}</div>` : ''}`;
+              sc.card.appendChild(kpiBox);
+              scrollDispatch();
+            }
+          }
+
+          if (d.type === 'step_revising') {
+            const sc = stepCards[d.index];
+            if (sc) {
+              const note = document.createElement('div');
+              note.style.cssText = 'margin:6px 16px;padding:8px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:6px;font-size:12px;color:#fde68a;';
+              note.innerHTML = `🔁 <strong>กำลังแก้ไขตาม Feedback:</strong> ${esc(d.feedback || '')}`;
+              sc.card.appendChild(note);
+              scrollDispatch();
+            }
+          }
+
           if (d.type === 'step_done') {
             const sc = stepCards[d.index];
             if (sc) {
@@ -555,8 +600,9 @@ async function dispatch() {
               sc.bodyEl.innerHTML = md(finalText);
               sc.card.className = 'step-card done';
               sc.badgeEl.className = 'step-badge done';
-              sc.badgeEl.textContent = '✓ เสร็จแล้ว';
-              sc.statusEl.textContent = 'ดำเนินการเสร็จสิ้น';
+              const score = d.kpi?.overall || 0;
+              sc.badgeEl.textContent = score ? `✓ เสร็จ • KPI ${score}` : '✓ เสร็จแล้ว';
+              sc.statusEl.textContent = d.revised ? 'แก้ไขและเสร็จสิ้น' : 'ดำเนินการเสร็จสิ้น';
               // Forward button on each step
               if (finalText) {
                 const fid = ++forwardIdCounter;
@@ -570,10 +616,62 @@ async function dispatch() {
             }
           }
 
+          if (d.type === 'summary_start') {
+            const sumCard = document.createElement('div');
+            sumCard.id = 'finalSummaryCard';
+            sumCard.className = 'step-card working';
+            sumCard.innerHTML = `
+              <div class="step-card-header">
+                <div class="step-agent-avatar" style="background:#0d948820;border:1px solid #0d948840">📋</div>
+                <div class="step-agent-info">
+                  <div class="step-agent-name">สรุปสำหรับผู้ใช้</div>
+                  <div class="step-agent-status">PM กำลังสรุปผลและรายงาน...</div>
+                </div>
+                <span class="step-badge working">⟳ สรุป</span>
+              </div>
+              <div class="step-card-body" id="finalSummaryBody">
+                <div class="step-inline-status"><span class="step-spin">⟳</span> รอผลลัพธ์...</div>
+              </div>`;
+            dispatchBody.appendChild(sumCard);
+            scrollDispatch();
+          }
+
+          if (d.type === 'summary_delta') {
+            const body = $('finalSummaryBody');
+            if (body) {
+              if (!body.dataset.full) body.dataset.full = '';
+              body.dataset.full += d.text;
+              body.innerHTML = md(body.dataset.full) + '<span class="cursor"></span>';
+              scrollDispatch();
+            }
+          }
+
+          if (d.type === 'summary_done') {
+            const card = $('finalSummaryCard');
+            const body = $('finalSummaryBody');
+            if (body) body.innerHTML = md(d.text || body.dataset.full || '');
+            if (card) {
+              card.className = 'step-card done';
+              const badge = card.querySelector('.step-badge');
+              if (badge) { badge.className = 'step-badge done'; badge.textContent = '✓ สรุปเสร็จ'; }
+              const stats = d.stats || {};
+              const statsBar = document.createElement('div');
+              const c = stats.avgKPI >= 85 ? '#10b981' : stats.avgKPI >= 70 ? '#f59e0b' : '#ef4444';
+              statsBar.style.cssText = `margin:8px 16px;padding:10px 12px;background:rgba(0,0,0,.2);border-radius:6px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;`;
+              statsBar.innerHTML = `
+                <span>📊 <strong style="color:${c}">KPI เฉลี่ย: ${stats.avgKPI || 0}/100</strong></span>
+                <span>👥 ${stats.totalSteps || 0} agents</span>
+                <span>🔁 แก้ไข: ${stats.revisions || 0} ครั้ง</span>
+                <span>⚠️ ปัญหาที่พบ: ${(stats.issues || []).length}</span>`;
+              card.appendChild(statsBar);
+            }
+            scrollDispatch();
+          }
+
           if (d.type === 'dispatch_done') {
             const doneCard = document.createElement('div');
             doneCard.className = 'dispatch-done-card';
-            doneCard.innerHTML = `<span style="font-size:20px">✅</span><span>งานทั้งหมดเสร็จสิ้น — พิมพ์งานใหม่เพื่อเริ่มอีกครั้ง</span>`;
+            doneCard.innerHTML = `<span style="font-size:20px">✅</span><span>งานเสร็จสิ้น • บันทึกลง memory แล้ว — พิมพ์งานใหม่ได้เลย</span>`;
             dispatchBody.appendChild(doneCard);
             scrollDispatch();
           }
