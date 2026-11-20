@@ -19,7 +19,9 @@
     "productName": "BinderDash",
     "files": [
       "src/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/msgpackr-extract/**",
+      "!node_modules/@msgpackr-extract/**"
     ],
     "win": {
       "target": "nsis",
@@ -30,7 +32,8 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "npmRebuild": false
   },
   "dependencies": {
     "msgpackr": "^1.11.2"
