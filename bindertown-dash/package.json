@@ -1,7 +1,7 @@
 {
   "name": "bindertown-dash",
   "productName": "BinderDash",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fan-made multi-account launcher and dashboard for Binder Town (unofficial)",
   "main": "src/main.js",
   "private": true,
@@ -17,8 +17,22 @@
   "build": {
     "appId": "com.fanmade.binderdash",
     "productName": "BinderDash",
-    "files": ["src/**/*", "package.json"],
-    "win": { "target": "nsis", "icon": "build/icon.png" },
-    "nsis": { "artifactName": "BinderDash-Setup-${version}.${ext}", "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "artifactName": "BinderDash-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "dependencies": {
+    "msgpackr": "^1.11.2"
   }
 }

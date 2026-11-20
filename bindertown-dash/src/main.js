@@ -9,7 +9,7 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { parseMessage } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 
@@ -42,6 +42,7 @@ function blankRuntime() {
     closedSince: null,
     lastMsgAt: null,
     data: new AccountData(),
+    adapter: new BinderTownAdapter(),
     demo: null,
     alerts: new Set(), // active problems, e.g. 'disconnect', 'idle'
     loadedAt: null,
@@ -148,6 +149,7 @@ function openGame(id) {
   if (g.win && !g.win.isDestroyed()) return showGame(id);
   g.demo = null;
   g.data.reset();
+  g.adapter.reset();
 
   const win = new BrowserWindow({
     width: 1280,
@@ -248,6 +250,9 @@ function attachWatcher(id, wc) {
       if (g.sockets.size === 0) g.closedSince = Date.now();
     } else if (method === 'Network.webSocketFrameReceived') {
       onFrame(id, params.response);
+    } else if (method === 'Network.webSocketFrameSent') {
+      // only used to time the game's own pings (read-only)
+      if (params.response.opcode === 2) rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64'));
     }
   });
   dbg.on('detach', (_e, reason) => console.warn(`debugger detached for ${id}: ${reason}`));
@@ -259,14 +264,34 @@ function onFrame(id, frame) {
   if (g.status !== 'online') { g.status = 'online'; }
   if (g.alerts.has('disconnect')) setAlert(id, 'disconnect', false);
 
-  // opcode 1 = text frame; binary frames come base64-encoded
-  const text = frame.opcode === 1 ? frame.payloadData : null;
   if (store.data.settings.debugCapture) capture(id, frame);
-  if (!text) return pushState();
+  // the game talks Colyseus over binary frames (opcode 2, base64 from the DevTools protocol)
+  if (frame.opcode !== 2) return pushState();
+  try {
+    handleEvents(id, g.adapter.incoming(Buffer.from(frame.payloadData, 'base64')));
+  } catch (err) {
+    console.warn('frame decode failed', err);
+  }
+  pushState();
+}
 
-  const prevName = g.data.stats.name;
-  handleEvents(id, parseMessage(text));
-  if (g.data.stats.name !== prevName && g.win && !g.win.isDestroyed()) g.win.setTitle(windowTitle(id));
+// Read the game's own state (window.__game) once a second: character, mobs, minimap. Read-only.
+async function pollSnapshots() {
+  for (const [id, g] of openGames()) {
+    if (g.snapshotBusy || g.status === 'maintenance' || g.status === 'crashed') continue;
+    g.snapshotBusy = true;
+    try {
+      const snap = await g.win.webContents.executeJavaScript(SNAPSHOT_JS, true);
+      if (!g.win || g.win.isDestroyed()) continue;
+      const prevName = g.data.stats.name;
+      handleEvents(id, g.adapter.snapshot(snap));
+      if (snap && snap.ready) g.inGame = true;
+      else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
+      if (g.data.stats.name !== prevName) g.win.setTitle(windowTitle(id));
+    } catch { /* page reloading */ } finally {
+      g.snapshotBusy = false;
+    }
+  }
   pushState();
 }
 
@@ -322,10 +347,14 @@ function handleEvents(id, events) {
         g.lastHitAt = Date.now();
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
         break;
-      case 'death': setAlert(id, 'death', true, 'ตัวละครตาย'); break;
+      case 'self':
+        if (ev.dead && !g.alerts.has('death')) setAlert(id, 'death', true, 'ตัวละครตาย');
+        else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
+        break;
+      case 'death': setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย'); break;
       case 'revive': setAlert(id, 'death', false); break;
       case 'chat':
-        if (ev.channel === 'whisper' && !ev.mine) notify(id, 'whisper', `กระซิบจาก ${ev.from}: ${ev.text}`);
+        if (ev.channel === 'whisper' && !ev.mine && !ev.backlog) notify(id, 'whisper', `กระซิบจาก ${ev.from}: ${ev.text}`);
         break;
       case 'party':
         notify(id, 'party', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`);
@@ -626,4 +655,5 @@ app.whenReady().then(() => {
   if (store.data.settings.openAllOnStart) store.data.accounts.forEach((a, i) => setTimeout(() => openGame(a.id), i * 1500));
   setInterval(tick, 15 * 1000);
   setInterval(demoTick, 500);
+  setInterval(pollSnapshots, 1000);
 });

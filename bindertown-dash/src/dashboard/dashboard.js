@@ -1,6 +1,6 @@
 /* global dash */
 const STATUS_TEXT = {
-  closed: 'ยังไม่เปิด', loading: 'กำลังโหลด', online: 'ออนไลน์', disconnected: 'หลุด', demo: 'ตัวอย่าง',
+  closed: 'ยังไม่เปิด', loading: 'กำลังโหลด', lobby: 'ยังไม่เข้าเกม (ล็อกอิน/โหลด)', online: 'ออนไลน์', disconnected: 'หลุด', demo: 'ตัวอย่าง',
   maintenance: 'ปิดปรับปรุง', crashed: 'หน้าเกมหยุดทำงาน', offline: 'โหลดเกมไม่ได้',
 };
 const ALERT_TEXT = {
@@ -77,9 +77,9 @@ function accountCard(a) {
   },
   el('div', { class: 'acc-top' }, el('span', { class: 'dot ' + a.status }), name),
   el('div', { class: 'acc-meta' },
-    el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : ''),
+    el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : '', s.ping != null ? ` · ${s.ping} ms` : ''),
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
-  open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', pct(s.exp, s.maxExp))] : null,
+  open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
   a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map((k) => ALERT_TEXT[k] || k).join(' · ')) : null);
 }
 
@@ -123,6 +123,12 @@ function profileButtons(a) {
   return b;
 }
 
+// EXP % straight from the game's HUD when there, else exp / maxExp (demo)
+function expPctOf(s) {
+  if (typeof s.expPct === 'number') return Math.max(0, Math.min(100, s.expPct));
+  return pct(s.exp, s.maxExp);
+}
+
 function renderProfile(a) {
   const d = detail || { stats: {}, rates: {}, buffs: [] };
   const s = d.stats || {};
@@ -139,22 +145,27 @@ function renderProfile(a) {
     s.jobLevel != null ? el('span', {}, '  Job ', el('b', {}, String(s.jobLevel))) : null,
     s.silver != null ? el('span', {}, '  Silver ', el('b', {}, short(s.silver))) : null,
     s.gold != null ? el('span', {}, '  Gold ', el('b', {}, num(s.gold))) : null,
+    d.net && d.net.ping != null ? el('span', { class: 'ping' }, `  ${d.net.ping} ms`) : null,
     s.name ? null : a.status === 'closed' ? 'กด "เปิดเกม" เพื่อเริ่ม' : 'ยังอ่านข้อมูลตัวละครไม่ได้',
   ].filter(Boolean));
   rebuild($('#d-buttons'), `${a.id}:${a.status}:${a.hidden}`, () => profileButtons(a));
 
+  const ep = expPctOf(s);
+  const hasExp = typeof s.expPct === 'number' || !!s.maxExp;
+  setWidth($('#d-exp'), ep);
   setWidth($('#d-hp'), pct(s.hp, s.maxHp));
   setWidth($('#d-sp'), pct(s.sp, s.maxSp));
-  setWidth($('#d-exp'), pct(s.exp, s.maxExp));
   $('#d-hp-t').textContent = s.maxHp ? `${num(s.hp)} / ${num(s.maxHp)}` : '';
   $('#d-sp-t').textContent = s.maxSp ? `${num(s.sp)} / ${num(s.maxSp)}` : '';
-  $('#d-exp-t').textContent = s.maxExp ? pct(s.exp, s.maxExp).toFixed(2) + '%' : '';
+  $('#d-exp-t').textContent = hasExp ? ep.toFixed(2) + '%' : '';
   let eta = '';
-  if (s.maxExp && typeof s.exp === 'number') {
-    const left = s.maxExp - s.exp;
+  if (hasExp) {
     eta = `Lv.${(s.level || 0) + 1}`;
-    if (r.expPerHour > 0) eta += ` อีก ~${dur((left / r.expPerHour) * 3600000)}`;
-    eta += ` · ขาด ${short(left)}`;
+    // real game: from how fast EXP % grows; demo: from exp / maxExp
+    const left = typeof s.expPct === 'number' ? r.expLeft : s.maxExp - s.exp;
+    const ms = typeof s.expPct === 'number' ? r.levelEtaMs : (r.expPerHour > 0 ? (left / r.expPerHour) * 3600000 : null);
+    if (ms > 0) eta += ` อีก ~${dur(ms)}`;
+    if (left > 0) eta += ` · ขาด ${short(left)}`;
   }
   $('#d-exp-eta').textContent = eta;
 
@@ -224,8 +235,12 @@ function renderMap() {
     ? [info.region.replace(/^Region [A-Z] · /, ''), info.min != null ? `Lv.${info.min}–${info.max}` : KIND_TEXT[info.kind]].filter(Boolean).join(' · ')
     : '';
   const img = $('#map-bg');
-  const src = info ? MAP_IMG + info.id + '.webp' : '';
-  if (img.dataset.src !== src) {
+  // the game's own minimap (map art + dots) when the game is running; wiki art otherwise
+  const live = d.minimap || '';
+  const src = live || (info ? MAP_IMG + info.id + '.webp' : '');
+  img.classList.toggle('live', !!live);
+  if (live) { img.dataset.src = src; img.src = src; img.hidden = false; }
+  else if (img.dataset.src !== src) {
     img.dataset.src = src;
     img.hidden = true;
     if (src) { img.onload = () => { img.hidden = false; }; img.onerror = () => { img.hidden = true; }; img.src = src; }
@@ -236,6 +251,7 @@ function renderMap() {
   $('#c-mon').textContent = w && w.monsters ? w.monsters.length : 0;
   $('#c-ply').textContent = w && w.players ? w.players.length : 0;
   $('#c-drop').textContent = w && w.drops ? w.drops.length : 0;
+  if (live) return; // already has the game's dots
   if (!w) {
     if (src) return;
     ctx.fillStyle = '#8f89ad';
@@ -304,6 +320,8 @@ function render() {
   const sum = (f) => live.reduce((t, a) => t + (typeof a.summary[f] === 'number' ? a.summary[f] : 0), 0);
   $('#k-silver').textContent = live.length ? num(sum('silver')) : '-';
   $('#k-silver-run').textContent = live.length ? signed(sum('silverToday')) : '-';
+  const online = Math.max(0, ...state.accounts.map((x) => (x.summary && x.summary.online) || 0));
+  $('#k-server').textContent = online ? num(online) : '-';
 
   const a = state.accounts.find((x) => x.id === selected);
   $('#detail').hidden = !a;
