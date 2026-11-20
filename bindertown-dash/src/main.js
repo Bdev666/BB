@@ -130,6 +130,10 @@ function placeOverDashboard(win) {
   win.setBounds({ x: d.x + Math.round((d.width - width) / 2), y: d.y + Math.round((d.height - height) / 2), width, height });
 }
 
+function chromeUA(ua) {
+  return ua.replace(/\sElectron\/\S+/, '').replace(/\s(bindertown-dash|BinderDash)\/\S+/i, '');
+}
+
 function isGameUrl(url) {
   try {
     const h = new URL(url).hostname;
@@ -608,6 +612,10 @@ function registerIpc() {
 app.on('second-instance', () => createDashboard());
 app.on('window-all-closed', () => { /* stay in the tray */ });
 app.on('before-quit', () => { quitting = true; });
+
+// Google refuses sign-in in browsers that announce Electron: every window (game pages and
+// their sign-in popups) presents itself as plain Chrome
+app.userAgentFallback = chromeUA(app.userAgentFallback);
 
 app.whenReady().then(() => {
   store = new Store(app.getPath('userData'));
