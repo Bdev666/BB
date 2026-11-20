@@ -11,6 +11,7 @@ const DEFAULTS = {
     notify: { disconnect: true, idle: true, crash: true, maintenance: true },
     telegram: { token: '', chatId: '' },
     debugCapture: false,     // save raw game messages to a local file (to map the game's data)
+    demo: false,             // fake data to preview the dashboard
   },
 };
 

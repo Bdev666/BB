@@ -2,15 +2,20 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
   <title>BinderDash</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header>
-    <h1>BinderDash <small>ไม่เป็นทางการ · อ่านข้อมูลอย่างเดียว ไม่เล่นแทน</small></h1>
+  <header class="topbar">
+    <div class="brand">BinderDash <small>ไม่เป็นทางการ · อ่านอย่างเดียว</small></div>
+    <div class="kpis">
+      <span>ออนไลน์ <b id="k-online">0 / 0</b></span>
+      <span>Silver รวม <b id="k-silver">-</b></span>
+      <span>Silver รอบนี้ <b id="k-silver-run" class="pos">-</b></span>
+    </div>
     <div class="actions">
-      <button id="add">+ เพิ่มบัญชี</button>
+      <button id="toggle-all" title="ซ่อน/แสดงหน้าต่างเกมทุกบัญชี">ซ่อน/แสดงเกมทั้งหมด</button>
       <button id="toggle-settings">ตั้งค่า</button>
     </div>
   </header>
@@ -39,14 +44,75 @@
       <p id="tg-msg" class="hint"></p>
     </div>
     <div class="col">
-      <h2>สำหรับนักพัฒนา</h2>
+      <h2>อื่น ๆ</h2>
+      <label><input type="checkbox" id="demo"> โหมดตัวอย่าง (ข้อมูลปลอม ไว้ดูหน้าตา Dashboard)</label>
       <label><input type="checkbox" id="debugCapture"> บันทึกข้อมูลจากเกมลงไฟล์ (ใช้แมปข้อมูลเกม)</label>
       <p class="hint">ไฟล์อยู่ในเครื่องเท่านั้น อาจมีข้อมูลส่วนตัว ห้ามส่งให้คนอื่น</p>
       <button id="open-captures">เปิดโฟลเดอร์ไฟล์</button>
     </div>
   </section>
 
-  <main id="cards"></main>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-head">
+        <span>บัญชี</span>
+        <button id="add" class="add">+ เพิ่ม</button>
+      </div>
+      <div id="accounts"></div>
+    </aside>
+
+    <main class="detail" id="detail">
+      <section class="panel profile">
+        <div class="profile-head">
+          <div class="avatar" id="d-avatar">?</div>
+          <div class="who">
+            <div class="row1"><span id="d-name" class="dname">-</span> <span id="d-status" class="badge"></span></div>
+            <div id="d-sub" class="sub">-</div>
+          </div>
+          <div class="pbuttons" id="d-buttons"></div>
+        </div>
+        <div class="bars">
+          <div class="barbox"><div class="barlabel"><span class="l-hp">HP</span><span id="d-hp-t"></span></div><div class="bar hp"><i id="d-hp"></i></div></div>
+          <div class="barbox"><div class="barlabel"><span class="l-sp">SP</span><span id="d-sp-t"></span></div><div class="bar sp"><i id="d-sp"></i></div></div>
+          <div class="barbox wide"><div class="barlabel"><span class="l-exp">EXP <small id="d-exp-eta"></small></span><span id="d-exp-t"></span></div><div class="bar exp"><i id="d-exp"></i></div></div>
+        </div>
+        <div class="statsrow">
+          <div class="attrs" id="d-attrs"></div>
+          <div class="buffs" id="d-buffs"></div>
+        </div>
+        <div class="tiles" id="d-tiles"></div>
+      </section>
+
+      <div class="logs">
+        <section class="panel log">
+          <div class="log-head"><h3>เหตุการณ์</h3><div class="chips" id="ev-chips"></div></div>
+          <div class="lines" id="ev-lines"></div>
+        </section>
+        <section class="panel log">
+          <div class="log-head"><h3>แชท</h3><div class="chips" id="chat-chips"></div></div>
+          <div class="lines" id="chat-lines"></div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="rightcol">
+      <section class="panel mapbox">
+        <div class="maptitle" id="d-map">-</div>
+        <canvas id="minimap" width="320" height="240"></canvas>
+      </section>
+      <section class="panel">
+        <div class="counts">
+          <div><b id="c-mon">0</b><span>มอน</span></div>
+          <div><b id="c-ply">0</b><span>ผู้เล่น</span></div>
+          <div><b id="c-drop">0</b><span>ของตก</span></div>
+        </div>
+      </section>
+      <section class="panel bag">
+        <h3>กระเป๋า</h3>
+        <div id="bag"></div>
+      </section>
+    </aside>
+  </div>
 
   <footer>Ctrl+Shift+D เปิด/ปิด Dashboard · F11 เต็มจอ · Ctrl+R โหลดหน้าเกมใหม่</footer>
   <script src="dashboard.js"></script>

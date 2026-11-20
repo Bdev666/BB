@@ -9,7 +9,9 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { parseMessage, ExpTracker } = require('./game-adapter');
+const { parseMessage } = require('./game-adapter');
+const { AccountData } = require('./session-data');
+const { DemoFeed } = require('./demo');
 
 const GAME_URL = 'https://play.bindertowngame.com/';
 const GAME_HOSTS = ['bindertowngame.com'];
@@ -37,8 +39,8 @@ function blankRuntime() {
     sockets: new Set(),
     closedSince: null,
     lastMsgAt: null,
-    stats: {},
-    exp: new ExpTracker(),
+    data: new AccountData(),
+    demo: null,
     alerts: new Set(), // active problems, e.g. 'disconnect', 'idle'
     loadedAt: null,
   };
@@ -59,10 +61,10 @@ function publicState() {
       return {
         id: a.id,
         name: a.name,
-        status: g.status,
+        status: g.demo ? 'demo' : g.status,
         hidden: !!(g.win && !g.win.isVisible()),
-        stats: g.stats,
-        expPerHour: g.exp.perHour(),
+        summary: g.data.summary(now),
+        memoryMB: g.memoryMB || null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
       };
@@ -108,7 +110,7 @@ function setAlert(id, key, on, text) {
 // ---------- game windows ----------
 function windowTitle(id) {
   const a = account(id);
-  const n = rt(id).stats.name;
+  const n = rt(id).data.stats.name;
   return n ? `${a.name} · ${n}` : a.name;
 }
 
@@ -143,6 +145,8 @@ function openGame(id) {
   g.status = 'loading';
   g.alerts.clear();
   g.loadedAt = Date.now();
+  g.demo = null;
+  g.data.reset();
   updateSleepBlocker();
 
   win.on('page-title-updated', (e) => { e.preventDefault(); win.setTitle(windowTitle(id)); });
@@ -235,13 +239,9 @@ function onFrame(id, frame) {
   if (store.data.settings.debugCapture) capture(id, frame);
   if (!text) return pushState();
 
-  const found = parseMessage(text);
-  if (found) {
-    const prevName = g.stats.name;
-    Object.assign(g.stats, found);
-    if (typeof found.exp === 'number') g.exp.add(found.exp, g.stats.level);
-    if (g.stats.name !== prevName && g.win && !g.win.isDestroyed()) g.win.setTitle(windowTitle(id));
-  }
+  const prevName = g.data.stats.name;
+  for (const ev of parseMessage(text)) g.data.ingest(ev);
+  if (g.data.stats.name !== prevName && g.win && !g.win.isDestroyed()) g.win.setTitle(windowTitle(id));
   pushState();
 }
 
@@ -284,8 +284,35 @@ function updateSleepBlocker() {
   if (!any && sleepBlocker !== null) { powerSaveBlocker.stop(sleepBlocker); sleepBlocker = null; }
 }
 
+// ---------- demo mode ----------
+function demoTick() {
+  const on = store.data.settings.demo;
+  store.data.accounts.forEach((a, i) => {
+    const g = rt(a.id);
+    const open = g.win && !g.win.isDestroyed();
+    if (on && !open) {
+      if (!g.demo) { g.demo = new DemoFeed(i); g.data.reset(); }
+      for (const ev of g.demo.tick()) g.data.ingest(ev);
+    } else if (g.demo) {
+      g.demo = null;
+      g.data.reset();
+    }
+  });
+  pushState();
+}
+
+// Memory used by each game window (shown on the account list)
+function updateMemory() {
+  const byPid = new Map(app.getAppMetrics().map((m) => [m.pid, m]));
+  for (const [, g] of openGames()) {
+    const m = byPid.get(g.win.webContents.getOSProcessId());
+    g.memoryMB = m && m.memory ? Math.round(m.memory.workingSetSize / 1024) : null;
+  }
+}
+
 // ---------- periodic checks ----------
 function tick() {
+  updateMemory();
   const s = store.data.settings;
   const now = Date.now();
   for (const [id, g] of openGames()) {
@@ -311,8 +338,10 @@ function tick() {
 function createDashboard() {
   if (dashboard && !dashboard.isDestroyed()) { dashboard.show(); dashboard.focus(); return; }
   dashboard = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    width: 1440,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
     title: 'BinderDash',
     icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
@@ -366,12 +395,19 @@ function handle(cmd, fn) { ipcMain.handle('dash:' + cmd, (_e, ...args) => fn(...
 
 function registerIpc() {
   handle('state', () => publicState());
+  handle('detail', (id) => {
+    if (!account(id)) return null;
+    const g = rt(id);
+    return g.data.detail();
+  });
   handle('open', (id) => {
     const nonPremiumWarning = openGames().length === 3;
     openGame(id);
     return { warnFreeLimit: nonPremiumWarning };
   });
   handle('show', (id) => showGame(id));
+  handle('reload', (id) => { const g = rt(id); if (g.win && !g.win.isDestroyed()) g.win.webContents.reload(); });
+  handle('toggle-all', () => toggleAllGames());
   handle('hide', (id) => hideGame(id));
   handle('close', (id) => closeGame(id));
   handle('add', () => {
@@ -407,6 +443,7 @@ function registerIpc() {
     if (patch.disconnectSeconds !== undefined) s.disconnectSeconds = Math.min(600, Math.max(15, Number(patch.disconnectSeconds) || 60));
     if (patch.notify) for (const k of Object.keys(s.notify)) if (k in patch.notify) s.notify[k] = !!patch.notify[k];
     if (patch.debugCapture !== undefined) s.debugCapture = !!patch.debugCapture;
+    if (patch.demo !== undefined) s.demo = !!patch.demo;
     store.save();
     pushState();
   });
@@ -455,4 +492,5 @@ app.whenReady().then(() => {
   createTray();
   createDashboard();
   setInterval(tick, 15 * 1000);
+  setInterval(demoTick, 500);
 });

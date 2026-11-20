@@ -8,9 +8,21 @@
 //   3. Replace FIELD_ALIASES / parseMessage below with the real field names
 //
 // This module only READS data. Nothing here sends anything to the game.
+//
+// parseMessage() returns a list of normalized events for session-data.js:
+//   { type:'self', name, job, level, jobLevel, hp, maxHp, sp, maxSp, exp, maxExp,
+//                  silver, gold, str, agi, vit, int, dex, luk, map }   (any subset)
+//   { type:'buffs', list:[{ name, until, stacks }] }
+//   { type:'hit', target, dmg, crit, skill }   { type:'miss', target }
+//   { type:'hurt', from, dmg }                  { type:'kill', target, exp, job }
+//   { type:'loot', item, qty }                  { type:'bag', items:[{ name, qty }] }
+//   { type:'chat', channel, from, guild, text } { type:'info', text }
+//   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[...], drops:[...] }
+// Only 'self' is produced until the real format is mapped.
 
 const FIELD_ALIASES = {
   name: ['name', 'charName', 'characterName', 'nickname'],
+  silver: ['silver'],
   level: ['level', 'lv', 'lvl'],
   hp: ['hp', 'curHp', 'currentHp'],
   maxHp: ['maxHp', 'hpMax', 'mhp'],
@@ -19,7 +31,7 @@ const FIELD_ALIASES = {
   exp: ['exp', 'xp', 'curExp'],
   maxExp: ['maxExp', 'expMax', 'nextExp', 'expToNext'],
   map: ['map', 'mapName', 'zone', 'mapId'],
-  gold: ['gold', 'money', 'coin', 'coins'],
+  gold: ['gold', 'coin', 'coins'],
 };
 
 const ALIAS_TO_FIELD = new Map();
@@ -62,10 +74,10 @@ function scan(node, depth, out) {
 
 function parseMessage(data) {
   const obj = decode(data);
-  if (!obj) return null;
+  if (!obj) return [];
   const out = {};
   scan(obj, 0, out);
-  return Object.keys(out).length ? out : null;
+  return Object.keys(out).length ? [{ type: 'self', ...out }] : [];
 }
 
 // Keeps a short history of EXP to estimate EXP/hour and time to level.
