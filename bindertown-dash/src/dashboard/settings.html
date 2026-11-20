@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>ตั้งค่า — BinderDash</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <nav class="nav">
+    <h1>ตั้งค่า</h1>
+    <a href="#general" data-tab="general">ทั่วไป</a>
+    <a href="#notify" data-tab="notify">แจ้งเตือน</a>
+    <a href="#telegram" data-tab="telegram">Telegram</a>
+    <a href="#data" data-tab="data">ข้อมูล</a>
+    <a href="#about" data-tab="about">เกี่ยวกับ</a>
+  </nav>
+
+  <main>
+    <!-- ทั่วไป -->
+    <section data-page="general">
+      <div class="card">
+        <h2>ทั่วไป</h2>
+        <div class="row">
+          <div><b>เปิด Dashboard พร้อมโปรแกรม</b><p>ถ้าปิด จะอยู่แค่ไอคอนมุมขวาล่าง กดเปิด Dashboard ได้จากไอคอนหรือ Ctrl+Shift+D</p></div>
+          <label class="switch"><input type="checkbox" data-set="openDashboardOnStart"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>เปิดทุกบัญชีตอนเปิดโปรแกรม</b><p>ถ้าไม่เลือก จะเปิดแค่ Dashboard แล้วกดเปิดเองทีละบัญชี</p></div>
+          <label class="switch"><input type="checkbox" data-set="openAllOnStart"><i></i></label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>ตัวเลือกเสริม</h2>
+        <div class="row col">
+          <div><b>เซิร์ฟเวอร์เกม</b><p>มีผลเมื่อเปิดโปรแกรมใหม่ · <span id="url-active"></span></p></div>
+          <div class="inline">
+            <input type="text" id="gameUrl" class="mono grow" spellcheck="false">
+            <button id="url-save" class="primary">บันทึก</button>
+            <button id="url-default">ค่าเริ่มต้น</button>
+          </div>
+        </div>
+        <div class="row">
+          <div><b>ล้างคุกกี้</b><p>ออกจากระบบเกมทุกบัญชี ต้องเข้าสู่ระบบใหม่ หน้าเกมที่เปิดอยู่จะโหลดใหม่</p></div>
+          <button id="clear-cookies" class="primary">ล้างคุกกี้</button>
+        </div>
+        <div class="row">
+          <div><b>ล้างแคชแล้วโหลดใหม่</b><p>เหมือน Ctrl+Shift+F5 ใน Chrome ไม่ได้ออกจากระบบ หน้าเกมที่เปิดอยู่จะโหลดใหม่</p></div>
+          <button id="clear-cache" class="primary">ล้างแคช</button>
+        </div>
+        <div class="row">
+          <div><b>คืน RAM หน้าเกมเอง</b><p>หน้าเกมที่ใช้ RAM เกิน <input type="number" id="ramLimitMB" min="500" max="8000" step="100"> MB จะโหลดใหม่ตอนไม่มีเรื่องผิดปกติ ทีละบัญชี (ไม่เกินครั้งละ 30 นาที) ตัวละครหลุดเกมแป๊บหนึ่งตอนโหลด</p></div>
+          <label class="switch"><input type="checkbox" data-set="autoRam"><i></i></label>
+        </div>
+      </div>
+    </section>
+
+    <!-- แจ้งเตือน -->
+    <section data-page="notify">
+      <div class="card">
+        <h2>แจ้งเตือน</h2>
+        <p class="lead">เด้งมุมจอ และไอคอน BinderDash มีจุดแดงจนกว่าเรื่องจะหาย คลิกเพื่อไปที่เกมบัญชีนั้น · บัญชีที่กำลังเล่นอยู่ (หน้าต่างเกมที่เปิดหน้าอยู่) ไม่เตือน</p>
+        <div class="row">
+          <div><b>หลุด และไม่ต่อกลับใน <input type="number" id="disconnectSeconds" min="15" max="600"> วินาที</b><p>นับตอนการเชื่อมต่อกับเซิร์ฟเวอร์เกมปิดหมด</p></div>
+          <label class="switch"><input type="checkbox" data-notify="disconnect"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>ตัวละครตาย</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <label class="switch"><input type="checkbox" data-notify="death"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>Auto Play น่าจะหยุด</b><p>ไม่ได้ตีเลย <input type="number" id="idleMinutes" min="1" max="120"> นาที · นับเฉพาะตอนต่ออยู่และยังไม่ตาย (ระหว่างที่ยังอ่านการตีไม่ได้ จะใช้ "ไม่มีข้อมูลจากเกม" แทน)</p></div>
+          <label class="switch"><input type="checkbox" data-notify="idle"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>มีคนกระซิบ</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <label class="switch"><input type="checkbox" data-notify="whisper"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>มีคนชวนหรือขอเข้าปาร์ตี้</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <label class="switch"><input type="checkbox" data-notify="party"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>ไอเทมใกล้หมด</b><p>ตั้งจำนวนได้ที่แท็บ "กระเป๋า" ใน Dashboard (กดที่ไอเทม) เช่น ยาน้อยกว่า 30</p></div>
+          <label class="switch"><input type="checkbox" data-notify="itemLow"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>หน้าเกมค้าง / หยุดทำงาน</b></div>
+          <label class="switch"><input type="checkbox" data-notify="crash"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>เกมปิดปรับปรุง</b><p>ระหว่างปิดปรับปรุง โปรแกรมลองโหลดใหม่เองทุก 2 นาที</p></div>
+          <label class="switch"><input type="checkbox" data-notify="maintenance"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>มีเสียง</b><p>ดังตาม volume ของ BinderDash ใน Volume mixer ของ Windows</p></div>
+          <label class="switch"><input type="checkbox" data-notify="sound"><i></i></label>
+        </div>
+        <div class="row">
+          <p>ถ้าไม่ขึ้น ดูที่ Settings ของ Windows › System › Notifications และปิด Do not disturb</p>
+          <button id="test-notify" class="primary">ลองแจ้งเตือน</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Telegram -->
+    <section data-page="telegram">
+      <div class="card">
+        <h2>Telegram</h2>
+        <p class="lead">ส่งแจ้งเตือนเข้า Telegram ด้วย (ไม่บังคับ แจ้งเตือนของ Windows ยังอยู่เหมือนเดิม)</p>
+        <ol class="steps">
+          <li>ใน Telegram คุยกับ <b>@BotFather</b> พิมพ์ <code>/newbot</code> แล้วตั้งชื่อบอท จะได้ KEY มา</li>
+          <li>เปิดแชทกับบอทของคุณแล้วกด <b>START</b> (หรือส่งอะไรก็ได้ให้บอท)</li>
+          <li>วาง KEY ด้านล่างแล้วกด "เชื่อมต่อ" บอทจะทักกลับมา</li>
+        </ol>
+        <div id="tg-off" class="row">
+          <input type="password" id="tg-token" class="mono grow" placeholder="KEY ของบอท">
+          <button id="tg-connect" class="primary">เชื่อมต่อ</button>
+        </div>
+        <div id="tg-on" class="row" hidden>
+          <div><b>เชื่อมต่อแล้ว</b><p>แจ้งเตือนที่เปิดไว้จะเด้งทั้งใน Windows และ Telegram</p></div>
+          <button id="tg-disconnect">เลิกเชื่อมต่อ</button>
+        </div>
+        <p id="tg-msg" class="msg"></p>
+        <p class="lead">ข้อความแจ้งเตือน (ชื่อตัวละคร ข้อความกระซิบ) ผ่านเซิร์ฟเวอร์ของ Telegram · อย่าบอก KEY ให้ใคร · เลิกใช้แล้วกด "เลิกเชื่อมต่อ"</p>
+      </div>
+    </section>
+
+    <!-- ข้อมูล -->
+    <section data-page="data">
+      <div class="card">
+        <h2>ข้อมูลในเครื่อง</h2>
+        <p class="lead">login และการตั้งค่าเกมของทุกบัญชีอยู่ในโฟลเดอร์นี้</p>
+        <div class="row">
+          <input type="text" id="userData" class="mono grow" readonly>
+          <button id="open-userdata" class="primary">เปิดโฟลเดอร์</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>สำหรับนักพัฒนา</h2>
+        <div class="row">
+          <div><b>โหมดตัวอย่าง</b><p>ใช้ข้อมูลปลอมกับบัญชีที่ยังไม่เปิดเกม ไว้ดูหน้าตา Dashboard ไม่แจ้งเตือน</p></div>
+          <label class="switch"><input type="checkbox" data-set="demo"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>บันทึกข้อมูลจากเกมลงไฟล์</b><p>ใช้แมปข้อมูลเกม · ไฟล์อยู่ในเครื่องเท่านั้น อาจมีข้อมูลส่วนตัว ห้ามส่งให้คนอื่น</p></div>
+          <label class="switch"><input type="checkbox" data-set="debugCapture"><i></i></label>
+        </div>
+        <div class="row">
+          <p>ไฟล์ที่บันทึกไว้</p>
+          <button id="open-captures">เปิดโฟลเดอร์ captures</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- เกี่ยวกับ -->
+    <section data-page="about">
+      <div class="card">
+        <h2>เกี่ยวกับ</h2>
+        <div class="about">
+          <div class="logo">B</div>
+          <div><b class="big">BinderDash</b> <span id="version"></span><p id="author"></p></div>
+        </div>
+        <p class="lead">โปรแกรมแฟนเมดสำหรับเล่น Binder Town หลายบัญชี ไม่เป็นทางการ ไม่เกี่ยวข้องกับผู้พัฒนาเกม · อ่านข้อมูลอย่างเดียว ไม่คลิกหรือเล่นแทน</p>
+      </div>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

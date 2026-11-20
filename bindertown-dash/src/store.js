@@ -6,9 +6,20 @@ const DEFAULTS = {
   accounts: [{ id: 1, name: 'บัญชี 1' }],
   nextId: 2,
   settings: {
-    idleMinutes: 5,          // no server data for this long -> warn
+    // general
+    openDashboardOnStart: true,
+    openAllOnStart: false,
+    gameUrl: '',             // empty = default server; takes effect after restart
+    autoRam: false,          // reload a game page whose memory passes ramLimitMB
+    ramLimitMB: 1500,
+    // notifications
+    idleMinutes: 5,          // no hits (or no data) for this long -> warn
     disconnectSeconds: 60,   // socket closed this long -> warn
-    notify: { disconnect: true, idle: true, crash: true, maintenance: true },
+    notify: {
+      disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
+      crash: true, maintenance: true, sound: true,
+    },
+    itemWatch: {},           // item name -> warn when count drops below this
     telegram: { token: '', chatId: '' },
     debugCapture: false,     // save raw game messages to a local file (to map the game's data)
     demo: false,             // fake data to preview the dashboard
@@ -29,6 +40,7 @@ class Store {
           ...saved.settings,
           notify: { ...DEFAULTS.settings.notify, ...(saved.settings || {}).notify },
           telegram: { ...DEFAULTS.settings.telegram, ...(saved.settings || {}).telegram },
+          itemWatch: { ...(saved.settings || {}).itemWatch },
         },
       };
     } catch { /* first run */ }

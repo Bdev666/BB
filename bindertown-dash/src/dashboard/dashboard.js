@@ -232,14 +232,42 @@ function renderMap() {
   if (w.self) { dot(w.self, 7, '#ffffff55'); dot(w.self, 4.5, '#ffb547'); }
 }
 
+let watchEditing = null; // item name whose limit is being edited
 function renderBag() {
+  if (watchEditing) return;
+  const watch = (state && state.settings.itemWatch) || {};
   const items = ((detail && detail.bag) || []).slice().sort((a, b) => b.qty - a.qty);
-  $('#bag').replaceChildren(...(items.length ? items.map((it) => el('div', { class: 'item' },
-    el('div', { class: 'ic' }, it.name.slice(0, 1)),
-    el('div', { class: 'nm' }, it.name, el('small', {},
-      [it.usedPerHour > 0 ? `ใช้ ${short(it.usedPerHour)}/ชม.` : null, it.gainedPerHour > 0 ? `เก็บได้ ${short(it.gainedPerHour)}/ชม.` : null]
-        .filter(Boolean).join(' · ') || ' ')),
-    el('div', { class: 'q' }, num(it.qty)))) : [el('div', { class: 'empty' }, 'ยังไม่มีข้อมูลกระเป๋า')]));
+  $('#bag').replaceChildren(...(items.length ? items.map((it) => {
+    const limit = watch[it.name];
+    const low = limit != null && it.qty < limit;
+    const row = el('div', { class: 'item' + (low ? ' low' : ''), title: 'กดเพื่อตั้งเตือนใกล้หมด' },
+      el('div', { class: 'ic' }, it.name.slice(0, 1)),
+      el('div', { class: 'nm' }, it.name, el('small', {},
+        [limit != null ? `เตือนเมื่อ < ${num(limit)}` : null,
+          it.usedPerHour > 0 ? `ใช้ ${short(it.usedPerHour)}/ชม.` : null,
+          it.gainedPerHour > 0 ? `เก็บได้ ${short(it.gainedPerHour)}/ชม.` : null]
+          .filter(Boolean).join(' · ') || ' ')),
+      el('div', { class: 'q' }, num(it.qty)));
+    row.addEventListener('click', () => editWatch(row, it.name, limit));
+    return row;
+  }) : [el('div', { class: 'empty' }, 'ยังไม่มีข้อมูลกระเป๋า')]));
+}
+
+function editWatch(row, name, limit) {
+  watchEditing = name;
+  const input = el('input', { type: 'number', min: '0', class: 'watch', placeholder: 'จำนวน', value: limit != null ? String(limit) : '' });
+  const done = (save) => {
+    if (!watchEditing) return;
+    watchEditing = null;
+    if (save) dash.invoke('item-watch', name, input.value === '' || input.value === '0' ? null : input.value);
+    renderBag();
+  };
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
+  input.addEventListener('blur', () => done(true));
+  row.lastChild.replaceWith(el('div', { class: 'q' }, el('small', { class: 'hint' }, 'เตือนเมื่อน้อยกว่า '), input));
+  input.focus();
+  input.select();
 }
 
 // ---------- top level ----------
@@ -264,16 +292,6 @@ function render() {
     renderBag();
   }
 
-  const st = state.settings;
-  if (document.activeElement?.tagName !== 'INPUT') {
-    for (const box of document.querySelectorAll('[data-notify]')) box.checked = !!st.notify[box.dataset.notify];
-    $('#idleMinutes').value = st.idleMinutes;
-    $('#disconnectSeconds').value = st.disconnectSeconds;
-    $('#debugCapture').checked = !!st.debugCapture;
-    $('#demo').checked = !!st.demo;
-  }
-  $('#tg-on').hidden = !st.telegram.connected;
-  $('#tg-off').hidden = st.telegram.connected;
 }
 
 async function refreshDetail() {
@@ -304,23 +322,7 @@ $('#add').addEventListener('click', async () => {
   else { selected = id; refreshDetail(); }
 });
 $('#toggle-all').addEventListener('click', () => dash.invoke('toggle-all'));
-$('#toggle-settings').addEventListener('click', () => { $('#settings').hidden = !$('#settings').hidden; });
-for (const box of document.querySelectorAll('[data-notify]')) {
-  box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
-}
-$('#idleMinutes').addEventListener('change', (e) => dash.invoke('settings', { idleMinutes: e.target.value }));
-$('#disconnectSeconds').addEventListener('change', (e) => dash.invoke('settings', { disconnectSeconds: e.target.value }));
-$('#debugCapture').addEventListener('change', (e) => dash.invoke('settings', { debugCapture: e.target.checked }));
-$('#demo').addEventListener('change', (e) => dash.invoke('settings', { demo: e.target.checked }));
-$('#open-captures').addEventListener('click', () => dash.invoke('open-captures'));
-$('#test-notify').addEventListener('click', () => dash.invoke('test-notify'));
-$('#tg-connect').addEventListener('click', async () => {
-  $('#tg-msg').textContent = 'กำลังเชื่อมต่อ...';
-  const r = await dash.invoke('telegram-connect', $('#tg-token').value);
-  $('#tg-msg').textContent = r.ok ? 'เชื่อมต่อแล้ว บอทส่งข้อความทักทายไปแล้ว' : r.error;
-  if (r.ok) $('#tg-token').value = '';
-});
-$('#tg-disconnect').addEventListener('click', () => dash.invoke('telegram-disconnect'));
+$('#toggle-settings').addEventListener('click', () => dash.invoke('open-settings'));
 
 dash.onState((s) => { state = s; render(); });
 dash.invoke('state').then((s) => { state = s; render(); refreshDetail(); });

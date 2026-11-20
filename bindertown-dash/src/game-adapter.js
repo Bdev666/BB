@@ -16,7 +16,8 @@
 //   { type:'hit', target, dmg, crit, skill }   { type:'miss', target }
 //   { type:'hurt', from, dmg }                  { type:'kill', target, exp, job }
 //   { type:'loot', item, qty }                  { type:'bag', items:[{ name, qty }] }
-//   { type:'chat', channel, from, guild, text } { type:'info', text }
+//   { type:'chat', channel, from, guild, text, mine } { type:'info', text }
+//   { type:'death', by } { type:'revive' }     { type:'party', from, text }
 //   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[...], drops:[...] }
 // Only 'self' is produced until the real format is mapped.
 

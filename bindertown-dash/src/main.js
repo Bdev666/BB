@@ -2,7 +2,7 @@
 // Unofficial. Read-only: it watches the game, it never plays for you.
 const {
   app, BrowserWindow, Tray, Menu, Notification, ipcMain, nativeImage,
-  powerSaveBlocker, shell, dialog,
+  powerSaveBlocker, shell, dialog, session,
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +13,8 @@ const { parseMessage } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 
-const GAME_URL = 'https://play.bindertowngame.com/';
+const DEFAULT_GAME_URL = 'https://play.bindertowngame.com/';
+let gameUrl = DEFAULT_GAME_URL; // read from settings once at startup
 const GAME_HOSTS = ['bindertowngame.com'];
 const MAX_ACCOUNTS = 10;
 
@@ -26,6 +27,7 @@ app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 let store;
 let dashboard = null;
+let settingsWin = null;
 let tray = null;
 let quitting = false;
 let sleepBlocker = null;
@@ -77,7 +79,8 @@ function pushState() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    if (dashboard && !dashboard.isDestroyed()) dashboard.webContents.send('dash:state', publicState());
+    const st = publicState();
+    for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:state', st);
     updateTray();
   }, 250);
 }
@@ -86,10 +89,14 @@ function pushState() {
 function notify(id, kind, text) {
   const s = store.data.settings;
   if (s.notify[kind] === false) return;
+  const g = rt(id);
+  if (g.demo) return; // demo data never notifies
+  // don't interrupt the account you're looking at right now
+  if (g.win && !g.win.isDestroyed() && g.win.isVisible() && g.win.isFocused()) return;
   const a = account(id);
-  const title = a ? `${a.name}` : 'BinderDash';
+  const title = a ? (g.data.stats.name ? `${a.name} · ${g.data.stats.name}` : a.name) : 'BinderDash';
   if (Notification.isSupported()) {
-    const n = new Notification({ title, body: text, icon: nativeImage.createFromDataURL(icons.alert) });
+    const n = new Notification({ title, body: text, silent: !s.notify.sound, icon: nativeImage.createFromDataURL(icons.alert) });
     n.on('click', () => showGame(id));
     n.show();
   }
@@ -203,7 +210,7 @@ function openGame(id) {
   wc.on('did-start-loading', () => { g.sockets.clear(); g.loadedAt = Date.now(); });
 
   attachWatcher(id, wc);
-  win.loadURL(GAME_URL);
+  win.loadURL(gameUrl);
   pushState();
 }
 
@@ -232,7 +239,6 @@ function onFrame(id, frame) {
   g.lastMsgAt = Date.now();
   if (g.status !== 'online') { g.status = 'online'; }
   if (g.alerts.has('disconnect')) setAlert(id, 'disconnect', false);
-  if (g.alerts.has('idle')) setAlert(id, 'idle', false);
 
   // opcode 1 = text frame; binary frames come base64-encoded
   const text = frame.opcode === 1 ? frame.payloadData : null;
@@ -240,7 +246,7 @@ function onFrame(id, frame) {
   if (!text) return pushState();
 
   const prevName = g.data.stats.name;
-  for (const ev of parseMessage(text)) g.data.ingest(ev);
+  handleEvents(id, parseMessage(text));
   if (g.data.stats.name !== prevName && g.win && !g.win.isDestroyed()) g.win.setTitle(windowTitle(id));
   pushState();
 }
@@ -284,6 +290,40 @@ function updateSleepBlocker() {
   if (!any && sleepBlocker !== null) { powerSaveBlocker.stop(sleepBlocker); sleepBlocker = null; }
 }
 
+// ---------- game events -> data + notifications ----------
+function handleEvents(id, events) {
+  const g = rt(id);
+  const s = store.data.settings;
+  for (const ev of events) {
+    g.data.ingest(ev);
+    switch (ev.type) {
+      case 'hit':
+      case 'kill':
+        g.lastHitAt = Date.now();
+        if (g.alerts.has('idle')) setAlert(id, 'idle', false);
+        break;
+      case 'death': setAlert(id, 'death', true, 'ตัวละครตาย'); break;
+      case 'revive': setAlert(id, 'death', false); break;
+      case 'chat':
+        if (ev.channel === 'whisper' && !ev.mine) notify(id, 'whisper', `กระซิบจาก ${ev.from}: ${ev.text}`);
+        break;
+      case 'party':
+        notify(id, 'party', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`);
+        break;
+      case 'bag':
+        for (const it of ev.items || []) {
+          const limit = s.itemWatch[it.name];
+          const key = 'item:' + it.name;
+          if (limit == null) { g.alerts.delete(key); continue; }
+          if (it.qty < limit) setAlert(id, key, true, `${it.name} เหลือ ${it.qty} (ตั้งไว้ต่ำกว่า ${limit})`);
+          else if (g.alerts.has(key)) setAlert(id, key, false);
+        }
+        break;
+      default: break;
+    }
+  }
+}
+
 // ---------- demo mode ----------
 function demoTick() {
   const on = store.data.settings.demo;
@@ -292,7 +332,7 @@ function demoTick() {
     const open = g.win && !g.win.isDestroyed();
     if (on && !open) {
       if (!g.demo) { g.demo = new DemoFeed(i); g.data.reset(); }
-      for (const ev of g.demo.tick()) g.data.ingest(ev);
+      handleEvents(a.id, g.demo.tick());
     } else if (g.demo) {
       g.demo = null;
       g.data.reset();
@@ -327,8 +367,18 @@ function tick() {
       g.status = 'disconnected';
       setAlert(id, 'disconnect', true, `หลุดจากเซิร์ฟเวอร์เกิน ${s.disconnectSeconds} วินาที`);
     }
-    if (g.status === 'online' && g.lastMsgAt && now - g.lastMsgAt > s.idleMinutes * 60 * 1000) {
-      setAlert(id, 'idle', true, `ไม่มีข้อมูลจากเกม ${s.idleMinutes} นาที · AUTO อาจหยุด`);
+    // Auto Play probably stopped: no hits for N minutes (only while connected and alive).
+    // Until hits can be read from the game, fall back to "no data at all".
+    const lastActivity = g.lastHitAt || g.lastMsgAt;
+    if (g.status === 'online' && !g.alerts.has('death') && lastActivity && now - lastActivity > s.idleMinutes * 60 * 1000) {
+      setAlert(id, 'idle', true, g.lastHitAt ? `ไม่ได้ตีเลย ${s.idleMinutes} นาที · Auto Play น่าจะหยุด` : `ไม่มีข้อมูลจากเกม ${s.idleMinutes} นาที · AUTO อาจหยุด`);
+    }
+    // Give back RAM: reload a page that grew past the limit (at most every 30 min, not while something's wrong)
+    if (s.autoRam && g.memoryMB > s.ramLimitMB && g.status === 'online' && g.alerts.size === 0
+        && (!g.ramReloadAt || now - g.ramReloadAt > 30 * 60 * 1000)) {
+      g.ramReloadAt = now;
+      g.data.log('other', `หน้าเกมใช้ RAM ${g.memoryMB} MB เกิน ${s.ramLimitMB} MB · โหลดใหม่เพื่อคืน RAM`);
+      g.win.webContents.reload();
     }
   }
   pushState();
@@ -365,6 +415,29 @@ function toggleDashboard() {
   else createDashboard();
 }
 
+// ---------- settings window ----------
+function openSettings(tab) {
+  if (settingsWin && !settingsWin.isDestroyed()) {
+    settingsWin.show(); settingsWin.focus();
+    if (tab) settingsWin.webContents.send('settings:tab', tab);
+    return;
+  }
+  settingsWin = new BrowserWindow({
+    width: 860,
+    height: 680,
+    minWidth: 640,
+    minHeight: 480,
+    title: 'ตั้งค่า — BinderDash',
+    icon: nativeImage.createFromDataURL(icons.normal),
+    autoHideMenuBar: true,
+    backgroundColor: '#0d0c16',
+    webPreferences: { preload: path.join(__dirname, 'preload-dashboard.js'), contextIsolation: true, sandbox: true },
+  });
+  settingsWin.loadFile(path.join(__dirname, 'dashboard', 'settings.html'), { hash: tab || '' });
+  settingsWin.on('page-title-updated', (e) => e.preventDefault());
+  settingsWin.on('closed', () => { settingsWin = null; });
+}
+
 // ---------- tray ----------
 function updateTray() {
   if (!tray) return;
@@ -382,6 +455,7 @@ function createTray() {
   tray = new Tray(nativeImage.createFromDataURL(icons.normal));
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Dashboard', click: createDashboard },
+    { label: 'ตั้งค่า', click: () => openSettings() },
     { label: 'ซ่อน/แสดงเกมทั้งหมด', click: toggleAllGames },
     { type: 'separator' },
     { label: 'ออกจากโปรแกรม', click: () => { quitting = true; app.quit(); } },
@@ -433,12 +507,17 @@ function registerIpc() {
     store.save();
     games.delete(id);
     // forget this account's login
-    const { session } = require('electron');
     await session.fromPartition(`persist:acc-${id}`).clearStorageData().catch(() => {});
     pushState();
   });
   handle('settings', (patch) => {
     const s = store.data.settings;
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.ramLimitMB !== undefined) s.ramLimitMB = Math.min(8000, Math.max(500, Number(patch.ramLimitMB) || 1500));
+    if (patch.gameUrl !== undefined) {
+      const u = String(patch.gameUrl).trim();
+      s.gameUrl = /^https:\/\/[^\s]+$/.test(u) && u !== DEFAULT_GAME_URL ? u : '';
+    }
     if (patch.idleMinutes !== undefined) s.idleMinutes = Math.min(120, Math.max(1, Number(patch.idleMinutes) || 5));
     if (patch.disconnectSeconds !== undefined) s.disconnectSeconds = Math.min(600, Math.max(15, Number(patch.disconnectSeconds) || 60));
     if (patch.notify) for (const k of Object.keys(s.notify)) if (k in patch.notify) s.notify[k] = !!patch.notify[k];
@@ -470,9 +549,37 @@ function registerIpc() {
   handle('test-notify', () => {
     const first = store.data.accounts[0];
     const s = store.data.settings;
-    if (Notification.isSupported()) new Notification({ title: 'BinderDash', body: 'ทดสอบการแจ้งเตือน' }).show();
+    if (Notification.isSupported()) new Notification({ title: 'BinderDash', body: 'ทดสอบการแจ้งเตือน', silent: !s.notify.sound }).show();
     telegram.send(s.telegram.token, s.telegram.chatId, 'BinderDash: ทดสอบการแจ้งเตือน').catch(() => {});
     return !!first;
+  });
+  handle('item-watch', (name, limit) => {
+    const w = store.data.settings.itemWatch;
+    const n = Number(limit);
+    if (limit === null || limit === '' || !(n > 0)) delete w[name];
+    else w[name] = Math.floor(n);
+    store.save();
+    pushState();
+  });
+  handle('open-settings', (tab) => openSettings(tab));
+  handle('app-info', () => ({
+    name: 'BinderDash',
+    version: app.getVersion(),
+    author: require('../package.json').author || '',
+    userData: app.getPath('userData'),
+    defaultGameUrl: DEFAULT_GAME_URL,
+    activeGameUrl: gameUrl,
+  }));
+  handle('open-userdata', () => shell.openPath(app.getPath('userData')));
+  handle('clear-cookies', async () => {
+    for (const a of store.data.accounts) {
+      await session.fromPartition(`persist:acc-${a.id}`).clearStorageData({ storages: ['cookies', 'localstorage', 'indexdb'] }).catch(() => {});
+    }
+    for (const [, g] of openGames()) g.win.webContents.reload();
+  });
+  handle('clear-cache', async () => {
+    for (const a of store.data.accounts) await session.fromPartition(`persist:acc-${a.id}`).clearCache().catch(() => {});
+    for (const [, g] of openGames()) g.win.webContents.reloadIgnoringCache();
   });
   handle('open-captures', () => {
     const dir = path.join(app.getPath('userData'), 'captures');
@@ -488,9 +595,11 @@ app.on('before-quit', () => { quitting = true; });
 
 app.whenReady().then(() => {
   store = new Store(app.getPath('userData'));
+  gameUrl = store.data.settings.gameUrl || DEFAULT_GAME_URL;
   registerIpc();
   createTray();
-  createDashboard();
+  if (store.data.settings.openDashboardOnStart) createDashboard();
+  if (store.data.settings.openAllOnStart) store.data.accounts.forEach((a, i) => setTimeout(() => openGame(a.id), i * 1500));
   setInterval(tick, 15 * 1000);
   setInterval(demoTick, 500);
 });

@@ -22,35 +22,6 @@
 
   <div id="banner" class="banner" hidden></div>
 
-  <section id="settings" class="settings" hidden>
-    <div class="col">
-      <h2>แจ้งเตือน</h2>
-      <label><input type="checkbox" data-notify="disconnect"> หลุดจากเกม</label>
-      <label><input type="checkbox" data-notify="idle"> ไม่มีข้อมูลจากเกม (AUTO อาจหยุด)</label>
-      <label><input type="checkbox" data-notify="crash"> หน้าเกมค้าง/หยุดทำงาน</label>
-      <label><input type="checkbox" data-notify="maintenance"> เกมปิดปรับปรุง</label>
-      <label>เตือนเมื่อหลุดเกิน <input type="number" id="disconnectSeconds" min="15" max="600"> วินาที</label>
-      <label>เตือนเมื่อไม่มีข้อมูล <input type="number" id="idleMinutes" min="1" max="120"> นาที</label>
-      <button id="test-notify">ทดสอบการแจ้งเตือน</button>
-    </div>
-    <div class="col">
-      <h2>Telegram</h2>
-      <p class="hint">1) คุยกับ @BotFather พิมพ์ /newbot ได้ KEY มา 2) เปิดแชทกับบอทของคุณแล้วกด START 3) วาง KEY แล้วกดเชื่อมต่อ</p>
-      <div id="tg-off">
-        <input type="password" id="tg-token" placeholder="KEY ของบอท">
-        <button id="tg-connect">เชื่อมต่อ</button>
-      </div>
-      <div id="tg-on" hidden>เชื่อมต่อแล้ว <button id="tg-disconnect">เลิกเชื่อมต่อ</button></div>
-      <p id="tg-msg" class="hint"></p>
-    </div>
-    <div class="col">
-      <h2>อื่น ๆ</h2>
-      <label><input type="checkbox" id="demo"> โหมดตัวอย่าง (ข้อมูลปลอม ไว้ดูหน้าตา Dashboard)</label>
-      <label><input type="checkbox" id="debugCapture"> บันทึกข้อมูลจากเกมลงไฟล์ (ใช้แมปข้อมูลเกม)</label>
-      <p class="hint">ไฟล์อยู่ในเครื่องเท่านั้น อาจมีข้อมูลส่วนตัว ห้ามส่งให้คนอื่น</p>
-      <button id="open-captures">เปิดโฟลเดอร์ไฟล์</button>
-    </div>
-  </section>
 
   <div class="layout">
     <aside class="sidebar">
@@ -108,7 +79,7 @@
         </div>
       </section>
       <section class="panel bag">
-        <h3>กระเป๋า</h3>
+        <h3>กระเป๋า <small class="hint">กดที่ไอเทมเพื่อตั้งเตือนใกล้หมด</small></h3>
         <div id="bag"></div>
       </section>
     </aside>

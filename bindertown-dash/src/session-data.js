@@ -73,6 +73,9 @@ class AccountData {
         break;
       case 'world': this.world = { ...this.world, ...ev }; delete this.world.type; break;
       case 'info': this.log('other', ev.text, t); break;
+      case 'death': this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
+      case 'revive': this.log('other', 'ฟื้นแล้ว', t); break;
+      case 'party': this.log('other', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`, t); break;
       default: break;
     }
   }
