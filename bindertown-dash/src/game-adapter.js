@@ -19,8 +19,10 @@
 //   { type:'chat', channel, from, guild, text, mine, backlog } { type:'info', text }
 //   { type:'death', by } { type:'revive' }     { type:'party', from, text }
 //   { type:'net', ping, online }               { type:'minimap', url }
+//   { type:'buffs', list:[{ name, until, stacks }] }
 //   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[{x,y}], drops:[] }
 const { unpack } = require('msgpackr');
+const DROP_NAMES = require('./drop-names');
 
 const ROOM_DATA = 13;
 
@@ -83,11 +85,24 @@ function serverEvents(message) {
   return e ? [e] : [];
 }
 
-const pretty = (id) => String(id || '?')
-  .replace(/~.*$/, '')
-  .replace(/^(drop|cash|mat)_/, '')
+const titleCase = (id) => String(id || '?')
   .split(/[_\s]+/).filter(Boolean)
   .map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+// item / mob / skill id -> display name ("yellow_potion" -> "Yellow Potion", drop_<mob> -> the drop's name)
+function pretty(id) {
+  const base = String(id || '?').replace(/[~#^|+].*$/, '').replace(/^cash:/, '');
+  const drop = /^drop_(.+)$/.exec(base);
+  if (drop) return DROP_NAMES[drop[1]] || `${titleCase(drop[1])} (ดรอป)`;
+  return titleCase(base);
+}
+
+function announcementText(e) {
+  if (e.text) return String(e.text);
+  if (e.kind === 'epic' && e.item) return `${e.name} ได้ ${e.item}${e.mob ? ` จาก ${pretty(e.mob)}${e.mobLevel ? ` Lv ${e.mobLevel}` : ''}` : ''}${e.map ? ` (${e.map})` : ''}`;
+  if (e.kind === 'refine' && e.item) return `${e.name} ตีบวก ${e.item} +${e.level} สำเร็จ`;
+  if (e.name && e.item) return `${e.name} · ${e.item}`;
+  return '';
+}
 
 // Runs in the game page (main world). Read-only: reads window.__game and two HUD texts.
 const SNAPSHOT_JS = `(() => {
@@ -104,6 +119,8 @@ const SNAPSHOT_JS = `(() => {
   try { st.players.forEach((p, id) => { if (p === me) sessionId = id; else players.push([+p.x || 0, +p.y || 0, p.name || '']); }); } catch (e) {}
   const mobs = {};
   try { st.mobs.forEach((m, id) => { mobs[id] = [m.mobType || '', m.level || 0, +m.x || 0, +m.y || 0, m.state || '', m.ownerId || '']; }); } catch (e) {}
+  const loots = [];
+  try { st.loots && st.loots.forEach((l) => loots.push([+l.x || 0, +l.y || 0])); } catch (e) {}
   const txt = (id) => { const el = document.getElementById(id); return el ? el.textContent : ''; };
   let mapId = ''; try { mapId = g.mapId(); } catch (e) {}
   let mini = '';
@@ -111,7 +128,7 @@ const SNAPSHOT_JS = `(() => {
     window.__bdMiniAt = Date.now();
     try { const c = document.getElementById('minimap'); if (c && c.width) mini = c.toDataURL('image/png'); } catch (e) {}
   }
-  return { ready: true, sessionId, self, players, mobs, mapId, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
+  return { ready: true, sessionId, self, players, mobs, loots, mapId, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
 })()`;
 
 // One per account: keeps what's needed to give events names and owners.
@@ -201,9 +218,11 @@ class BinderTownAdapter {
       case 'chatBacklog':
         for (const l of e.lines || []) out.push(this.chat(l, l.at || at, true));
         break;
-      case 'announcement':
-        out.push({ type: 'chat', channel: 'system', from: '', text: String(e.text || ''), backlog: false, t: at });
+      case 'announcement': {
+        const text = announcementText(e);
+        if (text) out.push({ type: 'chat', channel: 'system', from: '', text, backlog: false, t: at });
         break;
+      }
       case 'notice': if (e.text) out.push({ type: 'info', text: String(e.text), t: at }); break;
       case 'maintenance': out.push({ type: 'info', text: 'เกมแจ้งปิดปรับปรุง', t: at }); break;
       case 'socialInvite':
@@ -283,7 +302,7 @@ class BinderTownAdapter {
       xp: num(me.xp), expPct: pct(s.xpText), jobPct: pct(s.jobText),
       silver: num(me.silver), gold: num(me.gold ?? me.gems),
       str: num(me.str), agi: num(me.agi), vit: num(me.vit), int: num(me.int), dex: num(me.dex), luk: num(me.luk),
-      map: s.mapId || undefined, dead: me.state === 'dead',
+      map: s.mapId || undefined, dead: me.state === 'dead', premium: typeof me.premium === 'boolean' ? me.premium : undefined,
     };
     for (const k of Object.keys(self)) if (self[k] === undefined) delete self[k];
     out.push(self);
@@ -294,9 +313,17 @@ class BinderTownAdapter {
       type: 'world', t: at,
       w: Math.max(1, ...xs) + 2, h: Math.max(1, ...ys) + 2,
       self: typeof me.x === 'number' ? { x: me.x, y: me.y } : null,
-      monsters, players: (s.players || []).map((p) => ({ x: p[0], y: p[1], name: p[2] })), drops: [],
+      monsters, players: (s.players || []).map((p) => ({ x: p[0], y: p[1], name: p[2] })),
+      drops: (s.loots || []).map((l) => ({ x: l[0], y: l[1] })),
     });
     if (s.mini) out.push({ type: 'minimap', url: s.mini, t: at });
+    // buffs / effects: a JSON list of { kind, until, stacks }
+    try {
+      const list = JSON.parse(me.effects || '[]')
+        .filter((x) => x && x.kind && x.kind !== 'offready')
+        .map((x) => ({ name: pretty(x.kind), until: x.until > 0 ? x.until : undefined, stacks: x.stacks > 1 ? x.stacks : undefined }));
+      out.push({ type: 'buffs', list, t: at });
+    } catch { /* not JSON */ }
     return out;
   }
 }

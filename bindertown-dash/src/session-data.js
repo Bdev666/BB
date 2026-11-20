@@ -60,7 +60,9 @@ class AccountData {
         const { type, t: _t, ...rest } = ev;
         Object.assign(this.stats, rest);
         const total = typeof rest.xp === 'number' ? rest.xp : rest.exp;
-        if (typeof total === 'number') this.expTracker.add(total, this.stats.level, t);
+        // the game's xp is a running total (doesn't restart at level up); demo exp does
+        if (typeof rest.xp === 'number') this.expTracker.add(rest.xp, undefined, t);
+        else if (typeof total === 'number') this.expTracker.add(total, this.stats.level, t);
         if (typeof rest.expPct === 'number') this.pctTracker.add(rest.expPct, this.stats.level, t);
         if (typeof rest.silver === 'number' && this.silverStart === null) this.silverStart = rest.silver;
         break;
@@ -92,7 +94,7 @@ class AccountData {
       case 'bag':
         for (const it of ev.items || []) {
           const b = this.bagItem(it.name, t);
-          if (b.firstQty === null) b.firstQty = it.qty;
+          if (b.firstQty === null) b.firstQty = Math.max(0, it.qty - b.gained); // loot already counted
           b.qty = it.qty;
           if (it.icon) b.icon = it.icon;
         }
