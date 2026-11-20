@@ -2,7 +2,7 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: https://wiki.bindertowngame.com">
   <title>BinderDash</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -15,8 +15,8 @@
       <span>Silver รอบนี้ <b id="k-silver-run" class="pos">-</b></span>
     </div>
     <div class="actions">
-      <button id="toggle-all" title="ซ่อน/แสดงหน้าต่างเกมทุกบัญชี">ซ่อน/แสดงเกมทั้งหมด</button>
-      <button id="toggle-settings">ตั้งค่า</button>
+      <button id="toggle-all" title="ซ่อน/แสดงหน้าต่างเกมทุกบัญชีพร้อมกัน (เหมือนคลิกไอคอน BinderDash มุมขวาล่าง)">ซ่อน/แสดงเกมทั้งหมด</button>
+      <button id="toggle-settings" title="เปิดหน้าต่างตั้งค่า">ตั้งค่า</button>
     </div>
   </header>
 
@@ -27,7 +27,7 @@
     <aside class="sidebar">
       <div class="side-head">
         <span>บัญชี</span>
-        <button id="add" class="add">+ เพิ่ม</button>
+        <button id="add" class="add" title="เพิ่มบัญชี (สูงสุด 10)">+ เพิ่ม</button>
       </div>
       <div id="accounts"></div>
     </aside>
@@ -68,8 +68,11 @@
 
     <aside class="rightcol">
       <section class="panel mapbox">
-        <div class="maptitle" id="d-map">-</div>
-        <canvas id="minimap" width="320" height="240"></canvas>
+        <div class="maphead"><b id="d-map">แผนที่</b><small id="d-map-sub"></small></div>
+        <div class="mapwrap">
+          <img id="map-bg" alt="" hidden>
+          <canvas id="minimap" width="320" height="240"></canvas>
+        </div>
       </section>
       <section class="panel">
         <div class="counts">
@@ -86,6 +89,7 @@
   </div>
 
   <footer>Ctrl+Shift+D เปิด/ปิด Dashboard · F11 เต็มจอ · Ctrl+R โหลดหน้าเกมใหม่</footer>
+  <script src="maps.js"></script>
   <script src="dashboard.js"></script>
 </body>
 </html>

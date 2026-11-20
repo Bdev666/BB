@@ -104,16 +104,16 @@ function startRename(a, node) {
 function profileButtons(a) {
   const b = [];
   if (a.status === 'closed' || a.status === 'demo') {
-    b.push(el('button', { class: 'primary', onclick: async () => {
+    b.push(el('button', { class: 'primary', title: 'เปิดหน้าต่างเกมของบัญชีนี้', onclick: async () => {
       const r = await dash.invoke('open', a.id);
       if (r && r.warnFreeLimit) showBanner('เปิดเกิน 3 ตัวแล้ว: ตรวจกฎของเกมเรื่องจำนวนตัวละครต่อ IP ด้วย');
     } }, 'เปิดเกม'));
   } else {
-    b.push(el('button', { onclick: () => dash.invoke('reload', a.id) }, '⟳ รีเฟรช'));
+    b.push(el('button', { title: 'โหลดหน้าเกมใหม่ (เหมือน Ctrl+R) ตอนเกมค้าง', onclick: () => dash.invoke('reload', a.id) }, '⟳ รีเฟรช'));
     b.push(a.hidden
-      ? el('button', { onclick: () => dash.invoke('show', a.id) }, '⧉ ไปที่เกม')
-      : el('button', { onclick: () => dash.invoke('hide', a.id) }, '◌ ซ่อนเกม'));
-    b.push(el('button', { class: 'danger', onclick: () => {
+      ? el('button', { title: 'ไปที่หน้าต่างเกมของบัญชีนี้', onclick: () => dash.invoke('show', a.id) }, '⧉ ไปที่เกม')
+      : el('button', { title: 'ซ่อนแล้วเกมยังเล่นต่อ เรียกกลับได้ที่นี่ หรือที่ไอคอน BinderDash มุมขวาล่าง', onclick: () => dash.invoke('hide', a.id) }, '◌ ซ่อนเกม'));
+    b.push(el('button', { class: 'danger', title: 'ตัวละครออกจากเกม Auto Play หยุด (บัญชียังอยู่ในรายการ)', onclick: () => {
       if (confirm(`ปิดเกมของ ${a.name}? ตัวละครจะออกจากเกม`)) dash.invoke('close', a.id);
     } }, '✕ ปิดเกม'));
   }
@@ -206,18 +206,38 @@ function renderLogs() {
   }));
 }
 
+const MAP_IMG = 'https://wiki.bindertowngame.com/img/gen/map/';
+const KIND_TEXT = { town: 'เมือง', boss: 'ถ้ำ Field Boss', special: 'แมพพิเศษ' };
+function findMap(name) {
+  if (!name || !window.BT_MAPS) return null;
+  const key = String(name).toLowerCase().replace(/\s*lv.*$/, '').trim();
+  return window.BT_MAPS.find((m) => m.id === key || m.name.toLowerCase() === key || m.id === key.replace(/[^a-z0-9]+/g, '_')) || null;
+}
+
 function renderMap() {
   const d = detail || {};
   const w = d.world;
-  $('#d-map').textContent = (d.stats && d.stats.map) || 'แผนที่';
+  const name = d.stats && d.stats.map;
+  const info = findMap(name);
+  $('#d-map').textContent = info ? info.name : name || 'แผนที่';
+  $('#d-map-sub').textContent = info
+    ? [info.region.replace(/^Region [A-Z] · /, ''), info.min != null ? `Lv.${info.min}–${info.max}` : KIND_TEXT[info.kind]].filter(Boolean).join(' · ')
+    : '';
+  const img = $('#map-bg');
+  const src = info ? MAP_IMG + info.id + '.webp' : '';
+  if (img.dataset.src !== src) {
+    img.dataset.src = src;
+    img.hidden = true;
+    if (src) { img.onload = () => { img.hidden = false; }; img.onerror = () => { img.hidden = true; }; img.src = src; }
+  }
   const cv = $('#minimap');
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#241a4a';
-  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.clearRect(0, 0, cv.width, cv.height);
   $('#c-mon').textContent = w && w.monsters ? w.monsters.length : 0;
   $('#c-ply').textContent = w && w.players ? w.players.length : 0;
   $('#c-drop').textContent = w && w.drops ? w.drops.length : 0;
   if (!w) {
+    if (src) return;
     ctx.fillStyle = '#8f89ad';
     ctx.font = '13px Segoe UI, Tahoma';
     ctx.textAlign = 'center';
@@ -227,9 +247,11 @@ function renderMap() {
   const sx = cv.width / (w.w || 1), sy = cv.height / (w.h || 1);
   const dot = (p, r, c) => { ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, r, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill(); };
   for (const p of w.drops || []) dot(p, 3, '#ffc233');
-  for (const p of w.monsters || []) dot(p, 3.5, '#ff4d6d');
-  for (const p of w.players || []) dot(p, 3.5, '#60a5fa');
-  if (w.self) { dot(w.self, 7, '#ffffff55'); dot(w.self, 4.5, '#ffb547'); }
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#ffffffaa';
+  for (const p of w.monsters || []) { dot(p, 4, '#ff4d6d'); ctx.stroke(); }
+  for (const p of w.players || []) { dot(p, 4, '#38bdf8'); ctx.stroke(); }
+  if (w.self) { dot(w.self, 9, '#ffb54766'); dot(w.self, 5.5, '#ffffff'); ctx.strokeStyle = '#ffb547'; ctx.lineWidth = 2.5; ctx.stroke(); }
 }
 
 let watchEditing = null; // item name whose limit is being edited

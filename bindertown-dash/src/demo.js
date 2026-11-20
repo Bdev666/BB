@@ -22,6 +22,7 @@ class DemoFeed {
     this.players = Array.from({ length: 4 }, () => ({ x: Math.random(), y: Math.random(), name: pick(NAMES) }));
     this.self = { x: 0.5, y: 0.5 };
     this.tickN = 0;
+    this.seed = seed;
     this.name = ['Kenji', 'Somchai', 'Lina', 'Pim'][seed % 4];
     this.job = ['Kensei', 'Scout', 'Acolyte', 'Mage'][seed % 4];
   }
@@ -64,7 +65,7 @@ class DemoFeed {
     out.push({
       type: 'self', name: this.name, job: this.job, level: this.level, jobLevel: 50, hp: this.hp, maxHp: this.maxHp,
       sp: this.sp, maxSp: this.maxSp, exp: this.exp, maxExp: this.maxExp, silver: this.silver, gold: 260,
-      str: 99, agi: 99, vit: 66, int: 1, dex: 30, luk: 1, map: 'Demo Vale Lv.40-50',
+      str: 99, agi: 99, vit: 66, int: 1, dex: 30, luk: 1, map: ['Frostpeak Slopes', 'Shattered Vale', 'Umbral Depths', 'Moonpool Gardens'][this.seed % 4],
     });
     if (this.tickN % 5 === 1) {
       out.push({ type: 'bag', items: Object.entries(this.bag).map(([name, qty]) => ({ name, qty })) });

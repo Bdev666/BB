@@ -110,8 +110,12 @@ h3 { font-size: 14px; margin: 0; }
 /* right column */
 .rightcol { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
 .mapbox { padding: 8px; }
-.maptitle { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-#minimap { width: 100%; height: auto; border-radius: 8px; background: #241a4a; display: block; }
+.maphead { padding: 2px 4px 8px; }
+.maphead b { display: block; font-size: 16px; }
+.maphead small { color: var(--muted); font-size: 11px; }
+.mapwrap { position: relative; border-radius: 8px; overflow: hidden; background: #241a4a; aspect-ratio: 4 / 3; }
+.mapwrap img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; filter: saturate(.9) brightness(.85); }
+#minimap { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .counts { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
 .counts b { display: block; font-size: 18px; }
 .counts span { color: var(--muted); font-size: 11px; }

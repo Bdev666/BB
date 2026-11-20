@@ -118,7 +118,16 @@ function setAlert(id, key, on, text) {
 function windowTitle(id) {
   const a = account(id);
   const n = rt(id).data.stats.name;
-  return n ? `${a.name} · ${n}` : a.name;
+  return `${n ? `${a.name} · ${n}` : a.name} — Binder Town`;
+}
+
+// Put a game window over the middle of the Dashboard (unless the user has moved it themselves)
+function placeOverDashboard(win) {
+  if (!dashboard || dashboard.isDestroyed() || !dashboard.isVisible() || dashboard.isMinimized()) return;
+  const d = dashboard.getBounds();
+  const width = Math.min(1280, Math.round(d.width * 0.85));
+  const height = Math.min(800, Math.round(d.height * 0.85));
+  win.setBounds({ x: d.x + Math.round((d.width - width) / 2), y: d.y + Math.round((d.height - height) / 2), width, height });
 }
 
 function isGameUrl(url) {
@@ -133,11 +142,14 @@ function openGame(id) {
   if (!a) return;
   const g = rt(id);
   if (g.win && !g.win.isDestroyed()) return showGame(id);
+  g.demo = null;
+  g.data.reset();
 
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    title: a.name,
+    show: false,
+    title: windowTitle(id),
     icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
     webPreferences: {
@@ -149,11 +161,14 @@ function openGame(id) {
     },
   });
   g.win = win;
+  g.userPlaced = false;
+  placeOverDashboard(win);
+  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show(); });
+  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 3000);
+  win.on('moved', () => { g.userPlaced = true; });
   g.status = 'loading';
   g.alerts.clear();
   g.loadedAt = Date.now();
-  g.demo = null;
-  g.data.reset();
   updateSleepBlocker();
 
   win.on('page-title-updated', (e) => { e.preventDefault(); win.setTitle(windowTitle(id)); });
@@ -268,6 +283,7 @@ function showGame(id) {
   const g = rt(id);
   if (!g.win || g.win.isDestroyed()) return openGame(id);
   if (g.win.isMinimized()) g.win.restore();
+  if (!g.win.isVisible() && !g.userPlaced) placeOverDashboard(g.win);
   g.win.show();
   g.win.focus();
 }
