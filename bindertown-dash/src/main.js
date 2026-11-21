@@ -9,7 +9,7 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS, MARKET_FILTER, rarityOf } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const updater = require('./updater');
@@ -443,7 +443,7 @@ function handleEvents(id, events) {
         break;
       case 'loot':
         // something that isn't a plain monster drop: ask the market what it's worth, notify if it's worth it
-        if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.item, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
+        if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.id, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
         break;
       case 'fieldBosses': onFieldBosses(ev.list); break;
       case 'worldEvent': onWorldEvent(ev); break;
@@ -466,12 +466,15 @@ function handleEvents(id, events) {
       case 'market': {
         // prices are the same for every account on the server
         for (const [, other] of games) if (other !== g) other.data.ingest(ev);
-        const wait = g.valuableWait.get(ev.item);
+        const wait = g.valuableWait.get(ev.id);
         if (wait) {
-          g.valuableWait.delete(ev.item);
-          // only real player-market prices (listings / sales), never NPC prices
-          if (ev.price && (ev.basis === 'listed' || ev.basis === 'sales') && ev.price * wait.qty >= s.valuableMinGold) {
-            notify(id, 'valuable', `💰 ดรอป ${ev.item}${wait.qty > 1 ? ' x' + wait.qty : ''} · ราคาตลาด ~${Math.round(ev.price).toLocaleString('en-US')} G${wait.qty > 1 ? '/ชิ้น' : ''}`);
+          g.valuableWait.delete(ev.id);
+          // the central market's price for this kind + grade (cheapest listing now, like the board),
+          // never NPC prices; only from the threshold up (default 1,000,000 Gold)
+          const G = (n) => Math.round(n).toLocaleString('en-US');
+          log.info(`acc ${id}: market price ${ev.key || ev.id}: ${ev.price ?? '-'} G (${ev.basis || 'no data'})`);
+          if (ev.price && ev.price * wait.qty >= s.valuableMinGold) {
+            notify(id, 'valuable', `💰 ดรอป ${ev.item}${wait.qty > 1 ? ' x' + wait.qty : ''} · ตลาดกลาง${ev.basis === 'listed' ? 'ถูกสุด' : 'ขายล่าสุด'} ~${G(ev.price)} G${wait.qty > 1 ? '/ชิ้น' : ''}${ev.basis === 'listed' && ev.last ? ` · ขายจริงล่าสุด ${G(ev.last)} G` : ''}`);
           }
         }
         break;
@@ -511,7 +514,8 @@ function requestPrice(id, itemId, force = false) {
   const last = priceAsked.get(itemId) || 0;
   if (!force && Date.now() - last < 10 * 60 * 1000) return Promise.resolve(true);
   priceAsked.set(itemId, Date.now());
-  return sendInput(id, { type: 'marketGuide', itemId });
+  // the market board's item view (kind + grade): what the game's market window asks for
+  return sendInput(id, { ...MARKET_FILTER, type: 'marketItem', itemId, loff: 0 });
 }
 
 async function gameCommand(id, cmd, arg) {
@@ -723,6 +727,12 @@ function eventsView() {
   ]).filter(Boolean);
 }
 
+// gear pieces that may be salvaged: unlocked, of the chosen grades (default Normal + Magic)
+function salvageable(g, rarities) {
+  const want = new Set(Array.isArray(rarities) && rarities.length ? rarities : ['normal', 'magic']);
+  return g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && want.has(rarityOf(x))) : [];
+}
+
 // AUTO / sleep straight from the game page: the once-a-second snapshot can be a beat behind
 async function liveUi(id) {
   const g = rt(id);
@@ -748,8 +758,8 @@ async function commandAll(cmd, arg) {
     } else if (['sellEtc', 'buy'].includes(cmd)) {
       r = await gameCommand(id, cmd, arg);
     } else if (cmd === 'salvageAll') {
-      // every unlocked gear piece in this account's bag (the player confirmed the count first)
-      const ids = g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x)) : [];
+      // unlocked gear of the chosen grades in this account's bag (the player confirmed the counts first)
+      const ids = salvageable(g, arg.rarities);
       r = ids.length ? await gameCommand(id, 'salvage', { itemIds: ids }) : { ok: true, skipped: true, error: 'ไม่มีอุปกรณ์ให้ย่อย' };
       if (r.ok && ids.length) r.count = ids.length;
     } else {
@@ -1257,9 +1267,8 @@ function registerIpc() {
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   // how many unlocked gear pieces each account would salvage (shown before confirming)
-  handle('salvage-preview', () => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
-    id, name: g.data.stats.name || account(id).name,
-    count: g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x)).length : 0,
+  handle('salvage-preview', (rarities) => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
+    id, name: g.data.stats.name || account(id).name, count: salvageable(g, rarities).length,
   })));
   handle('potions', () => POTIONS);
   handle('item-watch', (name, limit) => {

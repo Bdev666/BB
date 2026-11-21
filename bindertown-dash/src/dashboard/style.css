@@ -213,3 +213,6 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .modal-box .quick { flex-wrap: wrap; margin: 6px 0; }
 .results { margin-top: 10px; font-size: 12.5px; }
 .res.ok { color: var(--ok); } .res.bad { color: var(--bad); }
+.rar { font-size: 10px; padding: 0 6px; border-radius: 6px; margin-right: 4px; border: 1px solid currentColor; }
+.r-normal { color: #cbd5e1; } .r-magic { color: #60a5fa; } .r-rare { color: #fbbf24; } .r-epic { color: #c084fc; }
+.rpick { display: inline-flex !important; margin: 0 6px 0 0 !important; gap: 4px; }

@@ -105,6 +105,7 @@ class AccountData {
           if (b.firstQty === null) b.firstQty = Math.max(0, it.qty - b.gained); // loot already counted
           b.qty = it.qty;
           if (it.ids) b.ids = it.ids;
+          b.supply = !!it.supply;
           if (it.icon) b.icon = it.icon;
           seen.add(it.name);
         }
@@ -115,11 +116,11 @@ class AccountData {
         const b = this.bag.get(ev.item);
         if (b) b.sold += ev.qty || 0;
         this.soldSilver += ev.silver || 0;
-        this.log('loot', `ขาย ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
+        this.log(ev.auto ? 'other' : 'loot', `${ev.forged ? 'หลอมอัตโนมัติ' : ev.auto ? 'ขายอัตโนมัติ' : 'ขาย'} ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
         break;
       }
       case 'market':
-        if (ev.item) this.prices.set(ev.item, { price: ev.price, basis: ev.basis, at: t });
+        if (ev.bagName || ev.item) this.prices.set(ev.bagName || ev.item, { price: ev.price, basis: ev.basis, at: t });
         break;
       case 'premium': this.premiumUntil = ev.until; break;
       case 'pass': this.checklist.pass = { day: ev.day, daily: ev.daily, weekly: ev.weekly, at: t }; break;
@@ -151,7 +152,8 @@ class AccountData {
       return {
         name, qty: b.qty, icon: b.icon, ids: b.ids, gainedPerHour: b.gained / hours, usedPerHour,
         // how long the stack lasts at the current rate (potions, arrows ...), needs a few minutes of data
-        minutesLeft: usedPerHour > 0 && hours > 0.08 ? (b.qty / usedPerHour) * 60 : null,
+        // only for supplies (potions, ammo …): gear/materials leave the bag by being sold or salvaged
+        minutesLeft: b.supply && usedPerHour > 0 && hours > 0.08 ? (b.qty / usedPerHour) * 60 : null,
         market: p ? p.price : undefined,
       };
     });

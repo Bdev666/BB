@@ -164,7 +164,24 @@ const POTIONS = [
 ];
 
 // Items that are everyday supplies, not loot worth a market check
-const SUPPLIES = /^(potion|mana_potion|.*_potion|arrow.*|bullet.*|throwing_.*|fly_wing|butterfly_wing|herb_leaf|raw_fish)$/;
+const SUPPLIES = /^(potion|mana_potion|.*_potion|.*elixir|.*ether|arrow.*|.*_arrow|bullet.*|.*_bullets?|throwing_.*|fly_wing|butterfly_wing|herb_leaf|raw_fish|field_ration|grilled_fish|campfire_kit|repair_kit)$/;
+// something the character uses up (potions, ammo …): only these get a "runs out in N minutes" clock
+function isSupply(id) { return SUPPLIES.test(baseOf(id)); }
+
+// "robe_t10+12|vit:6:9,dex:7:12#uuid" -> "robe_t10" (refine, inscription, quality and instance stripped)
+function baseOf(id) { return String(id || '').replace(/^cash:/, '').split(/[|#+^*~@]/)[0]; }
+// Item grade the way the game computes it (client: affix count; the 20 classic affixes count one step higher)
+const CLASSIC_AFFIXES = new Set(['sharp', 'heavy', 'keen', 'precise', 'swift', 'fleet', 'runed', 'arcane', 'cruel', 'deadly', 'of_the_bear', 'of_the_ox', 'of_the_fox', 'of_fortune', 'of_the_sage', 'of_the_owl', 'of_the_wind', 'of_stone', 'of_the_monk', 'of_the_hawk']);
+function rarityOf(id) {
+  const m = /\|([^#]*)/.exec(String(id || ''));
+  const names = m && m[1] ? m[1].split(',').map((a) => a.split(':')[0]).filter(Boolean) : [];
+  if (!names.length) return 'normal';
+  if (names.every((a) => CLASSIC_AFFIXES.has(a))) return ['normal', 'magic', 'rare', 'epic'][Math.min(names.length, 3)];
+  return names.length >= 4 ? 'epic' : names.length >= 3 ? 'rare' : 'magic';
+}
+const RARITY_LABEL = { normal: 'Normal', magic: 'Magic', rare: 'Rare', epic: 'Epic' };
+// what the market's item view asks for (the game sends its board filter along)
+const MARKET_FILTER = { q: '', field: 'all', rarity: '', cat: 'all', sub: 'all', lvMin: 0, lvMax: 0, affix: '', tierMin: 0, lines: 0, mark: '', refMin: 0, qual: 0, job: '', hand: '', codexNew: 0 };
 
 // Server payload -> list of plain events (mirrors the client's onServer)
 function serverEvents(message) {
@@ -380,10 +397,30 @@ class BinderTownAdapter {
       }
       case 'tradeInvite': out.push({ type: 'info', text: `${e.from} ขอเทรด`, t: at }); break;
       case 'inv': this.inventory(e, at, out); break;
-      case 'autoSold': out.push({ type: 'info', text: `ขายอัตโนมัติ ${pretty(e.itemId)} x${e.qty}`, t: at }); break;
+      case 'autoSold':
+        // gone from the bag because it was sold, not used up
+        out.push({ type: 'sold', item: pretty(e.itemId), qty: e.qty || 1, auto: true, t: at });
+        break;
+      case 'autoForged':
+        out.push({ type: 'sold', item: pretty(e.itemId), qty: e.qty || 1, auto: true, forged: true, t: at });
+        break;
       case 'sold':
         out.push({ type: 'sold', item: e.itemId === '*' ? 'ของหลายชิ้น' : pretty(e.itemId), qty: e.qty, silver: e.silver, t: at });
         break;
+      case 'marketItem': {
+        // the market board's own row for this item kind + grade: "cheapest now" is what the board shows
+        const v = e.view || {};
+        if (!v.itemId) break;
+        const gear = String(v.itemId).includes('|') || String(v.itemId).includes('#');
+        const price = v.low > 0 ? v.low : v.vol7 > 0 && v.last > 0 ? v.last : null;
+        out.push({
+          type: 'market', id: v.itemId, key: v.key || '', t: at,
+          item: gear ? `${pretty(v.itemId)} (${RARITY_LABEL[rarityOf(v.itemId)]})` : pretty(v.itemId),
+          bagName: pretty(v.itemId),
+          price, basis: v.low > 0 ? 'listed' : price ? 'sales' : null, last: v.last || 0, vol7: v.vol7 || 0, stock: v.stock || 0,
+        });
+        break;
+      }
       case 'marketGuide': {
         const p = marketPrice(e, at);
         out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
@@ -512,7 +549,9 @@ class BinderTownAdapter {
       const m = merged.get(name) || { name, qty: 0, ids: [] };
       m.qty += Number(qty) || 0;
       // gear pieces are single instances "<item>#<uuid>"; locked ones can't be sold or salvaged
-      m.ids.push({ id, qty: Number(qty) || 0, gear: id.includes('#'), locked: this.locks.has(id) });
+      const gear = id.includes('#');
+      m.ids.push({ id, qty: Number(qty) || 0, gear, locked: this.locks.has(id), ...(gear ? { rarity: rarityOf(id) } : {}) });
+      if (isSupply(id)) m.supply = true;
       merged.set(name, m);
     }
     out.push({ type: 'bag', items: [...merged.values()], t: at });
@@ -573,4 +612,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { KNOWN_TYPES, KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { MARKET_FILTER, rarityOf, baseOf, isSupply, KNOWN_TYPES, KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

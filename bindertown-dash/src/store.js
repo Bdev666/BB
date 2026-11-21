@@ -25,7 +25,7 @@ const DEFAULTS = {
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
       fieldBoss: true, worldBoss: true, event: true, daily: true,
     },
-    valuableMinGold: 300,    // notify drops whose player-market value is at least this (Gold)
+    valuableMinGold: 1000000, // notify drops whose central-market value is at least this (Gold)
     potionMinutes: 30,
     bossLeadMinutes: 5,      // heads-up this many minutes before a boss spawns / starts       // warn when supplies run out within this many minutes
     weightFullPct: 90,       // warn when the bag is this full
@@ -55,6 +55,11 @@ class Store {
           itemWatch: { ...(saved.settings || {}).itemWatch },
         },
       };
+      // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
+      if (!this.data.settings.valuable1m) {
+        if (this.data.settings.valuableMinGold < 1000000) this.data.settings.valuableMinGold = 1000000;
+        this.data.settings.valuable1m = true;
+      }
     } catch { /* first run */ }
   }
   save() {

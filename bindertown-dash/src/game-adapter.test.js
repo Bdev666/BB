@@ -56,6 +56,30 @@ assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear
   const e2 = a2.incoming(frame('server', { type: 'inv', items: [{ id: 'chipped_blade#u1', qty: 1 }, { id: 'buckler#u2', qty: 1 }], locks: ['buckler#u2'] }));
   assert.deepStrictEqual(e2[0].items.map((i) => [i.name, i.ids[0].gear, i.ids[0].locked]), [['Chipped Blade', true, false], ['Buckler', true, true]]);
 }
+// grades as the game computes them, from real market ids
+{
+  const { rarityOf, baseOf, isSupply } = require('./game-adapter');
+  assert.strictEqual(rarityOf('sword_t11|crit:7:6,int:8:12#78c8'), 'magic');
+  assert.strictEqual(rarityOf('amulet_t12|hit:8:34,str:7:11,manatide:4:76#5c19'), 'rare');
+  assert.strictEqual(rarityOf('ring_t10|int:8:13,crit:6:5,cdr:8:8,luk:6:9#ef36'), 'epic');
+  assert.strictEqual(rarityOf('chipped_blade#u1'), 'normal');
+  assert.strictEqual(rarityOf('dagger_t3|sharp:1:2#u'), 'magic', 'one classic affix');
+  assert.strictEqual(rarityOf('dagger_t3|sharp:1:2,of_the_fox:1:2#u'), 'rare', 'two classic affixes');
+  assert.strictEqual(baseOf('belt_t10*@58596069+10|hppct:6:20#58ba'), 'belt_t10');
+  assert.strictEqual(baseOf('robe_t10^ins_shatterwall|p_bulwark:7:45#2abe'), 'robe_t10');
+  assert.ok(isSupply('potion') && isSupply('high_ether') && isSupply('iron_arrow') && !isSupply('staff_t10|a:1:1#x') && !isSupply('drop_sprout'));
+  // market item view -> price for that kind + grade (cheapest now, like the market board)
+  const a6 = new BinderTownAdapter();
+  const ev6 = a6.incoming(frame('server', { type: 'marketItem', view: { key: 'robe_t10|epic', itemId: 'robe_t10|p_gust:4:21,bossres:8:8,dex:7:13,magicres:3:5#e316', low: 10000, last: 450000, vol7: 61, stock: 56 } }));
+  assert.deepStrictEqual([ev6[0].item, ev6[0].price, ev6[0].basis, ev6[0].key], ['Robe T10 (Epic)', 10000, 'listed', 'robe_t10|epic']);
+  // auto-sold gear is 'sold', not 'used': no "runs out" clock for gear
+  const a7 = new BinderTownAdapter();
+  const d7 = new AccountData(); d7.startedAt = 1;
+  for (const x of a7.incoming(frame('server', { type: 'inv', items: [{ id: 'staff_t10|a:1:1,b:1:1#s1', qty: 1 }, { id: 'potion', qty: 50 }] }), 2)) d7.ingest(x);
+  for (const x of a7.incoming(frame('server', [{ type: 'autoSold', itemId: 'staff_t10|a:1:1,b:1:1#s1', qty: 1 }, { type: 'inv', d: 1, items: [{ id: 'potion', qty: 20 }], gone: ['staff_t10|a:1:1,b:1:1#s1'] }]), 3600 * 1000)) d7.ingest(x);
+  const rows = d7.bagRows(1);
+  assert.deepStrictEqual(rows.map((r) => [r.name, r.minutesLeft != null]), [['Potion', true]], 'only the potion gets a clock; sold staff is gone');
+}
 ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'yellow_potion', qty: 9 }, { id: 'warden_shard', qty: 1 }], gone: ['refine_stone'] }));
 assert.deepStrictEqual(ev.map((e) => e.type), ['loot', 'bag']);
 assert.strictEqual(ev[0].item, 'Warden Shard');
@@ -93,8 +117,8 @@ assert.strictEqual(det.events[0].text, 'ตี Slime 50 (คริ)');
 assert.strictEqual(det.bag[0].name, 'Potion');
 // potion clock: 60 used in an hour with 30 left -> 30 minutes
 const d4 = new AccountData(); d4.startedAt = 1;
-d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 90 }], t: 2 });
-d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 30 }], t: 3600 * 1000 });
+d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 90, supply: true }], t: 2 });
+d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 30, supply: true }], t: 3600 * 1000 });
 d4.ingest({ type: 'market', item: 'Potion', price: 7, t: 3 });
 const pot = d4.bagRows(1)[0];
 assert.strictEqual(Math.round(pot.minutesLeft), 30);
