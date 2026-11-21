@@ -607,8 +607,15 @@ async function openLab() {
   const st = {}; for (const k of ['str', 'agi', 'vit', 'int', 'dex', 'luk']) st[k] = num_(me && me.stats ? me.stats[k] || 1 : 1, 0, 999);
   const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'), el('option', { value: 'farm' }, '🌾 ฟาร์มมอน (ตีหลายตัว)'));
   const pack = num_(4, 1, 12);
-  const boss = el('select', {}, el('option', { value: '' }, 'บอสเลเวลใกล้ตัวที่สุด'), ...labInfo.bosses.map((b) => el('option', { value: b.id }, `${labPretty(b.id)} (Lv ${b.level})`)));
+  const boss = el('select', {}, el('option', { value: '' }, 'บอสเลเวลใกล้ตัวที่สุด'),
+    el('option', { value: 'wraithroot_colossus' }, '🌍 World Boss · Wraithroot Colossus (Lv 99)'),
+    el('option', { value: 'pearlheart_titan' }, '🌍 World Boss · Pearlheart Titan (Lv 130)'),
+    el('option', { value: 'training_dummy' }, '🎯 หุ่นฟางห้องฝึก (เทียบกับ DPS Meter)'),
+    ...labInfo.bosses.map((b) => el('option', { value: b.id }, `${labPretty(b.id)} (Lv ${b.level})`)));
   const useCur = el('input', { type: 'checkbox', checked: me && me.job === myJob ? '' : null });
+  const lo = me && me.loadout;
+  const hasLo = !!lo && (Object.keys(lo.equip || {}).length > 0 || Object.keys(lo.album || {}).length > 0);
+  const useGear = el('input', { type: 'checkbox', checked: hasLo ? '' : null, disabled: hasLo ? null : '' });
   const packRow = el('label', { hidden: '' }, 'มอนต่อกลุ่ม ', pack, el('small', { class: 'hint' }, ' ตัว (สกิลวง/ทะลุ/กวาด ตีได้หลายตัว)'));
   const bossRow = el('label', {}, 'เป้า ', boss);
   mode.addEventListener('change', () => { packRow.hidden = mode.value !== 'farm'; bossRow.hidden = mode.value !== 'boss'; });
@@ -618,6 +625,7 @@ async function openLab() {
     go.disabled = true; res.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองชุดสกิล + Evolution + Trait + ช่องลัด ทั้งคลาส 1 และคลาส 2 ทุกสาย…'));
     const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
+    if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
     lastLab = p;
     try { renderLab(res, await dash.invoke('lab-run', p)); } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
@@ -630,9 +638,11 @@ async function openLab() {
       el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: 'แต้มคลาส 2 ทั้งหมด (ที่ใช้ไปแล้ว + ที่เหลือ) · ถ้ามีคลาส 2 อยู่แล้วจะอ่านจากตัวละคร' }, 'แต้มคลาส 2 ', c2pts),
       el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
       el('label', {}, 'โหมด ', mode), bossRow, packRow,
-      me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null),
+      me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null,
+      el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
+        hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)')),
     go, res,
-    el('p', { class: 'hint' }, 'ไม่รวมเกียร์/การ์ด (คูณดาเมจเท่ากันทุกบิลด์ จึงไม่เปลี่ยนอันดับ) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
+    el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
   ].filter(Boolean));
 }
 
@@ -668,10 +678,34 @@ function cardBox(x) {
     out);
 }
 
+// which map earns the most silver per hour with this build (+ the cards picked for gold farming, if any)
+function mapBox(x) {
+  const out = el('div', { class: 'lab-cards' });
+  const pack = el('input', { type: 'number', min: '1', max: '8', value: '3', style: 'width:52px' });
+  const go = el('button', { class: 'tiny', onclick: async () => {
+    go.disabled = true; out.replaceChildren(el('p', { class: 'hint' }, 'กำลังคำนวณทุกแมพ…'));
+    try {
+      const r = await dash.invoke('lab-maps', { ...lastLab, build: x.build, pack: +pack.value });
+      const lvl = lastLab.level;
+      out.replaceChildren(
+        el('p', { class: 'hint' }, `คิดจากดาเมจของบิลด์นี้กับมอนแต่ละชนิดในแมพ (เครื่องคิดเลขของเกม) · Silver/ตัว × Gold% · ฆ่า/ชม. จำกัดด้วยเวลาเกิดใหม่ · ${r.total} แมพ ใน ${(r.ms / 1000).toFixed(1)} วิ`),
+        el('table', { class: 'lab-maps' },
+          el('tr', {}, ...['#', 'แมพ', 'เลเวล', 'Silver/ชม.', 'ฆ่า/ชม.', 'Silver/ตัว', 'โดนตีกี่ทีตาย', 'มอน'].map((h) => el('th', {}, h))),
+          ...r.rows.map((m, i) => el('tr', { class: (m.hitsToDie != null && m.hitsToDie < 6 ? 'risky' : '') + (lvl > m.band[1] + 10 ? ' low' : '') },
+            el('td', {}, String(i + 1)), el('td', {}, m.name), el('td', {}, `${m.band[0]}–${m.band[1]}`), el('td', { class: 'gold' }, num(m.silverHr)),
+            el('td', {}, num(m.killsHr)), el('td', {}, num(m.perKill)), el('td', {}, m.hitsToDie == null ? '-' : String(m.hitsToDie) + (m.hitsToDie < 6 ? ' ⚠' : '')),
+            el('td', { class: 'hint' }, m.mobs.map((o) => `${labPretty(o.type)} ×${o.count} (${o.ttk}s)`).join(', '))))),
+        el('p', { class: 'hint' }, 'ตัวเลขเป็นค่าประมาณเพื่อเทียบแมพ (ไม่รวมของดรอป/การ์ดดรอป, เวลาเดินคิด 1.5 วิ/ตัว) · ⚠ = โดนตีไม่กี่ทีก็ตาย'));
+    } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); }
+    go.disabled = false;
+  } }, '🗺 หาแมพทำเงิน');
+  return el('div', {}, el('div', { class: 'lab-row' }, go, el('small', { class: 'hint' }, ' มอนต่อกลุ่มที่ลากตีพร้อมกัน '), pack), out);
+}
+
 function renderLab(box, r) {
   const best = r.results[0];
   const cur = r.current;
-  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ลอง ${num(r.evals)} แบบ ใน ${(r.ms / 1000).toFixed(1)} วิ`);
+  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ${r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'} · ลอง ${num(r.evals)} แบบ ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
       el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
@@ -684,6 +718,7 @@ function renderLab(box, r) {
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
     cardBox(x),
+    mapBox(x),
     x.notes.length ? el('details', {}, el('summary', {}, `ข้อสังเกต ${x.notes.length} ข้อ (ส่วนที่เครื่องคิดเลขของเกมไม่ได้นับ)`), ...x.notes.map((n) => el('div', { class: 'hint' }, '· ' + n))) : null);
   box.replaceChildren(...[head,
     cur ? el('p', { class: 'hint' }, `บิลด์ปัจจุบัน: ${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(cur.score)}`) : null,

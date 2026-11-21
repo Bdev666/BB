@@ -1269,7 +1269,8 @@ const ME_JS = `(() => { const m = window.__game && window.__game.me(); if (!m) r
   let c2r = o(m.c2r); try { if (typeof c2r === 'string') c2r = JSON.parse(c2r); } catch { c2r = null; }
   return { job: m.job, level: m.level, jobLevel: m.jobLevel, skillPoints: m.skillPoints, c2: m.c2 || '', c2r,
     stats: { str: m.str, agi: m.agi, vit: m.vit, int: m.int, dex: m.dex, luk: m.luk }, statPoints: m.statPoints,
-    skills: o(m.skillLevels) || {}, evo: o(m.skillMods) || {}, traits: traits || {} }; })()`;
+    skills: o(m.skillLevels) || {}, evo: o(m.skillMods) || {}, traits: traits || {},
+    wRefine: m.wRefine || 0, sRefine: m.sRefine || 0, guildLevel: m.guildLevel || 0 }; })()`;
 
 function handle(cmd, fn) { ipcMain.handle('dash:' + cmd, (_e, ...args) => fn(...args)); }
 
@@ -1376,11 +1377,15 @@ function registerIpc() {
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
   handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(p)})`));
   handle('lab-me', async (id) => {
     const g = games.get(id);
     if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;
-    try { return await g.win.webContents.executeJavaScript(ME_JS, true); } catch { return null; }
+    try {
+      const me = await g.win.webContents.executeJavaScript(ME_JS, true);
+      return me && { ...me, loadout: g.adapter.loadout };
+    } catch { return null; }
   });
   handle('salvage-preview', (rarities) => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
     id, name: g.data.stats.name || account(id).name, count: salvageable(g, rarities).length,

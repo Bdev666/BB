@@ -39,7 +39,10 @@ function detect(mod) {
       if (src.includes('dpsAlone') && src.includes('rotation')) r.calc = v;
       else if (src.includes('prereqLevel') && src.includes('jobLevel:') && src.length < 700) r.unlock = v;
       else if (src.includes('bp[0].patch')) r.def = v;
+      else if (src.includes('.role!=="boss"') && src.includes('startsWith') && src.length < 2500 && v.length === 2) r.mob = v;
       else if (src.includes('problems') && src.includes('skills') && src.includes('hotbar') && src.includes('evo')) r.validate = v;
+    } else if (Array.isArray(v) && !r.maps && v.length > 20 && v.slice(0, 5).every((m) => m && m.id && Array.isArray(m.levelBand))) {
+      r.maps = v;
     } else if (v && typeof v === 'object' && !Array.isArray(v)) {
       try {
         if (v.bolt && typeof v.bolt.dmgMult === 'number') r.skills = v;
@@ -95,7 +98,47 @@ function baseBuild(p) {
     stats: { ...p.stats }, skills: {}, evo: {}, traits: {}, hotbar: [], gear: {}, cards: [], cardStars: [],
     weapon: '', offhand: '', affixes: [],
     calc: { guild: 0, soulforge: 0, pet: '', night: false, codex: 0, target: p.target, targetLevel: p.targetLevel, debuffed: false, lowHp: false },
+    ...loadoutOf(p.loadout),
   };
+}
+// the character's worn gear and cards (from the game's inventory message), in the calculator's shape
+const GEAR_SLOTS = ['weapon', 'offhand', 'armor', 'headgear', 'face', 'mouth', 'necklace', 'belt', 'boots', 'accessory', 'accessory2'];
+function loadoutOf(lo) {
+  if (!lo) return {};
+  const out = {};
+  const gear = {};
+  for (const [slot, item] of Object.entries(lo.equip || {})) {
+    if (!GEAR_SLOTS.includes(slot) || typeof item !== 'string') continue;
+    const head = item.split('#')[0];
+    const bar = head.indexOf('|');
+    const name = bar >= 0 ? head.slice(0, bar) : head;
+    const id = name.split(/[!+^*~@]/)[0];
+    const plus = /\+(\d+)/.exec(name);
+    const affixes = bar >= 0 ? head.slice(bar + 1).split(',').filter(Boolean) : [];
+    let refine = plus ? Number(plus[1]) : 0;
+    if (slot === 'weapon' && lo.wRefine) refine = Math.max(refine, lo.wRefine);
+    if (slot === 'offhand' && lo.sRefine) refine = Math.max(refine, lo.sRefine);
+    gear[slot] = { id, affixes, refine };
+  }
+  if (Object.keys(gear).length) out.gear = gear;
+  // album: card slot -> "spirit_card+N|monster" (N+1 stars)
+  const cards = []; const stars = [];
+  const al = lo.album || {};
+  const keys = Object.keys(al).sort((a, b) => (parseInt(a.replace(/\D/g, ''), 10) || 0) - (parseInt(b.replace(/\D/g, ''), 10) || 0));
+  for (const k of keys) {
+    const v = String(al[k] || ''); const bar = v.indexOf('|'); if (bar < 0) continue;
+    const plus = /\+(\d+)/.exec(v.slice(0, bar));
+    cards.push(v.slice(bar + 1)); stars.push((plus ? Number(plus[1]) : 0) + 1);
+  }
+  if (cards.length) { out.cards = cards; out.cardStars = stars; }
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
+}
+const WORLD = { wraithroot_colossus: 99, pearlheart_titan: 130 };
+function targetLevelFor(target, mode, level) {
+  if (WORLD[target]) return WORLD[target];
+  if (String(target).startsWith('training_dummy')) return level;
+  const m = G.mobs && G.mobs[target];
+  return mode === 'boss' && m && m.level ? m.level : level;
 }
 function targetsOf(sid, lv, evo, pack) {
   let d = G.skills[sid] || {};
@@ -306,7 +349,7 @@ function describe(b, p) {
 
 function pickTarget(mode, level, want) {
   const mobs = G.mobs ? Object.entries(G.mobs) : [];
-  if (want && mobs.some(([k]) => k === want)) return want;
+  if (want && (mobs.some(([k]) => k === want) || WORLD[want] || String(want).startsWith('training_dummy'))) return want;
   const role = mode === 'boss' ? 'boss' : 'trash';
   const list = mobs.filter(([, m]) => m && m.role === role && typeof m.level === 'number');
   list.sort((a, b) => Math.abs(a[1].level - level) - Math.abs(b[1].level - level));
@@ -343,7 +386,7 @@ L.cards = async (p) => {
   const tmob = G.mobs[target];
   const q = { ...p, goal, pack: Math.max(1, p.pack || 4), mode: goal === 'boss' ? 'boss' : 'farm' };
   curP = q;
-  const b = { ...baseBuild({ ...q, target, targetLevel: goal === 'boss' && tmob && tmob.level ? tmob.level : p.level }), ...JSON.parse(JSON.stringify(p.build || {})) };
+  const b = { ...baseBuild({ ...q, target, targetLevel: targetLevelFor(target, goal === 'boss' ? 'boss' : 'farm', p.level) }), ...JSON.parse(JSON.stringify(p.build || {})) };
   b.cards = []; b.cardStars = [];
   const slots = CARD_SLOTS.filter((l) => p.level >= l).length;
   const cap = loadCap(p.level);
@@ -395,6 +438,53 @@ L.cards = async (p) => {
   };
 };
 
+// ---------- which map earns the most for a build ----------
+// per map: for each monster camp, time to kill (the game's calculator vs that monster, spread over
+// the pack for area skills) + walking, silver per kill x card/gear Gold%, capped by respawns
+L.maps = async (p) => {
+  await load();
+  if (!G.maps) throw new Error('หาข้อมูลแมพของเกมไม่เจอ');
+  evals = 0; const t0 = performance.now();
+  const q = { ...p, mode: 'farm', pack: Math.max(1, p.pack || 3) };
+  curP = q;
+  const b = { ...baseBuild({ ...q, target: 'sprout', targetLevel: p.level }), ...JSON.parse(JSON.stringify(p.build || {})) };
+  if (p.cards && p.cards.length) { b.cards = p.cards; b.cardStars = p.cards.map(() => p.stars || 5); }
+  const mobInfo = (type) => { try { return (G.mob ? G.mob(type) : null) || G.mobs[type] || {}; } catch { return G.mobs[type] || {}; } };
+  const walkS = p.walkS || 1.5;
+  const rows = [];
+  let gold = 0;
+  for (const map of G.maps) {
+    if (!map.mobs || !map.mobs.length || map.danger === 'safe' || /^ll_|training/.test(map.id)) continue;
+    const camps = {};
+    for (const m of map.mobs) if (m && m.type) camps[m.type] = (camps[m.type] || 0) + (m.count || 1);
+    let silver = 0; let time = 0; let killsCap = 0; let worst = Infinity; let n = 0; const mobs = [];
+    for (const [type, count] of Object.entries(camps)) {
+      const mi = mobInfo(type);
+      if (!mi || mi.role === 'boss' || mi.worldEvent) continue;
+      b.calc = { ...b.calc, target: type, targetLevel: mi.level || p.level };
+      let r; try { r = G.calc(b); evals++; } catch { continue; }
+      const rot = r.rotation || { dps: 0, share: [] };
+      let eff = 0; for (const s of rot.share) eff += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], Math.min(q.pack, count))); eff /= rot.seconds || 60;
+      if (!(eff > 0)) continue;
+      const hp = (r.target && r.target.hp) || mi.hp || 1;
+      const ttk = hp / eff;
+      const sv = ((mi.silverMin || 0) + (mi.silverMax || 0)) / 2;
+      silver += count * sv; time += count * (ttk + walkS); n += count;
+      killsCap += count * 3600000 / Math.max(3000, mi.respawnMs || 15000);
+      worst = Math.min(worst, (r.defense && r.defense.hitsToDie) || Infinity);
+      gold = (r.album && r.album.gold) || 0;
+      mobs.push({ type, count, level: mi.level, ttk: Math.round(ttk * 10) / 10, silver: Math.round(sv) });
+    }
+    if (!n || !time) continue;
+    const killsHr = Math.min(3600 * n / time, killsCap);
+    const perKill = silver / n * (1 + gold / 100);
+    rows.push({ id: map.id, name: map.name || map.id, band: map.levelBand, danger: map.danger, killsHr: Math.round(killsHr), perKill: Math.round(perKill), silverHr: Math.round(killsHr * perKill), hitsToDie: worst === Infinity ? null : Math.round(worst * 10) / 10, mobs });
+    if (rows.length % 10 === 0) await new Promise((r) => setTimeout(r, 0));
+  }
+  rows.sort((a, b) => b.silverHr - a.silverHr);
+  return { rows: rows.slice(0, p.top || 15), total: rows.length, gold, evals, ms: Math.round(performance.now() - t0) };
+};
+
 L.info = async () => {
   await load();
   const jobs = Object.keys(G.c2opts || {}).filter((j) => G.jobs[j]);
@@ -414,7 +504,7 @@ L.run = async (p) => {
   const t0 = performance.now();
   const target = pickTarget(p.mode, p.level, p.target);
   const tmob = G.mobs && G.mobs[target];
-  const base = { ...p, target, targetLevel: p.mode === 'boss' && tmob && tmob.level ? tmob.level : p.level, pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
+  const base = { ...p, target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
   const paths = p.paths && p.paths.length ? p.paths : ['', ...(G.c2opts[p.job] || [])];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   const results = [];
@@ -432,7 +522,7 @@ L.run = async (p) => {
     current = describe(b, q);
   }
   results.sort((a, b) => b.score - a.score);
-  return { mode: p.mode, target: { id: target, name: (tmob && tmob.name) || target, level: base.targetLevel }, results, current, evals, ms: Math.round(performance.now() - t0), budget1: c1Budget(p.job, base.jobLevel) };
+  return { mode: p.mode, loadout: !!(p.loadout && (Object.keys(p.loadout.equip || {}).length || Object.keys(p.loadout.album || {}).length)), target: { id: target, name: (tmob && tmob.name) || target, level: base.targetLevel }, results, current, evals, ms: Math.round(performance.now() - t0), budget1: c1Budget(p.job, base.jobLevel) };
 };
 })();`;
 

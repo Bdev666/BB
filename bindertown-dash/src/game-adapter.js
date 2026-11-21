@@ -271,6 +271,7 @@ class BinderTownAdapter {
     this.mobLevels = new Map();  // mobType -> level seen on the map
     this.locks = new Set();      // item ids the player locked in the game
     this.bound = new Set();      // item ids bound to the character (no market)
+    this.loadout = { equip: {}, album: {}, refineStacks: {} }; // worn gear + cards, for the Build Lab
     this.build = '';             // the game's build (from pong)
     this.econIndex = 1;           // server economy index (NPC prices follow it)
     this.newTypes = new Map();   // server message types the client table didn't have -> field names
@@ -544,6 +545,9 @@ class BinderTownAdapter {
     const items = Array.isArray(e.items) ? e.items : [];
     if (Array.isArray(e.locks)) this.locks = new Set(e.locks);
     if (Array.isArray(e.bound)) this.bound = new Set(e.bound); // bound to the character: can't be traded
+    if (e.equip && typeof e.equip === 'object') this.loadout.equip = { ...e.equip };
+    if (e.album && typeof e.album === 'object') this.loadout.album = { ...e.album };
+    if (e.refineStacks && typeof e.refineStacks === 'object') this.loadout.refineStacks = { ...e.refineStacks };
     if (!e.d || !this.inv) {
       this.inv = new Map(items.map((i) => [i.id, i.qty]));
     } else {

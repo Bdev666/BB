@@ -259,3 +259,9 @@ h3.foldable::before { content: '▾ '; opacity: .6; }
 .lab-cardlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; margin-top: 6px; }
 .lab-card1 { background: var(--panel2, #1c2230); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
 .lab-row select { width: auto; flex: none; }
+
+.lab-maps { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+.lab-maps th, .lab-maps td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.lab-maps td.gold { color: var(--gold, #f5c542); font-weight: 700; white-space: nowrap; }
+.lab-maps tr.risky td:nth-child(7) { color: #f87171; }
+.lab-maps tr.low { opacity: .7; }
