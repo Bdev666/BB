@@ -555,9 +555,38 @@ function tradableGear() {
   return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked && !x.bound).map((x) => ({ ...x, name: b.name })));
 }
 
-async function openMarketSell() {
+// ---------- high-value gear panel: pieces worth >= highValueGold on the central market ----------
+function renderHighValue() {
+  const min = (state && state.settings.highValueGold) || 10000000;
+  const a = state && state.accounts.find((x) => x.id === selected);
+  const live = !!a && a.status === 'online';
+  const ip = (detail && detail.itemPrices) || {};
   const gear = tradableGear();
-  const minBox = el('input', { type: 'number', min: '0', step: '100000', value: String((state && state.settings.valuableMinGold) || 1000000) });
+  const rich = gear.map((g) => ({ ...g, p: ip[g.id] })).filter((g) => g.p && g.p.price >= min).sort((x, y) => y.p.price - x.p.price);
+  const unknown = gear.filter((g) => !ip[g.id]).length;
+  const pending = (detail && detail.pending) || [];
+  $('#hv-note').textContent = `≥ ${short(min)} G`;
+  const key = JSON.stringify([live, min, rich.map((g) => [g.id, g.p.price]), unknown, pending.map((p) => [p.itemId, p.state, Math.ceil(p.left / 60000)])]);
+  rebuild($('#hivalue'), key, () => {
+    const out = rich.map((g) => el('div', { class: 'item hv' },
+      el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]),
+      el('div', { class: 'nm' }, g.name, el('small', {}, g.p.basis === 'listed' ? `ตลาดถูกสุด ${short(g.p.price)} G${g.p.last ? ` · ขายล่าสุด ${short(g.p.last)}` : ''} · วางขาย ${g.p.stock}` : `ขายจริงล่าสุด ${short(g.p.price)} G · ตอนนี้ไม่มีคนวางขาย`)),
+      live ? el('button', { class: 'tiny', title: 'ลงขายชิ้นนี้ในตลาดกลาง', onclick: () => openMarketSell({ only: [g.id] }) }, '🏪 ขาย') : null));
+    if (rich.length > 1 && live) out.push(el('button', { class: 'ctl small', onclick: () => openMarketSell({ only: rich.map((g) => g.id) }) }, `🏪 ลงขายทั้งหมด ${rich.length} ชิ้น`));
+    for (const p of pending) {
+      const label = { waiting: `⏳ รอขึ้นตลาด ~${Math.max(1, Math.ceil(p.left / 60000))} นาที`, listed: '✔ ขึ้นตลาดแล้ว', notSeen: '❔ ยังไม่เห็นในประกาศของฉัน ลองดูในเกม', failed: '✖ ไม่ได้ลงขาย (ของยังอยู่ในกระเป๋า)' }[p.state] || p.state;
+      out.push(el('div', { class: 'item hv pend ' + p.state },
+        el('div', { class: 'nm' }, p.name, el('small', {}, `${num(p.unit)} G · ${label}`))));
+    }
+    if (!out.length) out.push(el('div', { class: 'empty' }, unknown ? `กำลังเช็คราคาตลาดอุปกรณ์ ${unknown} ชิ้น…` : `ไม่มีอุปกรณ์ราคา ≥ ${short(min)} G ในกระเป๋า`));
+    else if (unknown) out.push(el('small', { class: 'hint' }, `ยังเช็คราคาไม่ครบ อีก ${unknown} ชิ้น`));
+    return out;
+  });
+}
+
+async function openMarketSell(opt = {}) {
+  const gear = tradableGear().filter((g) => !opt.only || opt.only.includes(g.id));
+  const minBox = el('input', { type: 'number', min: '0', step: '100000', value: String(opt.only ? 0 : (state && state.settings.valuableMinGold) || 1000000) });
   const list = el('div', { class: 'gearlist mklist' });
   const out = el('div', { class: 'results' });
   const rows = gear.map((g) => {
@@ -595,11 +624,11 @@ async function openMarketSell() {
       r.res.textContent = ' · กำลังลงขาย…';
       // eslint-disable-next-line no-await-in-loop
       const x = await dash.invoke('game-cmd', selected, 'marketList', { itemId: r.g.id, qty: 1, unitPrice: Number(r.price.value) });
-      r.res.textContent = x && x.ok ? ' · ✔ ลงขายแล้ว' : ` · ✖ ${(x && x.error) || 'ไม่สำเร็จ'}`;
+      r.res.textContent = x && x.ok ? (x.unsure ? ' · ⏳ ส่งแล้ว รอตลาดยืนยัน (~5 นาที)' : ' · ✔ ส่งลงขายแล้ว ขึ้นตลาดใน ~5 นาที') : ` · ✖ ${(x && x.error) || 'ไม่สำเร็จ'}`;
       r.res.className = x && x.ok ? 'res ok' : 'res bad';
       r.box.checked = false;
     }
-    out.replaceChildren(el('p', { class: 'hint' }, 'เสร็จแล้ว · ดูประกาศของคุณได้ในหน้าตลาดของเกม (แท็บ "ประกาศของฉัน")'));
+    out.replaceChildren(el('p', { class: 'hint' }, 'เสร็จแล้ว · ตลาดใช้เวลาราว 5 นาทีกว่าประกาศจะขึ้น โปรแกรมจะเช็ค "ประกาศของฉัน" ให้เองหลังครบเวลา ดูสถานะได้ในช่อง 💎 ของมีค่า'));
   } }, 'ลงขายที่เลือก');
   openModal('🏪 ลงขายตลาดกลาง', [
     el('p', { class: 'hint' }, 'ราคาตลาดตามชนิด+เกรด (ถูกสุดตอนนี้ / ขายจริงล่าสุด) · ราคาตั้งต้น = ต่ำกว่าถูกสุด 1 G แก้ได้ · ติ๊กให้อัตโนมัติเมื่อมูลค่าตั้งแต่'),
@@ -674,6 +703,7 @@ function renderNow() {
     renderDaily();
   }
   renderBosses();
+  renderHighValue();
   renderEvents();
 
 }

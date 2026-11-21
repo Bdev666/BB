@@ -25,6 +25,7 @@ const DEFAULTS = {
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
       fieldBoss: true, worldBoss: true, event: true, daily: true,
     },
+    highValueGold: 10000000, // the dashboard's "high-value gear" panel shows pieces worth at least this
     valuableMinGold: 1000000, // notify drops whose central-market value is at least this (Gold)
     potionMinutes: 30,
     bossLeadMinutes: 5,      // heads-up this many minutes before a boss spawns / starts       // warn when supplies run out within this many minutes

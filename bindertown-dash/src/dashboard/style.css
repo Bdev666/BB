@@ -221,3 +221,8 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .mkrow .bn small { display: block; }
 .mkprice { width: 120px; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
 .mklist { max-height: 50vh; }
+
+.hivalue .item.hv.pend { opacity: .85; }
+.hivalue .item.pend.listed small { color: var(--ok, #4ade80); }
+.hivalue .item.pend.failed small { color: var(--bad, #f87171); }
+.hivalue .ctl.small { width: 100%; margin-top: 6px; }

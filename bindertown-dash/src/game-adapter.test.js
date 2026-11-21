@@ -233,4 +233,9 @@ assert.strictEqual(ev[1].price, 300);
   assert.ok(lr && lr.ok === false && lr.linkRequired && /ผูกบัญชี/.test(lr.reason), 'guest market listing is refused with a clear reason');
 }
 
+{
+  const ml = new BinderTownAdapter().incoming(frame('server', { type: 'market', mine: [7], listings: [{ id: 7, itemId: 'robe#a', qty: 1, price: 5 }, { id: 8, itemId: 'x', qty: 1, price: 1 }] })).find((e) => e.type === 'myListings');
+  assert.deepStrictEqual(ml.list, [{ id: 7, itemId: 'robe#a', qty: 1, price: 5 }], 'own listings picked out of the board');
+}
+
 console.log('game-adapter tests passed');

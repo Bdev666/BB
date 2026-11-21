@@ -9,7 +9,7 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS, MARKET_FILTER, rarityOf } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS, MARKET_FILTER, rarityOf, baseOf, pretty } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const updater = require('./updater');
@@ -46,6 +46,8 @@ function blankRuntime() {
     data: new AccountData(),
     adapter: new BinderTownAdapter(),
     valuableWait: new Map(), // item name -> { qty } waiting for a market price
+    pending: [], // central-market listings sent, waiting to show up (the market takes ~5 min)
+    myListings: null, // last 'mine' list from the market board
     demo: null,
     alerts: new Set(), // active problems, e.g. 'disconnect', 'idle'
     loadedAt: null,
@@ -446,6 +448,7 @@ function handleEvents(id, events) {
         if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.id, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
         break;
       case 'fieldBosses': onFieldBosses(ev.list); break;
+      case 'myListings': onMyListings(id, ev.list); break;
       case 'marketResult': g.lastMarket = { ok: ev.ok, reason: ev.reason, at: Date.now() }; break;
       case 'worldEvent': onWorldEvent(ev); break;
       case 'newType':
@@ -599,12 +602,18 @@ async function runCommand(id, cmd, arg) {
         const m = g.lastMarket;
         if (m && m.at >= sentAt) {
           log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> ${m.ok ? 'listed' : 'refused: ' + m.reason}`);
-          return m.ok ? { ok: true } : { ok: false, error: m.reason || 'ตลาดไม่รับรายการนี้' };
+          if (m.ok) addPending(g, itemId, qty, unit, true);
+          return m.ok ? { ok: true, pending: true } : { ok: false, error: m.reason || 'ตลาดไม่รับรายการนี้' };
         }
         const n = g.lastNotice;
         if (n && n.at >= sentAt) return { ok: false, error: n.text };
       }
-      return { ok: false, error: 'ไม่ได้รับคำตอบจากตลาด ลองดูในหน้าตลาดของเกม' };
+      // no answer yet: the market may still be working on it (listings show up ~5 min later).
+      // If the piece left the bag it went to the market; either way it is rechecked later.
+      const gone = !(g.adapter.inv && g.adapter.inv.get(itemId));
+      addPending(g, itemId, qty, unit, gone);
+      log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> no answer, ${gone ? 'left the bag' : 'still in bag'}; recheck later`);
+      return { ok: true, pending: true, unsure: !gone };
     }
     case 'marketCancel': ok = await sendInput(id, { type: 'marketCancel', id: Number(arg.listingId) }); break;
     case 'buy': {
@@ -766,6 +775,38 @@ function eventsView() {
 }
 
 // gear that may go on the market: not locked, not bound
+// ---------- central-market listings that take a while to appear ----------
+const LISTING_DELAY_MS = 5 * 60 * 1000;
+function addPending(g, itemId, qty, unit, confirmed) {
+  g.pending = g.pending.filter((p) => p.itemId !== itemId);
+  g.pending.push({ itemId, name: pretty(baseOf(itemId)), rarity: rarityOf(itemId), qty, unit, at: Date.now(), confirmed, state: 'waiting' });
+}
+function onMyListings(id, list) {
+  const g = rt(id);
+  g.myListings = { list, at: Date.now() };
+  for (const p of g.pending) {
+    if (list.some((m) => m.itemId === p.itemId)) p.state = 'listed';
+    else if (Date.now() - p.at > LISTING_DELAY_MS + 60 * 1000 && p.state === 'waiting') p.state = p.confirmed || !(g.adapter.inv && g.adapter.inv.get(p.itemId)) ? 'notSeen' : 'failed';
+  }
+}
+// once the market's delay is over, look at "my listings" for each account with listings waiting
+let marketTickN = 0;
+function marketTick() {
+  marketTickN++;
+  for (const [id, g] of games) {
+    if (g.status !== 'online') continue;
+    g.pending = g.pending.filter((p) => Date.now() - p.at < 60 * 60 * 1000 && !(p.state === 'listed' && Date.now() - p.at > 15 * 60 * 1000));
+    const due = g.pending.some((p) => p.state === 'waiting' && Date.now() - p.at > LISTING_DELAY_MS);
+    if (due && (!g.myListings || Date.now() - g.myListings.at > 50 * 1000)) sendInput(id, { ...MARKET_FILTER, type: 'marketQuery', sort: 'def', off: 0 });
+    // price gear pieces the dashboard has no market price for yet (a few per minute, like browsing)
+    if (marketTickN % 4 === 0) {
+      const ip = g.data.itemPrices;
+      const todo = tradableGear(g).filter((x) => !ip.has(x) || Date.now() - ip.get(x).at > 30 * 60 * 1000).slice(0, 3);
+      todo.forEach((x, i) => setTimeout(() => requestPrice(id, x), i * 500));
+    }
+  }
+}
+
 function tradableGear(g) {
   return g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && !g.adapter.bound.has(x)) : [];
 }
@@ -1216,7 +1257,7 @@ function registerIpc() {
     if (!account(id)) return null;
     watchedId = id;
     const g = rt(id);
-    return g.data.detail();
+    return { ...g.data.detail(), pending: g.pending.map((p) => ({ ...p, left: Math.max(0, p.at + LISTING_DELAY_MS - Date.now()) })) };
   });
   handle('open', (id) => {
     const nonPremiumWarning = openGames().length === 3;
@@ -1259,6 +1300,7 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.highValueGold !== undefined) s.highValueGold = Math.max(0, Number(patch.highValueGold) || 0);
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
     if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
     if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
@@ -1394,6 +1436,7 @@ app.whenReady().then(() => {
   setInterval(pollSnapshots, 1000);
   setInterval(bossTick, 15 * 1000);
   setInterval(reconnectTick, 5000);
+  setInterval(marketTick, 15 * 1000);
   applyStartWithWindows();
   syncRemote();
 });

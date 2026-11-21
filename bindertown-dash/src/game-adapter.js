@@ -422,6 +422,15 @@ class BinderTownAdapter {
         });
         break;
       }
+      case 'market':
+        // the market board answer to marketQuery: "mine" = this character's own listings
+        // "mine" holds listing ids (or rows); the rows themselves are in "listings"
+        if (Array.isArray(e.mine)) {
+          const ids = new Set(e.mine.map((m) => (m && typeof m === 'object' ? m.id : m)));
+          const rows = [...e.mine.filter((m) => m && typeof m === 'object'), ...(e.listings || []).filter((l) => l && ids.has(l.id))];
+          out.push({ type: 'myListings', t: at, ids: [...ids], list: rows.map((m) => ({ id: m.id, itemId: String(m.itemId || ''), qty: m.qty || 1, price: m.price || 0 })) });
+        }
+        break;
       case 'linkRequired':
         out.push({ type: 'marketResult', ok: false, linkRequired: true, reason: `ต้องผูกบัญชี (ไม่ใช่ Guest) ก่อนจึงจะ${e.what || 'ใช้ตลาดกลาง'}ได้`, t: at });
         break;

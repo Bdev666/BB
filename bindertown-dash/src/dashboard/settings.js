@@ -26,6 +26,7 @@ function render(state) {
     $('#disconnectSeconds').value = s.disconnectSeconds;
     $('#ramLimitMB').value = s.ramLimitMB;
     $('#valuableMinGold').value = s.valuableMinGold;
+    $('#highValueGold').value = s.highValueGold;
     $('#potionMinutes').value = s.potionMinutes;
     $('#bossLeadMinutes').value = s.bossLeadMinutes;
     $('#reconnectMinutes').value = s.reconnectMinutes;
@@ -45,7 +46,7 @@ for (const box of $$('[data-set]')) {
 for (const box of $$('[data-notify]')) {
   box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
 }
-for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'weightCriticalPct', 'bossLeadMinutes', 'reconnectMinutes']) {
+for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'highValueGold', 'potionMinutes', 'weightFullPct', 'weightCriticalPct', 'bossLeadMinutes', 'reconnectMinutes']) {
   $('#' + id).addEventListener('change', (e) => dash.invoke('settings', { [id]: e.target.value }));
 }
 function urlNote(saved) {
