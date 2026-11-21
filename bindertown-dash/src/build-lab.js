@@ -293,7 +293,19 @@ async function optimize(p, onStep) {
     bestEvoAndTraits(b, p); setHotbar(b); cur = score(b, p).v;
     if (!moved) break;
   }
+  bestHotbar(b, p);
   return b;
+}
+// the game rotates skills in hotbar order: try every order of the 6 slots (720), and swapping in left-out damaging skills
+function bestHotbar(b, p) {
+  const r = G.calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
+  const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => y.dpsAlone - x.dpsAlone).map((s) => s.sid);
+  let best = { v: score(b, p).v, hb: b.hotbar.slice() };
+  const tryHb = (hb) => { b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
+  for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
+  const a = best.hb.slice(); const n = a.length; const c = new Array(n).fill(0);
+  if (n > 1 && n <= 7) { let i = 0; while (i < n) { if (c[i] < i) { const k = i % 2 ? c[i] : 0; [a[k], a[i]] = [a[i], a[k]]; tryHb(a.slice()); c[i]++; i = 0; } else { c[i] = 0; i++; } } }
+  b.hotbar = best.hb;
 }
 function stillValid(b, p, c2map) {
   for (const [sid, lv] of Object.entries(b.skills)) {
@@ -357,6 +369,8 @@ function pickTarget(mode, level, want) {
 }
 
 // ---------- card builds ----------
+const FX_TH = { atkPct: 'ATK', matkPct: 'MATK', critDmg: 'ดาเมจคริ', crit: 'โอกาสคริ', cdr: 'คูลดาวน์ −', aspd: 'ความเร็วโจมตี', maxHpPct: 'HP', dmgTaken: 'รับดาเมจ −', gold: 'Gold', drop: 'ดรอป', spirit: 'Spirit', gather: 'เก็บของ', boss: 'ดาเมจใส่บอส', debuffed: 'ดาเมจใส่เป้าติดดีบัฟ', thorns: 'สะท้อน', opener: 'ดาเมจตีแรก' };
+const comboFx = (f) => (f.k === 'stat' ? (f.stat || '').toUpperCase() + ' +' + f.v : (FX_TH[f.k] || f.k) + (/−$/.test(FX_TH[f.k] || '') ? '' : ' +') + f.v + '%');
 // 9 slots open at these levels; Spirit Load: boss 5, mini-boss 3, elite 2, others 1; cap by level
 const CARD_SLOTS = [12, 18, 25, 32, 40, 50, 60, 70, 85];
 const cardLoad = (id) => { const r = (G.mobs[id] || {}).role; return r === 'boss' ? 5 : r === 'mini-boss' ? 3 : r === 'elite' ? 2 : 1; };
@@ -402,39 +416,85 @@ L.cards = async (p) => {
   const sc = () => cardScore(b, q).v;
   const base = cardScore(b, q);
   let cur = base.v;
-  // greedy: add the card with the best gain per Spirit Load
-  while (b.cards.length < slots) {
-    let best = null;
-    for (const id of pool) {
-      if (used() + cardLoad(id) > cap || !haveLeft(id)) continue;
-      b.cards.push(id); b.cardStars.push(starOf(id));
-      const v = sc(); const g = (v - cur) / cardLoad(id);
-      if (!best || g > best.g) best = { id, v, g };
-      b.cards.pop(); b.cardStars.pop();
+  // 1) each card alone: its value, and which combos it belongs to (region / kin / colour, read from the game's album)
+  const groups = new Map(); // "kind:key" -> { kind, key, name, need: [..], members: [] }
+  const single = [];
+  for (const id of pool) {
+    b.cards = [id]; b.cardStars = [starOf(id)];
+    const r = cardScore(b, q);
+    single.push({ id, v: r.v - cur });
+    for (const x of ((r.r && r.r.album && r.r.album.res) || [])) {
+      if (!x.count) continue;
+      const k = x.kind + ':' + x.key;
+      let g = groups.get(k);
+      if (!g) groups.set(k, g = { kind: x.kind, key: x.key, name: x.name, need: x.kind === 'region' ? [3, 5] : [x.need || 2], members: [] });
+      g.members.push(id);
     }
-    if (!best || best.v <= cur) break;
-    b.cards.push(best.id); b.cardStars.push(starOf(best.id)); cur = best.v;
-    await new Promise((r) => setTimeout(r, 0));
   }
-  // swaps: replace one card by another while it helps (catches region sets and load trade-offs)
-  for (let round = 0; round < 3; round++) {
-    let moved = false;
-    for (let i = 0; i < b.cards.length; i++) {
-      const old = b.cards[i];
-      for (const id of pool) {
-        if (id === old || used() - cardLoad(old) + cardLoad(id) > cap || !haveLeft(id)) continue;
-        const oldStar = b.cardStars[i];
-        b.cards[i] = id; b.cardStars[i] = starOf(id); const v = sc();
-        if (v > cur * 1.001) { cur = v; moved = true; break; }
-        b.cards[i] = old; b.cardStars[i] = oldStar;
+  b.cards = []; b.cardStars = [];
+  await new Promise((r) => setTimeout(r, 0));
+  const val = Object.fromEntries(single.map((x) => [x.id, x.v]));
+  single.sort((a, b2) => b2.v - a.v);
+  // candidates: the strongest cards on their own + the best members of every combo
+  const cand = new Set(single.slice(0, 45).map((x) => x.id));
+  for (const g of groups.values()) for (const id of g.members.slice().sort((a, c) => val[c] - val[a]).slice(0, 7)) cand.add(id);
+  const C = [...cand];
+  const fill = (list) => {
+    // greedy fill from the candidates (gain per Spirit Load), then swaps over the candidates
+    let v = sc();
+    while (b.cards.length < slots) {
+      let best = null;
+      for (const id of list) {
+        if (used() + cardLoad(id) > cap || !haveLeft(id)) continue;
+        b.cards.push(id); b.cardStars.push(starOf(id));
+        const nv = sc(); const g = (nv - v) / cardLoad(id);
+        if (!best || g > best.g) best = { id, v: nv, g };
+        b.cards.pop(); b.cardStars.pop();
       }
+      if (!best || best.v <= v) break;
+      b.cards.push(best.id); b.cardStars.push(starOf(best.id)); v = best.v;
     }
-    await new Promise((r) => setTimeout(r, 0));
-    if (!moved) break;
+    for (let round = 0; round < 4; round++) {
+      let moved = false;
+      for (let i = 0; i < b.cards.length; i++) {
+        const old = b.cards[i]; const oldStar = b.cardStars[i];
+        let best = null;
+        for (const id of list) {
+          if (id === old || used() - cardLoad(old) + cardLoad(id) > cap) continue;
+          b.cards[i] = id; b.cardStars[i] = starOf(id);
+          if (haveLeft(id) || b.cards.filter((c) => c === id).length <= ((owned && owned[id] && owned[id].n) || 99)) { const nv = sc(); if (nv > v * 1.0005 && (!best || nv > best.v)) best = { id, v: nv }; }
+          b.cards[i] = old; b.cardStars[i] = oldStar;
+        }
+        if (best) { b.cards[i] = best.id; b.cardStars[i] = starOf(best.id); v = best.v; moved = true; }
+      }
+      if (!moved) break;
+    }
+    return v;
+  };
+  // 2) start points: nothing forced, and every combo (region 3 and 5, kin pair, colour set) forced in with its best members
+  const seeds = [[]];
+  for (const g of groups.values()) {
+    const mem = g.members.filter((id) => !owned || owned[id]).sort((a, c) => val[c] - val[a]);
+    for (const n of g.need) if (mem.length >= n) seeds.push(mem.slice(0, n));
   }
+  let best = null;
+  for (const seed of seeds) {
+    b.cards = []; b.cardStars = [];
+    let ok = true;
+    for (const id of seed) { if (b.cards.length >= slots || used() + cardLoad(id) > cap || !haveLeft(id)) { ok = false; break; } b.cards.push(id); b.cardStars.push(starOf(id)); }
+    if (!ok) continue;
+    const v = fill(C);
+    if (!best || v > best.v) best = { v, cards: b.cards.slice(), stars: b.cardStars.slice() };
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  b.cards = best ? best.cards : []; b.cardStars = best ? best.stars : [];
+  // 3) last polish over every card in the game (or every card owned)
+  cur = fill(pool);
+  const tried = seeds.length;
+  const combos = ((cardScore(b, q).r || {}).album || {}).res || [];
+  const sets = combos.filter((x) => x.on).map((x) => ({ kind: x.kind, name: x.name, count: x.count, need: x.need, tier: x.tier, fx: (x.fx || []).map(comboFx) }));
+  const near = combos.filter((x) => !x.on && x.count > 0 && x.count + 1 >= (x.kind === 'region' ? 3 : x.need)).map((x) => ({ kind: x.kind, name: x.name, count: x.count, need: x.kind === 'region' ? 3 : x.need }));
   const fin = cardScore(b, q);
-  const al = (fin.r && fin.r.album) || {};
-  const sets = (al.res || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => x.name + ' ' + x.count + ' ใบ');
   // why each card: damage lost without it, and the skill it lifts the most
   const shareOf = (r) => Object.fromEntries((((r && r.rotation) || {}).share || []).map((x) => [x.key, x.dmg]));
   const fullShare = shareOf(fin.r);
@@ -460,8 +520,71 @@ L.cards = async (p) => {
     cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], why: why[i], proc: (G.cardDefs[id].fx || []).some((f) => f.k !== 'stat' && !/Pct$|^(crit|critDmg|cdr|aspd|armorPen|boss|elite|night|gold|drop|spellAmp|castSpd|hit|flee|def|mdef|matk|atk|maxHp|maxMp|dmgTaken|slayer|ward|wardBoss|wardNight|debuffed|opener|desperate|haste|barrier|spirit|gather|block|lifesteal|magicRes|thorns)$/.test(f.k)), role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
-    sets, evals, ms: Math.round(performance.now() - t0),
+    sets, near, seeds: tried, evals, ms: Math.round(performance.now() - t0),
   };
+};
+
+// ---------- every card combo in the game, read from the game's album rules ----------
+L.combos = async () => {
+  await load();
+  if (!G.cardDefs || !G.mobs) throw new Error('หาข้อมูลการ์ดของเกมไม่เจอ');
+  const b = baseBuild({ job: 'mage', level: 100, jobLevel: 50, stats: {}, target: 'training_dummy', targetLevel: 100 });
+  const groups = new Map();
+  for (const id of Object.keys(G.cardDefs)) {
+    if (!G.mobs[id]) continue;
+    b.cards = [id]; b.cardStars = [5];
+    let r; try { r = G.calc(b); } catch { continue; }
+    for (const x of ((r.album && r.album.res) || [])) {
+      if (!x.count) continue;
+      const k = x.kind + ':' + x.key;
+      let g = groups.get(k);
+      if (!g) groups.set(k, g = { kind: x.kind, key: x.key, name: x.name, members: [] });
+      g.members.push(id);
+    }
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    const tiers = [];
+    for (const n of g.kind === 'region' ? [3, 5] : g.kind === 'kin' ? [2] : [2, 3]) {
+      if (g.members.length < n) continue;
+      b.cards = g.members.slice(0, n); b.cardStars = b.cards.map(() => 5);
+      let r; try { r = G.calc(b); } catch { continue; }
+      const x = ((r.album && r.album.res) || []).find((y) => y.kind === g.kind && y.key === g.key);
+      if (x && x.on && !tiers.some((t) => t.n === x.count && t.fx.join() === (x.fx || []).map(comboFx).join())) tiers.push({ n, fx: (x.fx || []).map(comboFx) });
+      if (x && x.on && g.kind !== 'region') break;
+    }
+    out.push({ kind: g.kind, name: g.name, count: g.members.length, tiers, members: g.members });
+  }
+  const order = { region: 0, kin: 1, color: 2 };
+  out.sort((a, c) => order[a.kind] - order[c.kind] || a.name.localeCompare(c.name));
+  return out;
+};
+
+// ---------- competition mode: skills and cards tuned together ----------
+// skills -> best cards -> skills again with those cards -> cards again, for the strongest paths
+const toAlbum = (cards, stars) => Object.fromEntries(cards.map((m, i) => ['s' + (i + 1), 'spirit_card' + ((stars[i] || 1) > 1 ? '+' + ((stars[i] || 1) - 1) : '') + '|' + m]));
+L.full = async (p) => {
+  await load();
+  const t0 = performance.now();
+  const goal = p.goal || (p.mode === 'boss' ? 'boss' : 'farm');
+  const first = await L.run({ ...p, current: null });
+  const out = [];
+  for (const res of first.results.slice(0, p.paths && p.paths.length === 1 ? 1 : 2)) {
+    const path = res.build.c2 || '';
+    let build = res.build; let cards = null; let lo = p.loadout ? { ...p.loadout } : {};
+    for (let round = 0; round < 2; round++) {
+      cards = await L.cards({ ...p, loadout: lo, build, goal });
+      lo = { ...lo, album: toAlbum(cards.cards.map((c) => c.id), cards.cards.map((c) => c.star)) };
+      const again = await L.run({ ...p, loadout: lo, paths: [path], current: null });
+      build = again.results[0].build;
+    }
+    cards = await L.cards({ ...p, loadout: lo, build, goal });
+    lo = { ...lo, album: toAlbum(cards.cards.map((c) => c.id), cards.cards.map((c) => c.star)) };
+    const fin = await L.run({ ...p, loadout: lo, paths: [path], current: p.current });
+    out.push({ result: fin.results[0], cards, current: fin.current, target: fin.target });
+  }
+  out.sort((a, b) => b.result.score - a.result.score);
+  return { mode: p.mode, goal, out, ms: Math.round(performance.now() - t0) };
 };
 
 // ---------- which map earns the most for a build ----------

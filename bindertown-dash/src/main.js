@@ -1377,6 +1377,8 @@ function registerIpc() {
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  handle('lab-combos', () => labCall('window.__bdLab.combos()'));
+  handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
   handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
   handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(p)})`));
   handle('lab-me', async (id) => {

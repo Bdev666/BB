@@ -630,11 +630,7 @@ async function openLab(opt = {}) {
   const res = el('div', { class: 'lab-res' });
   go.onclick = async () => {
     go.disabled = true; res.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองชุดสกิล + Evolution + Trait + ช่องลัด ทั้งคลาส 1 และคลาส 2 ทุกสาย…'));
-    const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
-      stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
-    if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
-    if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
-    if (owned.length) p.owned = owned;
+    const p = labParams();
     lastLab = p;
     try {
       renderLab(res, await dash.invoke('lab-run', p));
@@ -643,6 +639,48 @@ async function openLab(opt = {}) {
     } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     go.disabled = false;
   };
+  const labParams = () => {
+    const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+      stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
+    if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
+    if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
+    if (owned.length) p.owned = owned;
+    return p;
+  };
+  // competition mode: skills -> cards -> skills -> cards for the 2 strongest paths, every hotbar order
+  const fullStars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
+  const full = el('button', { class: 'primary gold', title: 'ปรับสกิลกับการ์ดสลับกันจนนิ่ง + ลองลำดับช่องลัดทุกแบบ ใช้เวลา 30–90 วิ' }, '🏆 โหมดแข่ง (ละเอียดสุด)');
+  full.onclick = async () => {
+    full.disabled = true; go.disabled = true;
+    const t = Date.now();
+    const tick = setInterval(() => { res.firstChild && (res.firstChild.textContent = `🏆 กำลังปรับสกิล ⇄ การ์ด ทีละรอบ… ${Math.round((Date.now() - t) / 1000)} วิ (ราว 30–90 วิ)`); }, 1000);
+    res.replaceChildren(el('p', { class: 'hint' }, '🏆 กำลังปรับสกิล ⇄ การ์ด ทีละรอบ…'));
+    const p = { ...labParams(), stars: +fullStars.value, goal: mode.value === 'boss' ? 'boss' : 'farm' };
+    lastLab = p;
+    try {
+      const f = await dash.invoke('lab-full', p);
+      renderLab(res, { mode: p.mode, target: f.out[0].target, results: f.out.map((o) => o.result), current: f.out[0].current, evals: 0, ms: f.ms, loadout: !!p.loadout, full: true });
+      res.querySelectorAll('.lab-card').forEach((cardEl, i) => { const box = cardEl.querySelector('.lab-cards'); if (box && f.out[i]) box.replaceChildren(...cardsView(f.out[i].cards, p.goal)); });
+      res.prepend(el('p', { class: 'hint' }, `🏆 โหมดแข่ง: สกิลกับการ์ดปรับร่วมกัน 2 รอบ + ลำดับช่องลัดทุกแบบ · ${(f.ms / 1000).toFixed(0)} วิ · DPS ในการ์ดผลลัพธ์รวมการ์ดชุดนี้แล้ว`));
+    } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
+    clearInterval(tick); full.disabled = false; go.disabled = false;
+  };
+  const comboBtn = el('button', { class: 'tiny', onclick: async () => {
+    comboBtn.disabled = true;
+    try {
+      const list = await dash.invoke('lab-combos');
+      const kindName = { region: '🗺 เซ็ตภูมิภาค (การ์ดต่างชนิด ภูมิภาคเดียวกัน)', kin: '🐾 คู่สายพันธุ์ (2 ใบต่างชนิด สายพันธุ์เดียวกัน)', color: '🎨 สีการ์ด (ต้อง ★3 ขึ้นไปทุกใบ)' };
+      openModal('📖 คอมโบการ์ดทั้งหมด (จากข้อมูลเกม)', [
+        el('p', { class: 'hint' }, 'การ์ดซ้ำชนิดเดียวกันได้ผล 100% / 50% / 25% / 0% · คอมโบนับการ์ดต่างชนิดกัน · ค่าในตารางคือโบนัสคอมโบ (ไม่ขึ้นกับดาว)'),
+        ...['region', 'kin', 'color'].map((k) => el('div', {}, el('h4', {}, kindName[k]),
+          el('table', { class: 'lab-maps' }, el('tr', {}, ...['คอมโบ', 'ใส่กี่ใบ', 'โบนัส', 'การ์ดที่นับ'].map((h) => el('th', {}, h))),
+            ...list.filter((x) => x.kind === k).flatMap((x) => (x.tiers.length ? x.tiers : [{ n: '-', fx: [] }]).map((t, i) => el('tr', {},
+              el('td', {}, i ? '' : x.name), el('td', {}, String(t.n)), el('td', {}, t.fx.join(' · ')),
+              el('td', { class: 'hint' }, i ? '' : `${x.count} ชนิด: ` + x.members.slice(0, 10).map(labPretty).join(', ') + (x.count > 10 ? ' …' : '')))))))),
+      ]);
+    } catch (e) { alert(e.message); }
+    comboBtn.disabled = false;
+  } }, '📖 คอมโบการ์ดทั้งหมด');
   out.replaceChildren(...[
     el('p', { class: 'hint' }, 'ใช้สูตรดาเมจของเกมเอง (ตัวเดียวกับหน้าบิลด์แนะนำในเกม) ลองลงแต้มสกิล · Evolution A/B · Trait ของสาย · ลำดับช่องลัด แล้วจัดอันดับ คลาส 1 อย่างเดียว เทียบกับคลาส 2 ทั้งสองสาย'),
     el('div', { class: 'lab-form' },
@@ -656,10 +694,31 @@ async function openLab(opt = {}) {
       el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
         hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)'),
       me ? el('small', { class: 'hint' }, ` · มีการ์ด ${owned.length} ชนิด${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)}` : ''}`) : null),
-    go, res,
+    el('div', { class: 'lab-row' }, go, full, el('small', { class: 'hint' }, ' ดาวการ์ด (โหมดแข่ง ถ้าไม่ใช้เฉพาะที่มี) '), fullStars, comboBtn), res,
     el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
   ].filter(Boolean));
   if (opt.auto && me) go.click();
+}
+
+// card result: the cards, what each adds, combos on and one card away
+function cardsView(r, goal) {
+  const pct = (a, b) => (b ? `${a >= b ? '+' : ''}${Math.round((a / b - 1) * 100)}%` : '');
+  return [
+        el('div', { class: 'lab-row' }, el('b', {}, `${{ boss: '👑 การ์ด DPS ตีบอส', farm: '🌾 การ์ด DPS ฟาร์ม', gold: '💰 การ์ดฟาร์มเงิน' }[goal]} · ${r.magic ? 'สายเวท' : 'สายกายภาพ'}`),
+          el('small', { class: 'hint' }, ` · ${r.cards.length}/${r.slots} ช่อง · Spirit Load ${r.load}/${r.cap} · ${r.owned ? `จากการ์ดที่มี ${r.poolSize} ชนิด` : 'จากการ์ดทุกใบในเกม ' + '★'.repeat(r.star)} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}`)),
+        r.now ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, `การ์ดที่ใส่อยู่ตอนนี้: DPS ${num(r.now.dps)}${r.now.gold ? ` · Gold +${r.now.gold}%` : ''} → ชุดใหม่ ${num(r.after.dps)} (${pct(r.after.dps, r.now.dps)})`)) : null,
+        el('div', { class: 'lab-row' }, el('span', { class: 'chip' }, `DPS ${num(r.before.dps)} → ${num(r.after.dps)} (${pct(r.after.dps, r.before.dps)})`),
+          r.after.gold ? el('span', { class: 'chip' }, `Gold +${r.after.gold}%`) : null, r.after.drop ? el('span', { class: 'chip' }, `Drop +${r.after.drop}%`) : null,
+          r.seeds ? el('small', { class: 'hint' }, ` · ลอง ${r.seeds} จุดเริ่ม (ทุกคอมโบ) ${num(r.evals)} แบบ`) : null),
+    r.sets && r.sets.length ? el('div', { class: 'lab-row' }, el('small', {}, '🔗 คอมโบที่ติด: '), ...r.sets.map((t) => el('span', { class: 'chip combo ' + t.kind, title: t.fx.join(' · ') }, `${t.name} ${t.count} ใบ: ${t.fx.join(', ')}`))) : null,
+    r.near && r.near.length ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, 'ขาดอีก 1 ใบ: '), ...r.near.map((t) => el('span', { class: 'chip dim' }, `${t.name} ${t.count}/${t.need}`))) : null,
+        el('div', { class: 'lab-cardlist' }, ...r.cards.map((c, i) => el('div', { class: 'lab-card1' },
+          el('b', {}, `${i + 1}. ${labPretty(c.id)}`), el('small', { class: 'hint' }, ` ${'★'.repeat(c.star || 1)} · ${c.role || ''} Lv ${c.level} · Load ${c.load}`),
+          el('div', { class: 'hint' }, c.fx.join(' · ')),
+          c.why ? el('div', { class: 'why' }, `${goal === 'gold' ? 'คะแนน' : 'DPS'} +${c.why.pct}%${c.why.skill ? ` · ช่วย ${c.why.skill} มากสุด${c.why.skillPct ? ` (+${c.why.skillPct}%)` : ''}` : ''}${c.why.set ? ` · ทำให้ครบเซ็ต ${c.why.set}` : ''}`) : null,
+          c.proc ? el('div', { class: 'hint' }, '⚠ มีเอฟเฟกต์พิเศษ (proc) ที่เครื่องคิดเลขของเกมคิดแบบเฉลี่ย') : null))),
+        el('p', { class: 'hint' }, goal === 'gold' ? 'คะแนนฟาร์มเงิน = ความเร็วฆ่ามอน × (1 + Gold%) × (1 + Drop%/2) · การ์ด slayer(ชนิด) แรงเฉพาะมอนชนิดนั้น (จัดตามเป้าด้านบน) ถ้าฟาร์มแมพอื่นให้เปลี่ยนเป็นการ์ดเพิ่ม ATK/MATK/INT/STR แทน' : 'จัดจากเครื่องคิดเลขของเกม (ตัวเดียวกับหน้าคำนวณดาเมจใน wiki) รวมโบนัสเซ็ตภูมิภาค · "ช่วยสกิลไหน" = สกิลที่ดาเมจหายมากสุดถ้าถอดใบนั้น · ค่าการ์ดตามดาวที่เลือก (wiki แสดง ★1) · ไม่รวมการ์ดบอสโลก')
+  ].filter(Boolean);
 }
 
 // card build for one Build Lab result: best cards for boss DPS, farm DPS or gold farming
@@ -675,20 +734,7 @@ function cardBox(x) {
       const q = { ...lastLab, build: x.build, goal, stars: +stars.value };
       if (!onlyMine.checked) delete q.owned;
       const r = await dash.invoke('lab-cards', q);
-      const pct = (a, b) => (b ? `${a >= b ? '+' : ''}${Math.round((a / b - 1) * 100)}%` : '');
-      out.replaceChildren(
-        el('div', { class: 'lab-row' }, el('b', {}, `${{ boss: '👑 การ์ด DPS ตีบอส', farm: '🌾 การ์ด DPS ฟาร์ม', gold: '💰 การ์ดฟาร์มเงิน' }[goal]} · ${r.magic ? 'สายเวท' : 'สายกายภาพ'}`),
-          el('small', { class: 'hint' }, ` · ${r.cards.length}/${r.slots} ช่อง · Spirit Load ${r.load}/${r.cap} · ${r.owned ? `จากการ์ดที่มี ${r.poolSize} ชนิด` : 'จากการ์ดทุกใบในเกม ' + '★'.repeat(r.star)} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}`)),
-        r.now ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, `การ์ดที่ใส่อยู่ตอนนี้: DPS ${num(r.now.dps)}${r.now.gold ? ` · Gold +${r.now.gold}%` : ''} → ชุดใหม่ ${num(r.after.dps)} (${pct(r.after.dps, r.now.dps)})`)) : null,
-        el('div', { class: 'lab-row' }, el('span', { class: 'chip' }, `DPS ${num(r.before.dps)} → ${num(r.after.dps)} (${pct(r.after.dps, r.before.dps)})`),
-          r.after.gold ? el('span', { class: 'chip' }, `Gold +${r.after.gold}%`) : null, r.after.drop ? el('span', { class: 'chip' }, `Drop +${r.after.drop}%`) : null,
-          ...r.sets.map((t) => el('span', { class: 'chip' }, '🔗 เซ็ต ' + t))),
-        el('div', { class: 'lab-cardlist' }, ...r.cards.map((c, i) => el('div', { class: 'lab-card1' },
-          el('b', {}, `${i + 1}. ${labPretty(c.id)}`), el('small', { class: 'hint' }, ` ${'★'.repeat(c.star || 1)} · ${c.role || ''} Lv ${c.level} · Load ${c.load}`),
-          el('div', { class: 'hint' }, c.fx.join(' · ')),
-          c.why ? el('div', { class: 'why' }, `${goal === 'gold' ? 'คะแนน' : 'DPS'} +${c.why.pct}%${c.why.skill ? ` · ช่วย ${c.why.skill} มากสุด${c.why.skillPct ? ` (+${c.why.skillPct}%)` : ''}` : ''}${c.why.set ? ` · ทำให้ครบเซ็ต ${c.why.set}` : ''}`) : null,
-          c.proc ? el('div', { class: 'hint' }, '⚠ มีเอฟเฟกต์พิเศษ (proc) ที่เครื่องคิดเลขของเกมคิดแบบเฉลี่ย') : null))),
-        el('p', { class: 'hint' }, goal === 'gold' ? 'คะแนนฟาร์มเงิน = ความเร็วฆ่ามอน × (1 + Gold%) × (1 + Drop%/2) · การ์ด slayer(ชนิด) แรงเฉพาะมอนชนิดนั้น (จัดตามเป้าด้านบน) ถ้าฟาร์มแมพอื่นให้เปลี่ยนเป็นการ์ดเพิ่ม ATK/MATK/INT/STR แทน' : 'จัดจากเครื่องคิดเลขของเกม (ตัวเดียวกับหน้าคำนวณดาเมจใน wiki) รวมโบนัสเซ็ตภูมิภาค · "ช่วยสกิลไหน" = สกิลที่ดาเมจหายมากสุดถ้าถอดใบนั้น · ค่าการ์ดตามดาวที่เลือก (wiki แสดง ★1) · ไม่รวมการ์ดบอสโลก'));
+      out.replaceChildren(...cardsView(r, goal));
     } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = false;
   };
@@ -729,7 +775,7 @@ function mapBox(x) {
 function renderLab(box, r) {
   const best = r.results[0];
   const cur = r.current;
-  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ${r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'} · ลอง ${num(r.evals)} แบบ ใน ${(r.ms / 1000).toFixed(1)} วิ`);
+  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
       el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(x.score)}`),

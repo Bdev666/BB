@@ -266,3 +266,9 @@ h3.foldable::before { content: '▾ '; opacity: .6; }
 .lab-maps tr.risky td:nth-child(7) { color: #f87171; }
 .lab-maps tr.low { opacity: .7; }
 .lab-card1 .why { color: #4ade80; font-size: 12px; margin-top: 2px; }
+
+.lab-row .chip.combo { background: #2a2140; }
+.lab-row .chip.combo.region { background: #1f3326; }
+.lab-row .chip.combo.color { background: #3a2a1a; }
+.lab-row .chip.dim { opacity: .65; }
+button.primary.gold { background: linear-gradient(90deg, #b8860b, #f5c542); color: #1a1a1a; }
