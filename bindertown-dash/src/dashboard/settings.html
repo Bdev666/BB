@@ -26,6 +26,10 @@
           <label class="switch"><input type="checkbox" data-set="openDashboardOnStart"><i></i></label>
         </div>
         <div class="row">
+          <div><b>เปิดเกมแบบซ่อน</b><p>เกมโหลดและเล่นอยู่เบื้องหลัง ไม่เด้งหน้าต่างขึ้นมา (เครื่องลื่นกว่า เปิดหลายบัญชีพร้อมกันได้สบาย) · กด "ไปที่เกม" เมื่ออยากดู</p></div>
+          <label class="switch"><input type="checkbox" data-set="openHidden"><i></i></label>
+        </div>
+        <div class="row">
           <div><b>เปิดทุกบัญชีตอนเปิดโปรแกรม</b><p>ถ้าไม่เลือก จะเปิดแค่ Dashboard แล้วกดเปิดเองทีละบัญชี</p></div>
           <label class="switch"><input type="checkbox" data-set="openAllOnStart"><i></i></label>
         </div>
@@ -161,6 +165,11 @@
           <div class="logo">B</div>
           <div><b class="big">BinderDash</b> <span id="version"></span><p id="author"></p></div>
         </div>
+        <div class="row">
+          <div><b>อัปเดต</b><p id="upd-status">-</p></div>
+          <button id="upd-check" class="primary">ตรวจหาอัปเดต</button>
+        </div>
+        <p class="lead">โปรแกรมเช็กเวอร์ชันใหม่เองตอนเปิดและทุก 30 นาที ถามก่อนทุกครั้ง ไม่ต้องโหลดไฟล์ติดตั้งใหม่เอง</p>
         <p class="lead">โปรแกรมแฟนเมดสำหรับเล่น Binder Town หลายบัญชี ไม่เป็นทางการ ไม่เกี่ยวข้องกับผู้พัฒนาเกม · อ่านข้อมูลอย่างเดียว ไม่คลิกหรือเล่นแทน</p>
       </div>
     </section>

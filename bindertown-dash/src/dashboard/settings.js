@@ -28,6 +28,7 @@ function render(state) {
     if (info) $('#gameUrl').value = s.gameUrl || info.defaultGameUrl;
   }
   $('#tg-on').hidden = !s.telegram.connected;
+  if (state.update) $('#upd-status').textContent = updateText(state.update);
   $('#tg-off').hidden = s.telegram.connected;
 }
 
@@ -76,6 +77,21 @@ $('#tg-connect').addEventListener('click', async () => {
 $('#tg-disconnect').addEventListener('click', () => { dash.invoke('telegram-disconnect'); $('#tg-msg').textContent = ''; });
 $('#open-userdata').addEventListener('click', () => dash.invoke('open-userdata'));
 $('#open-captures').addEventListener('click', () => dash.invoke('open-captures'));
+
+function updateText(u) {
+  const when = u.checkedAt ? ` · ตรวจล่าสุด ${new Date(u.checkedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}` : '';
+  switch (u.status) {
+    case 'checking': return 'กำลังตรวจ...';
+    case 'latest': return `เป็นเวอร์ชันล่าสุดแล้ว (v${u.current})${when}`;
+    case 'available': return `มีเวอร์ชันใหม่ v${u.version}${when}`;
+    case 'downloading': return `กำลังดาวน์โหลด v${u.version} ${u.percent}%`;
+    case 'ready': return 'กำลังติดตั้งและเปิดใหม่...';
+    case 'dev': return 'โหมดพัฒนา (ยังไม่ได้ติดตั้ง) ไม่ตรวจอัปเดต';
+    case 'error': return `ตรวจไม่สำเร็จ: ${u.error}${when}`;
+    default: return `v${u.current}`;
+  }
+}
+$('#upd-check').addEventListener('click', () => dash.invoke('update-now'));
 
 // ---------- start ----------
 dash.onState(render);

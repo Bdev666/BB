@@ -13,9 +13,11 @@
       <span>ออนไลน์ <b id="k-online">0 / 0</b></span>
       <span>Silver รวม <b id="k-silver">-</b></span>
       <span>Silver รอบนี้ <b id="k-silver-run" class="pos">-</b></span>
+      <span title="Silver/ชม. + มูลค่าดรอป/ชม. ของทุกบัญชีที่ออนไลน์">รายได้/ชม. <b id="k-income" class="gold">-</b></span>
       <span>คนในเซิร์ฟ <b id="k-server">-</b></span>
     </div>
     <div class="actions">
+      <button id="update-btn" class="update" hidden title="มีเวอร์ชันใหม่ กดเพื่ออัปเดต"></button>
       <button id="toggle-all" title="ซ่อน/แสดงหน้าต่างเกมทุกบัญชีพร้อมกัน (เหมือนคลิกไอคอน BinderDash มุมขวาล่าง)">ซ่อน/แสดงเกมทั้งหมด</button>
       <button id="toggle-settings" title="เปิดหน้าต่างตั้งค่า">ตั้งค่า</button>
     </div>
@@ -60,8 +62,9 @@
           <div class="log-head"><h3>เหตุการณ์</h3><div class="chips" id="ev-chips"></div></div>
           <div class="lines" id="ev-lines"></div>
         </section>
-        <section class="panel log">
-          <div class="log-head"><h3>แชท</h3><div class="chips" id="chat-chips"></div></div>
+        <section class="panel log chat" id="chat-panel">
+          <div class="log-head"><h3>แชท</h3><div class="chips" id="chat-chips"></div>
+            <button id="chat-toggle" class="mini-btn" title="ย่อ/ขยายช่องแชท">ย่อ ▸</button></div>
           <div class="lines" id="chat-lines"></div>
         </section>
       </div>

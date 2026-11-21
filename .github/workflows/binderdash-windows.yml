@@ -1,11 +1,19 @@
 name: BinderDash Windows build
 
+# Every push to bindertown-dash/ builds the installer as a workflow artifact.
+# A tag "binderdash-v<version>" also publishes a GitHub Release, which installed
+# copies of BinderDash pick up through their in-app updater.
 on:
   push:
     paths:
       - 'bindertown-dash/**'
       - '.github/workflows/binderdash-windows.yml'
+    tags:
+      - 'binderdash-v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -22,9 +30,18 @@ jobs:
           cache-dependency-path: bindertown-dash/package-lock.json
       - run: npm ci
       - run: npm run check
-      - run: npx electron-builder --win nsis --x64 --publish never
+      - name: Build
+        if: ${{ !startsWith(github.ref, 'refs/tags/binderdash-v') }}
+        run: npx electron-builder --win nsis --x64 --publish never
+      - name: Build and publish release
+        if: ${{ startsWith(github.ref, 'refs/tags/binderdash-v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --x64 --publish always
       - uses: actions/upload-artifact@v4
         with:
           name: BinderDash-Setup
-          path: bindertown-dash/dist/*.exe
+          path: |
+            bindertown-dash/dist/*.exe
+            bindertown-dash/dist/latest.yml
           if-no-files-found: error

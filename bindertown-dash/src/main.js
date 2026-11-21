@@ -12,6 +12,7 @@ const icons = require('./icons');
 const { BinderTownAdapter, SNAPSHOT_JS } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
+const updater = require('./updater');
 
 const DEFAULT_GAME_URL = 'https://play.bindertowngame.com/';
 let gameUrl = DEFAULT_GAME_URL; // read from settings once at startup
@@ -59,6 +60,7 @@ function publicState() {
   return {
     settings: { ...store.data.settings, telegram: { connected: !!(store.data.settings.telegram.token && store.data.settings.telegram.chatId) } },
     maxAccounts: MAX_ACCOUNTS,
+    update: { ...updater.state(), current: app.getVersion() },
     accounts: store.data.accounts.map((a) => {
       const g = rt(a.id);
       return {
@@ -75,14 +77,18 @@ function publicState() {
   };
 }
 
+const visible = (w) => !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized();
 let pushTimer = null;
 function pushState() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    const st = publicState();
-    for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:state', st);
     updateTray();
+    // nobody looking: don't build or send anything
+    const targets = [dashboard, settingsWin].filter(visible);
+    if (!targets.length) return;
+    const st = publicState();
+    for (const w of targets) w.webContents.send('dash:state', st);
   }, 250);
 }
 
@@ -142,7 +148,7 @@ function isGameUrl(url) {
   } catch { return false; }
 }
 
-function openGame(id) {
+function openGame(id, opts = {}) {
   const a = account(id);
   if (!a) return;
   const g = rt(id);
@@ -158,19 +164,27 @@ function openGame(id) {
     title: windowTitle(id),
     icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
+    backgroundColor: '#0b1220', // the game's own background: no white flash while loading
     webPreferences: {
       partition: `persist:acc-${id}`, // separate login/cookies per account
       preload: path.join(__dirname, 'preload-game.js'),
       contextIsolation: true,
       sandbox: true,
       backgroundThrottling: false,
+      spellcheck: false,
+      v8CacheOptions: 'bypassHeatCheck', // keep compiled game code: faster later opens
     },
   });
   g.win = win;
   g.userPlaced = false;
   placeOverDashboard(win);
-  win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show(); });
-  setTimeout(() => { if (!win.isDestroyed() && !win.isVisible()) win.show(); }, 3000);
+  // "open hidden" (Settings): the game loads and plays without ever taking the screen
+  const startHidden = !!(store.data.settings.openHidden || opts.hidden);
+  if (!startHidden) {
+    win.once('ready-to-show', () => { if (!win.isDestroyed()) win.show(); });
+    setTimeout(() => { if (!win.isDestroyed() && !win.isVisible() && !g.hiddenOnPurpose) win.show(); }, 3000);
+  }
+  g.hiddenOnPurpose = startHidden;
   win.on('moved', () => { g.userPlaced = true; });
   g.status = 'loading';
   g.alerts.clear();
@@ -240,7 +254,8 @@ function attachWatcher(id, wc) {
   const g = rt(id);
   const dbg = wc.debugger;
   try { dbg.attach('1.3'); } catch (err) { console.warn('debugger attach failed', err); return; }
-  dbg.sendCommand('Network.enable').catch(() => {});
+  // small buffers: we only need WebSocket frames, not response bodies kept in memory
+  dbg.sendCommand('Network.enable', { maxTotalBufferSize: 1024 * 1024, maxResourceBufferSize: 64 * 1024 }).catch(() => {});
   dbg.on('message', (_e, method, params) => {
     if (method === 'Network.webSocketCreated') {
       g.sockets.add(params.requestId);
@@ -276,12 +291,19 @@ function onFrame(id, frame) {
 }
 
 // Read the game's own state (window.__game) once a second: character, mobs, minimap. Read-only.
+let watchedId = null; // account the dashboard is showing (gets the minimap)
 async function pollSnapshots() {
+  const looking = visible(dashboard);
+  const now = Date.now();
   for (const [id, g] of openGames()) {
     if (g.snapshotBusy || g.status === 'maintenance' || g.status === 'crashed') continue;
+    // dashboard closed: every 3 s is plenty for alerts
+    if (!looking && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
+    g.lastSnapAt = now;
     g.snapshotBusy = true;
     try {
-      const snap = await g.win.webContents.executeJavaScript(SNAPSHOT_JS, true);
+      const wantMini = looking && id === watchedId;
+      const snap = await g.win.webContents.executeJavaScript(`window.__bdWantMini=${wantMini};` + SNAPSHOT_JS, true);
       if (!g.win || g.win.isDestroyed()) continue;
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
@@ -313,6 +335,7 @@ function showGame(id) {
   if (!g.win || g.win.isDestroyed()) return openGame(id);
   if (g.win.isMinimized()) g.win.restore();
   if (!g.win.isVisible() && !g.userPlaced) placeOverDashboard(g.win);
+  g.hiddenOnPurpose = false;
   g.win.show();
   g.win.focus();
 }
@@ -520,6 +543,7 @@ function registerIpc() {
   handle('state', () => publicState());
   handle('detail', (id) => {
     if (!account(id)) return null;
+    watchedId = id;
     const g = rt(id);
     return g.data.detail();
   });
@@ -561,7 +585,7 @@ function registerIpc() {
   });
   handle('settings', (patch) => {
     const s = store.data.settings;
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.ramLimitMB !== undefined) s.ramLimitMB = Math.min(8000, Math.max(500, Number(patch.ramLimitMB) || 1500));
     if (patch.gameUrl !== undefined) {
       const u = String(patch.gameUrl).trim();
@@ -611,6 +635,9 @@ function registerIpc() {
     pushState();
   });
   handle('open-settings', (tab) => openSettings(tab));
+  handle('update-check', () => updater.check(true));
+  handle('update-now', () => { const u = updater.state(); if (u.status === 'available') updater.download(); else updater.check(true); });
+  handle('open-hidden', (id) => openGame(id, { hidden: true }));
   handle('app-info', () => ({
     name: 'BinderDash',
     version: app.getVersion(),
@@ -652,7 +679,20 @@ app.whenReady().then(() => {
   registerIpc();
   createTray();
   if (store.data.settings.openDashboardOnStart) createDashboard();
-  if (store.data.settings.openAllOnStart) store.data.accounts.forEach((a, i) => setTimeout(() => openGame(a.id), i * 1500));
+  // accounts open before an update come back by themselves; otherwise "open all on start"
+  const reopen = store.data.reopenAfterUpdate;
+  const toOpen = Array.isArray(reopen) ? reopen.filter((id) => account(id))
+    : store.data.settings.openAllOnStart ? store.data.accounts.map((a) => a.id) : [];
+  if (reopen) { delete store.data.reopenAfterUpdate; store.save(); }
+  toOpen.forEach((id, i) => setTimeout(() => openGame(id, { hidden: !!reopen }), i * 2000)); // staggered: smoother start
+  updater.init({
+    onChange: () => pushState(),
+    beforeInstall: () => {
+      store.data.reopenAfterUpdate = openGames().map(([id]) => id);
+      store.save();
+      quitting = true;
+    },
+  });
   setInterval(tick, 15 * 1000);
   setInterval(demoTick, 500);
   setInterval(pollSnapshots, 1000);

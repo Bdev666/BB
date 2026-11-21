@@ -74,6 +74,7 @@ function accountCard(a) {
   return el('div', {
     class: 'acc' + (a.id === selected ? ' sel' : '') + (a.alerts.length ? ' alert' : ''),
     'data-id': a.id,
+    title: 'คลิก = ดูบัญชีนี้ · ดับเบิลคลิก = ไปที่เกม · Ctrl+1–9 เลือกบัญชี',
   },
   el('div', { class: 'acc-top' }, el('span', { class: 'dot ' + a.status }), name),
   el('div', { class: 'acc-meta' },
@@ -176,10 +177,25 @@ function renderProfile(a) {
     b.until ? el('small', {}, dur(b.until - now)) : b.stacks ? el('small', {}, '×' + b.stacks) : null)));
 
   const tiles = [
-    ['เวลาเล่น', dur(r.playMs)], ['ดาเมจ/วิ ตอนนี้', short(r.dpsNow)], ['ดาเมจเฉลี่ย/ครั้ง', short(r.avgHit)],
-    ['EXP/ชม.', short(r.expPerHour)], ['Kill/ชม.', short(r.killsPerHour)], ['Silver/ชม.', short(r.silverPerHour), 'pos'],
+    ['เวลาเล่น', dur(r.playMs), '', 'นับตั้งแต่เปิดเกมในบัญชีนี้'],
+    ['EXP/ชม.', short(r.expPerHour)],
+    ['Kill/ชม.', short(r.killsPerHour)],
+    ['ดาเมจ/วิ', short(r.dpsNow), '', `ดาเมจที่ตีได้ใน 1 นาทีล่าสุด · เฉลี่ยต่อครั้ง ${short(r.avgHit)}`],
+    ['Silver/ชม.', short(r.silverPerHour), 'pos', 'Silver ที่ได้จากการล้มมอน'],
+    ['ขายดรอป/ชม.', short(r.dropValuePerHour), 'pos', `มูลค่าของดรอปถ้าขาย NPC (คำนวณแบบเดียวกับเกม) · รวม ${num(r.dropValue)}`],
+    ['รายได้รวม/ชม.', short(r.incomePerHour), 'gold', 'Silver/ชม. + ขายดรอป/ชม.'],
+    ['การ์ด', r.cards ? `${num(r.cards)} · ${r.cardsPerHour.toFixed(1)}/ชม.` : '0', 'card', (d.cards || []).slice(-5).map((c) => c.mob).join(', ') || 'ยังไม่ได้การ์ด'],
   ];
-  $('#d-tiles').replaceChildren(...tiles.map(([l, v, c]) => el('div', { class: 'tile' + (c ? ' ' + c : '') }, el('span', {}, l), el('b', {}, v))));
+  // update text in place (no DOM rebuild every second)
+  const box = $('#d-tiles');
+  if (box.children.length !== tiles.length) {
+    box.replaceChildren(...tiles.map(([l, , c]) => el('div', { class: 'tile' + (c ? ' ' + c : '') }, el('span', {}, l), el('b', {}))));
+  }
+  tiles.forEach(([, v, , tip], i) => {
+    const t = box.children[i];
+    if (t.lastChild.textContent !== v) t.lastChild.textContent = v;
+    t.title = tip || '';
+  });
 }
 
 function chips(container, list, current, onPick) {
@@ -239,7 +255,7 @@ function renderMap() {
   const live = d.minimap || '';
   const src = live || (info ? MAP_IMG + info.id + '.webp' : '');
   img.classList.toggle('live', !!live);
-  if (live) { img.dataset.src = src; img.src = src; img.hidden = false; }
+  if (live) { if (img.dataset.src !== src) { img.dataset.src = src; img.src = src; } img.hidden = false; }
   else if (img.dataset.src !== src) {
     img.dataset.src = src;
     img.hidden = true;
@@ -309,10 +325,20 @@ function editWatch(row, name, limit) {
 }
 
 // ---------- top level ----------
+// Draw at most once per animation frame, whatever triggered it
+let renderQueued = false;
 function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; renderNow(); });
+}
+
+function renderNow() {
   if (!state || editing) return;
   if (!state.accounts.some((a) => a.id === selected)) selected = state.accounts.length ? state.accounts[0].id : null;
-  $('#accounts').replaceChildren(...state.accounts.map(accountCard));
+  // account list: rebuild only when something on it changed
+  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
+  rebuild($('#accounts'), listKey, () => state.accounts.map(accountCard));
   $('#add').disabled = state.accounts.length >= state.maxAccounts;
 
   const live = state.accounts.filter((a) => a.status === 'online' || a.status === 'demo');
@@ -320,6 +346,11 @@ function render() {
   const sum = (f) => live.reduce((t, a) => t + (typeof a.summary[f] === 'number' ? a.summary[f] : 0), 0);
   $('#k-silver').textContent = live.length ? num(sum('silver')) : '-';
   $('#k-silver-run').textContent = live.length ? signed(sum('silverToday')) : '-';
+  const u = state.update || {};
+  const ub = $('#update-btn');
+  ub.hidden = !['available', 'downloading', 'ready'].includes(u.status);
+  ub.textContent = u.status === 'downloading' ? `กำลังโหลด ${u.percent}%` : u.status === 'ready' ? 'กำลังติดตั้ง…' : `อัปเดต v${u.version}`;
+  $('#k-income').textContent = live.length ? short(sum('incomePerHour')) : '-';
   const online = Math.max(0, ...state.accounts.map((x) => (x.summary && x.summary.online) || 0));
   $('#k-server').textContent = online ? num(online) : '-';
 
@@ -349,6 +380,19 @@ function showBanner(text) {
   showBanner.t = setTimeout(() => { b.hidden = true; }, 10000);
 }
 
+$('#update-btn').addEventListener('click', () => dash.invoke('update-now'));
+// double-click an account = go to its game (opens it if closed)
+$('#accounts').addEventListener('dblclick', (e) => {
+  const card = e.target.closest('.acc');
+  if (!card || e.target.closest('.acc-name')) return;
+  dash.invoke('show', Number(card.dataset.id));
+});
+// Ctrl+1..9: pick an account
+addEventListener('keydown', (e) => {
+  if (!e.ctrlKey || e.shiftKey || !/^[1-9]$/.test(e.key) || !state) return;
+  const a = state.accounts[Number(e.key) - 1];
+  if (a) { selected = a.id; detail = null; render(); refreshDetail(); e.preventDefault(); }
+});
 // select an account on pointerdown (cards are redrawn often)
 $('#accounts').addEventListener('pointerdown', (e) => {
   const card = e.target.closest('.acc');
@@ -361,6 +405,16 @@ $('#add').addEventListener('click', async () => {
   if (id === false) showBanner('เพิ่มได้สูงสุด 10 บัญชี');
   else { selected = id; refreshDetail(); }
 });
+// Chat panel can be collapsed to a slim strip (remembered on this PC)
+function setChatMin(on) {
+  document.querySelector('.logs').classList.toggle('chat-min', on);
+  $('#chat-toggle').textContent = on ? '◂ แชท' : 'ย่อ ▸';
+  try { localStorage.setItem('chatMin', on ? '1' : ''); } catch { /* storage off */ }
+}
+$('#chat-toggle').addEventListener('click', (e) => { e.stopPropagation(); setChatMin(!document.querySelector('.logs').classList.contains('chat-min')); });
+$('#chat-panel').addEventListener('click', () => { if (document.querySelector('.logs').classList.contains('chat-min')) setChatMin(false); });
+try { setChatMin(localStorage.getItem('chatMin') === '1'); } catch { /* storage off */ }
+
 $('#toggle-all').addEventListener('click', () => dash.invoke('toggle-all'));
 $('#toggle-settings').addEventListener('click', () => dash.invoke('open-settings'));
 

@@ -15,7 +15,8 @@
 //                  silver, gold, str, agi, vit, int, dex, luk, map }   (any subset)
 //   { type:'hit', target, dmg, crit, skill }   { type:'miss', target }
 //   { type:'hurt', from, dmg }                  { type:'kill', target, exp, job, silver }
-//   { type:'loot', item, qty }                  { type:'bag', items:[{ name, qty }] }
+//   { type:'loot', item, qty, value }  value = NPC sell price x qty (drops only)
+//   { type:'card', mob, level }                  { type:'bag', items:[{ name, qty }] }
 //   { type:'chat', channel, from, guild, text, mine, backlog } { type:'info', text }
 //   { type:'death', by } { type:'revive' }     { type:'party', from, text }
 //   { type:'net', ping, online }               { type:'minimap', url }
@@ -23,6 +24,17 @@
 //   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[{x,y}], drops:[] }
 const { unpack } = require('msgpackr');
 const DROP_NAMES = require('./drop-names');
+const { MOBS: MOB_TABLE, CATEGORY } = require('./mob-table');
+
+// NPC sell price of a monster drop, same formula as the game client:
+// round((3 + level * 0.5) * roleMult * (level >= 65 ? 0.7 : 1)), at least 2
+const ROLE_MULT = { trash: 1, pack: 0.9, ambush: 1.2, tank: 1.3, elite: 2.5, 'mini-boss': 6, boss: 12 };
+function dropPrice(mobType, liveLevel) {
+  const def = MOB_TABLE[mobType];
+  const role = def ? def[0] : 'trash';
+  const level = (def && def[1]) || liveLevel || 1;
+  return Math.max(2, Math.round((3 + level * 0.5) * (ROLE_MULT[role] ?? 1) * (level >= 65 ? 0.7 : 1)));
+}
 
 const ROOM_DATA = 13;
 
@@ -92,7 +104,13 @@ const titleCase = (id) => String(id || '?')
 function pretty(id) {
   const base = String(id || '?').replace(/[~#^|+].*$/, '').replace(/^cash:/, '');
   const drop = /^drop_(.+)$/.exec(base);
-  if (drop) return DROP_NAMES[drop[1]] || `${titleCase(drop[1])} (ดรอป)`;
+  if (drop) {
+    // same as the game: a named drop, else "<Mob> · <category>"
+    if (DROP_NAMES[drop[1]]) return DROP_NAMES[drop[1]];
+    const def = MOB_TABLE[drop[1]];
+    const cat = def && CATEGORY[def[2]];
+    return cat ? `${titleCase(drop[1])} · ${cat}` : `${titleCase(drop[1])} (ดรอป)`;
+  }
   return titleCase(base);
 }
 
@@ -124,7 +142,7 @@ const SNAPSHOT_JS = `(() => {
   const txt = (id) => { const el = document.getElementById(id); return el ? el.textContent : ''; };
   let mapId = ''; try { mapId = g.mapId(); } catch (e) {}
   let mini = '';
-  if (window.__bdMiniAt === undefined || Date.now() - window.__bdMiniAt > 3000) {
+  if (window.__bdWantMini !== false && (window.__bdMiniAt === undefined || Date.now() - window.__bdMiniAt > 3000)) {
     window.__bdMiniAt = Date.now();
     try { const c = document.getElementById('minimap'); if (c && c.width) mini = c.toDataURL('image/png'); } catch (e) {}
   }
@@ -144,6 +162,7 @@ class BinderTownAdapter {
     this.lastKill = '';
     this.inv = null;             // Map itemId -> qty
     this.pings = new Map();      // t -> sentAt
+    this.mobLevels = new Map();  // mobType -> level seen on the map
   }
 
   mobName(id) {
@@ -236,7 +255,7 @@ class BinderTownAdapter {
       case 'tradeInvite': out.push({ type: 'info', text: `${e.from} ขอเทรด`, t: at }); break;
       case 'inv': this.inventory(e, at, out); break;
       case 'autoSold': out.push({ type: 'info', text: `ขายอัตโนมัติ ${pretty(e.itemId)} x${e.qty}`, t: at }); break;
-      case 'cardFound': out.push({ type: 'loot', item: `การ์ด ${pretty(e.mob)}`, qty: 1, t: at }); break;
+      case 'cardFound': out.push({ type: 'card', mob: pretty(e.mob), level: e.level, t: at }); break;
       case 'pong': {
         const sent = this.pings.get(e.t);
         const ev = { type: 'net', t: at };
@@ -267,7 +286,12 @@ class BinderTownAdapter {
       for (const id of e.gone || []) this.inv.delete(id);
       for (const i of items) {
         const before = this.inv.get(i.id) || 0;
-        if (i.qty > before) out.push({ type: 'loot', item: pretty(i.id), qty: i.qty - before, t: at });
+        if (i.qty > before) {
+          const qty = i.qty - before;
+          const drop = /^drop_([a-z0-9_]+)/.exec(i.id);
+          const value = drop ? dropPrice(drop[1], this.mobLevels.get(drop[1])) * qty : 0;
+          out.push({ type: 'loot', item: pretty(i.id), qty, value, t: at });
+        }
         this.inv.set(i.id, i.qty);
       }
     }
@@ -291,6 +315,7 @@ class BinderTownAdapter {
     const monsters = [];
     for (const [id, m] of Object.entries(s.mobs || {})) {
       this.mobs.set(id, { type: m[0], level: m[1], owner: m[5] });
+      if (m[0] && m[1]) this.mobLevels.set(m[0], m[1]);
       if (m[4] !== 'dead' && !m[5]) monsters.push({ x: m[2], y: m[3], name: pretty(m[0]) });
     }
     const pct = (t) => { const m = /([\d.]+)\s*%/.exec(t || ''); return m ? Number(m[1]) : undefined; };
@@ -328,4 +353,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty };
+module.exports = { decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

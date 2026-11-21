@@ -99,4 +99,26 @@ assert.strictEqual(Math.round(tr.perHour()), 1000);
 tr.add(10, 6, 31 * 60 * 1000);
 assert.strictEqual(tr.perHour(), null, 'resets on level up');
 
+// drop prices follow the game's formula; cards are counted
+const { dropPrice } = require('./game-adapter');
+assert.strictEqual(dropPrice('sprout'), 4, 'trash Lv 2: (3 + 1) x 1');
+assert.strictEqual(dropPrice('storm_petrel'), 46, 'trash Lv 124: (3 + 62) x 0.7');
+assert.strictEqual(dropPrice('elder_sprout'), 14, 'elite Lv 5: (3 + 2.5) x 2.5');
+assert.strictEqual(dropPrice('unknown_mob', 10), 8, 'unknown: live level, trash');
+ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'drop_sprout', qty: 3 }] }));
+assert.deepStrictEqual([ev[0].item, ev[0].qty, ev[0].value], ['Sprout · เยลลี่ต้นอ่อน', 3, 12]);
+assert.strictEqual(ev[0].value, 12);
+ev = ad.incoming(frame('server', { type: 'cardFound', mob: 'sprout', level: 2 }));
+assert.deepStrictEqual([ev[0].type, ev[0].mob], ['card', 'Sprout']);
+const d3 = new AccountData();
+d3.startedAt = 1;
+d3.ingest({ type: 'self', silver: 100, t: 1 });
+d3.ingest({ type: 'loot', item: 'X', qty: 3, value: 12, t: 2 });
+d3.ingest({ type: 'card', mob: 'Sprout', level: 2, t: 3 });
+d3.ingest({ type: 'self', silver: 160, t: 3600 * 1000 + 1 });
+const r3 = d3.rates(3600 * 1000 + 1);
+assert.strictEqual(Math.round(r3.dropValuePerHour), 12);
+assert.strictEqual(r3.cards, 1);
+assert.strictEqual(Math.round(r3.incomePerHour), 72, '60 silver + 12 drop value in an hour');
+
 console.log('game-adapter tests passed');

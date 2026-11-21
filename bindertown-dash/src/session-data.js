@@ -46,6 +46,8 @@ class AccountData {
     this.dmgWindow = [];      // [{ t, dmg }] last 60s of damage dealt
     this.dmgTotal = 0;
     this.hits = 0;
+    this.dropValue = 0;       // NPC sell value of drops picked up
+    this.cards = [];          // [{ t, mob, level }]
   }
 
   log(kind, text, t = Date.now()) {
@@ -86,7 +88,8 @@ class AccountData {
         this.log('exp', `ล้ม ${ev.target}${ev.exp ? ` +${fmt(ev.exp)} EXP` : ''}${ev.job != null ? ` · +${fmt(ev.job)} Job` : ''}${ev.silver ? ` · +${fmt(ev.silver)} Silver` : ''}`, t);
         break;
       case 'loot': {
-        this.log('loot', `เก็บ ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}`, t);
+        this.log('loot', `เก็บ ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.value ? ` · ${fmt(ev.value)} Silver` : ''}`, t);
+        this.dropValue += ev.value || 0;
         const b = this.bagItem(ev.item, t);
         b.gained += ev.qty || 1;
         break;
@@ -105,6 +108,11 @@ class AccountData {
         break;
       case 'world': this.world = { ...this.world, ...ev }; delete this.world.type; break;
       case 'info': this.log('other', ev.text, t); break;
+      case 'card':
+        this.cards.push({ t, mob: ev.mob, level: ev.level });
+        if (this.cards.length > 50) this.cards.shift();
+        this.log('loot', `🃏 ได้การ์ด ${ev.mob}${ev.level ? ` Lv ${ev.level}` : ''}`, t);
+        break;
       case 'death': this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
       case 'revive': this.log('other', 'ฟื้นแล้ว', t); break;
       case 'party': this.log('other', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`, t); break;
@@ -130,6 +138,12 @@ class AccountData {
       silverPerHour: typeof silver === 'number' && this.silverStart !== null ? (silver - this.silverStart) / hours : null,
       silverToday: typeof silver === 'number' && this.silverStart !== null ? silver - this.silverStart : null,
       dpsNow: this.dmgWindow.reduce((s, d) => s + d.dmg, 0) / 60,
+      dropValue: this.dropValue,
+      dropValuePerHour: this.dropValue / hours,
+      cards: this.cards.length,
+      cardsPerHour: this.cards.length / hours,
+      // everything earned: silver from kills + what the drops sell for
+      incomePerHour: (typeof silver === 'number' && this.silverStart !== null ? (silver - this.silverStart) / hours : 0) + this.dropValue / hours,
       avgHit: this.hits ? this.dmgTotal / this.hits : null,
     };
   }
@@ -162,6 +176,7 @@ class AccountData {
     return {
       stats: this.stats,
       net: this.net,
+      cards: this.cards.slice(-20),
       minimap: this.minimap,
       buffs: this.buffs,
       rates: this.rates(now),
