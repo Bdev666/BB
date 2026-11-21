@@ -62,6 +62,25 @@ function detect(mod) {
   return r;
 }
 
+// The calculator counts the Novice basic skills (Tough Skin, Keen Edge, ...) as maxed - right for a
+// wiki guide, wrong for a real character. With b.basics set, the calculation runs with the character's
+// real basic levels (the lab window is ours alone, so the table is set for the call and put back).
+function calc(b) {
+  const bas = b && b.basics;
+  if (!bas || !G.jobs.novice) return G.calc(b);
+  const saved = [];
+  for (const sid of G.jobs.novice.skills) { const d = G.skills[sid]; if (!d) continue; saved.push([d, d.maxLevel]); d.maxLevel = bas[sid] || 0; }
+  try { return G.calc(b); } finally { for (const [d, m] of saved) d.maxLevel = m; }
+}
+
+// training dummies: the server does not give the level-gap bonus on them (measured: Lv 13 vs the Lv 1
+// dummy, calculator x1.24 = 57 DPS, real 46 = without it). Undo that one factor for dummy targets.
+function dummyAdj(b, r) {
+  if (!r || !String((b.calc || {}).target || '').startsWith('training_dummy')) return 1;
+  const f = (r.factors || []).find((x) => /ช่องว่างเลเวล|level gap/i.test(x.label || ''));
+  return f && f.x ? 1 / f.x : 1;
+}
+
 // ---- rules (the game's own numbers) ----
 const MAX_JOB = 50;
 const ptsAt = (lv) => (lv <= 1 ? 0 : lv <= 40 ? 1 : lv <= 48 ? 2 : 3);
@@ -92,13 +111,20 @@ function c2Skills(path) {
 }
 
 // ---- evaluation ----
+// a Novice's basic skills are counted twice by the calculator (as job skills and as basics): take one copy off
+function noviceFix(job, stats) {
+  const st = { ...stats };
+  if (job === 'novice' && G.jobs.novice) for (const sid of G.jobs.novice.skills) { const d = G.skills[sid] || {}; for (const [k, v] of Object.entries(d.passive || {})) st[k] = (st[k] || 0) - v * (d.maxLevel || 0); }
+  return st;
+}
 function baseBuild(p) {
   return {
     job: p.job, level: p.level, jobLevel: p.jobLevel, c2: p.c2 || '', c2Job: p.c2Job || 50, c2tr: {},
-    stats: { ...p.stats }, skills: {}, evo: {}, traits: {}, hotbar: [], gear: {}, cards: [], cardStars: [],
+    stats: noviceFix(p.job, p.stats), skills: {}, evo: {}, traits: {}, hotbar: [], gear: {}, cards: [], cardStars: [],
     weapon: '', offhand: '', affixes: [],
     calc: { guild: 0, soulforge: 0, pet: '', night: false, codex: 0, target: p.target, targetLevel: p.targetLevel, debuffed: false, lowHp: false },
     ...loadoutOf(p.loadout),
+    ...(p.basics ? { basics: p.basics } : {}),
   };
 }
 // the character's worn gear and cards (from the game's inventory message), in the calculator's shape
@@ -152,9 +178,10 @@ function targetsOf(sid, lv, evo, pack) {
 let evals = 0;
 function score(b, p) {
   evals++;
-  let r; try { r = G.calc(b); } catch (e) { return { v: 0, err: String(e && e.message || e) }; }
+  let r; try { r = calc(b); } catch (e) { return { v: 0, err: String(e && e.message || e) }; }
   const rot = r.rotation || { dps: 0, share: [] };
-  let v = rot.dps;
+  const adj = dummyAdj(b, r);
+  let v = rot.dps * adj;
   if (p.mode === 'farm') {
     // damage spread over the pack: each skill's share times how many monsters it hits
     v = 0;
@@ -166,7 +193,7 @@ function score(b, p) {
 // hotbar = damaging skills by damage per second of cast time, best 6 (the game rotates in hotbar order)
 let curP = null; // the run's settings (farm mode orders the hotbar by damage x monsters hit)
 function setHotbar(b) {
-  const r = G.calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
+  const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const w = (s) => s.dpsAlone * (curP && curP.mode === 'farm' ? targetsOf(s.sid, s.lv, b.evo[s.sid], curP.pack) : 1);
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => w(y) - w(x));
   b.hotbar = dmg.slice(0, 6).map((s) => s.sid);
@@ -298,7 +325,7 @@ async function optimize(p, onStep) {
 }
 // the game rotates skills in hotbar order: try every order of the 6 slots (720), and swapping in left-out damaging skills
 function bestHotbar(b, p) {
-  const r = G.calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
+  const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => y.dpsAlone - x.dpsAlone).map((s) => s.sid);
   let best = { v: score(b, p).v, hb: b.hotbar.slice() };
   const tryHb = (hb) => { b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
@@ -347,7 +374,7 @@ function describe(b, p) {
   const used = (c2) => Object.entries(b.skills).filter(([sid]) => isC2(sid) === c2).reduce((t, [, l]) => t + l, 0);
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
-    score: Math.round(s.v), dps: Math.round((r.rotation || {}).dps || 0), ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
+    score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)), ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
@@ -382,9 +409,9 @@ const fxText = (f, star) => {
 };
 function cardScore(b, p) {
   evals++;
-  let r; try { r = G.calc(b); } catch { return { v: 0 }; }
+  let r; try { r = calc(b); } catch { return { v: 0 }; }
   const rot = r.rotation || { dps: 0, share: [] };
-  let dps = rot.dps;
+  let dps = rot.dps * dummyAdj(b, r);
   if (p.goal !== 'boss') { dps = 0; for (const s of rot.share) dps += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack)); dps /= rot.seconds || 60; }
   const al = r.album || {};
   const gold = al.gold || 0; const drop = al.drop || 0;
@@ -524,6 +551,30 @@ L.cards = async (p) => {
   };
 };
 
+// ---------- prediction for the character as it is now (to compare with a real measurement) ----------
+L.predict = async (p) => {
+  await load();
+  if (!G.jobs[p.job]) throw new Error('ไม่รู้จักอาชีพ ' + p.job);
+  const target = pickTarget('boss', p.level, p.target);
+  const q = { ...p, mode: 'boss', target, targetLevel: targetLevelFor(target, 'boss', p.level), c2: (p.current && p.current.c2) || '' };
+  curP = q;
+  const cur = p.current || {};
+  const b = { ...baseBuild(q), skills: { ...(cur.skills || {}) }, evo: { ...(cur.evo || {}) }, traits: { ...(cur.traits || {}) }, c2tr: { ...(cur.c2tr || {}) } };
+  setHotbar(b); bestHotbar(b, q);
+  const r = calc(b);
+  const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
+  const adj = dummyAdj(b, r);
+  const rot = { ...rot0, dps: rot0.dps * adj, share: (rot0.share || []).map((x) => ({ ...x, dmg: x.dmg * adj })) };
+  const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
+  const bs = r.basic || {}; const sh = r.sheet || {};
+  return {
+    debug: { sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
+    target: { id: target, level: q.targetLevel }, dps: Math.round(rot.dps),
+    perSkill: rot.share.map((x) => ({ sid: x.key, name: name(x.key), dps: Math.round(x.dmg / (rot.seconds || 60)) })),
+    hotbar: b.hotbar.map(name), notes: (r.notes || []).slice(0, 5), names: Object.fromEntries(Object.keys(G.skills).map((k) => [k, G.skills[k].name || k])),
+  };
+};
+
 // ---------- every card combo in the game, read from the game's album rules ----------
 L.combos = async () => {
   await load();
@@ -533,7 +584,7 @@ L.combos = async () => {
   for (const id of Object.keys(G.cardDefs)) {
     if (!G.mobs[id]) continue;
     b.cards = [id]; b.cardStars = [5];
-    let r; try { r = G.calc(b); } catch { continue; }
+    let r; try { r = calc(b); } catch { continue; }
     for (const x of ((r.album && r.album.res) || [])) {
       if (!x.count) continue;
       const k = x.kind + ':' + x.key;
@@ -548,7 +599,7 @@ L.combos = async () => {
     for (const n of g.kind === 'region' ? [3, 5] : g.kind === 'kin' ? [2] : [2, 3]) {
       if (g.members.length < n) continue;
       b.cards = g.members.slice(0, n); b.cardStars = b.cards.map(() => 5);
-      let r; try { r = G.calc(b); } catch { continue; }
+      let r; try { r = calc(b); } catch { continue; }
       const x = ((r.album && r.album.res) || []).find((y) => y.kind === g.kind && y.key === g.key);
       if (x && x.on && !tiers.some((t) => t.n === x.count && t.fx.join() === (x.fx || []).map(comboFx).join())) tiers.push({ n, fx: (x.fx || []).map(comboFx) });
       if (x && x.on && g.kind !== 'region') break;
@@ -611,7 +662,7 @@ L.maps = async (p) => {
       const mi = mobInfo(type);
       if (!mi || mi.role === 'boss' || mi.worldEvent) continue;
       b.calc = { ...b.calc, target: type, targetLevel: mi.level || p.level };
-      let r; try { r = G.calc(b); evals++; } catch { continue; }
+      let r; try { r = calc(b); evals++; } catch { continue; }
       const rot = r.rotation || { dps: 0, share: [] };
       let eff = 0; for (const s of rot.share) eff += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], Math.min(q.pack, count))); eff /= rot.seconds || 60;
       if (!(eff > 0)) continue;
@@ -640,6 +691,7 @@ L.info = async () => {
   const bosses = G.mobs ? Object.entries(G.mobs).filter(([, m]) => m && m.role === 'boss').map(([id, m]) => ({ id, name: m.name || id, level: m.level })).sort((a, b) => a.level - b.level) : [];
   return {
     file: G.file, have: Object.keys(G).filter((k) => G[k]),
+    novice: G.jobs.novice ? G.jobs.novice.skills.map((sid) => ({ sid, max: (G.skills[sid] || {}).maxLevel, kind: (G.skills[sid] || {}).kind, line: (G.skills[sid] || {}).line, passive: JSON.stringify((G.skills[sid] || {}).passive || (G.skills[sid] || {}).passiveBonus || '') })) : null,
     jobs: jobs.map((j) => ({ id: j, name: G.jobs[j].name || j, c2: (G.c2opts[j] || []).map((c) => ({ id: c, name: (G.c2defs[c] || {}).name || c, role: (G.c2defs[c] || {}).role || '' })) })),
     bosses,
   };

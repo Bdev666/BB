@@ -272,3 +272,5 @@ h3.foldable::before { content: '▾ '; opacity: .6; }
 .lab-row .chip.combo.color { background: #3a2a1a; }
 .lab-row .chip.dim { opacity: .65; }
 button.primary.gold { background: linear-gradient(90deg, #b8860b, #f5c542); color: #1a1a1a; }
+.lab-row .chip.ok { background: #1f4d2e; } .lab-row .chip.warnc { background: #5a2a1a; }
+.lab-measure { border: 1px dashed var(--line); border-radius: 8px; padding: 8px; margin: 8px 0; }

@@ -405,6 +405,8 @@ function handleEvents(id, events) {
       case 'hit':
       case 'kill':
         g.lastHitAt = Date.now();
+        // a real-DPS measurement is running: keep this character's own hits
+        if (ev.type === 'hit' && g.measure && Date.now() < g.measure.until) { const m = g.measure; if (!m.first) m.first = Date.now(); m.last = Date.now(); m.hits.push({ dmg: ev.dmg, sid: ev.sid, mob: ev.mob, pet: ev.pet, crit: ev.crit }); }
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
         break;
       case 'humanCheck':
@@ -1376,7 +1378,31 @@ function registerIpc() {
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
+  // real DPS: sum this character's own hits for N seconds (count from the first hit)
+  handle('measure-start', (id, seconds) => {
+    const g = games.get(id);
+    if (!g || !g.inGame) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
+    const sec = Math.max(10, Math.min(300, Number(seconds) || 60));
+    g.measure = { sec, armed: Date.now(), until: Date.now() + (sec + 120) * 1000, first: 0, last: 0, hits: [] };
+    return { ok: true };
+  });
+  handle('measure-get', (id) => {
+    const g = games.get(id);
+    const m = g && g.measure;
+    if (!m) return null;
+    if (m.first && Date.now() > m.first + m.sec * 1000) m.until = Math.min(m.until, m.first + m.sec * 1000);
+    const now = Math.min(Date.now(), m.until);
+    const done = now >= m.until;
+    const secs = m.first ? Math.max(1, (now - m.first) / 1000) : 0;
+    const mine = m.hits.filter((h) => !h.pet);
+    const per = {}; for (const h of mine) per[h.sid || 'basic'] = (per[h.sid || 'basic'] || 0) + h.dmg;
+    const mobs = {}; for (const h of m.hits) if (h.mob) mobs[h.mob] = (mobs[h.mob] || 0) + 1;
+    const total = mine.reduce((t, h) => t + h.dmg, 0);
+    const pet = m.hits.filter((h) => h.pet).reduce((t, h) => t + h.dmg, 0);
+    return { done, started: !!m.first, secs: Math.round(secs * 10) / 10, sec: m.sec, total, pet, dps: secs ? Math.round(total / secs) : 0, hits: mine.length, crits: mine.filter((h) => h.crit).length, perSkill: per, mobs };
+  });
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  handle('lab-predict', (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`));
   handle('lab-combos', () => labCall('window.__bdLab.combos()'));
   handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
   handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));

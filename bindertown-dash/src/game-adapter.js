@@ -344,7 +344,7 @@ class BinderTownAdapter {
           this.myHits.set(e.targetId, at);
           const target = this.mobName(e.targetId) || 'เป้าหมาย';
           if (e.kind === 'miss' || amount === 0) out.push({ type: 'miss', target, t: at });
-          else out.push({ type: 'hit', target, dmg: amount, crit: e.kind === 'crit', skill: e.skillId ? pretty(e.skillId) : '', t: at });
+          else { const tm = this.mobs.get(e.targetId); out.push({ type: 'hit', target, dmg: amount, crit: e.kind === 'crit', skill: e.skillId ? pretty(e.skillId) : '', sid: e.skillId || '', mob: tm ? tm.type : '', pet: e.actorId !== this.sessionId, t: at }); }
         } else if (e.targetId === this.sessionId && amount > 0 && e.kind !== 'heal') {
           out.push({ type: 'hurt', from: this.mobName(e.actorId) || 'ผู้เล่น', dmg: amount, t: at });
         }

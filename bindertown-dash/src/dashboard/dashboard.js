@@ -645,6 +645,7 @@ async function openLab(opt = {}) {
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
     if (owned.length) p.owned = owned;
+    if (me && me.skills) p.basics = me.skills; // the character's real basic-skill levels (the calculator assumes maxed)
     return p;
   };
   // competition mode: skills -> cards -> skills -> cards for the 2 strongest paths, every hotbar order
@@ -694,10 +695,48 @@ async function openLab(opt = {}) {
       el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
         hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)'),
       me ? el('small', { class: 'hint' }, ` · มีการ์ด ${owned.length} ชนิด${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)}` : ''}`) : null),
+    me ? measureBox(accId, me, () => ({ ...labParams(), job: me.job, level: me.level, jobLevel: me.jobLevel, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 } })) : null,
     el('div', { class: 'lab-row' }, go, full, el('small', { class: 'hint' }, ' ดาวการ์ด (โหมดแข่ง ถ้าไม่ใช้เฉพาะที่มี) '), fullStars, comboBtn), res,
     el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
   ].filter(Boolean));
   if (opt.auto && me) go.click();
+}
+
+// real test: measure this character's own damage for 60 s (training dummy) and compare with the prediction
+function measureBox(accId, me, params) {
+  const out = el('div', { class: 'lab-cards' });
+  const secs = el('select', {}, ...[30, 60, 120].map((n) => el('option', { value: String(n), selected: n === 60 ? '' : null }, n + ' วิ')));
+  let timer = null;
+  const go = el('button', { class: 'tiny', onclick: async () => {
+    const st = await dash.invoke('measure-start', accId, +secs.value);
+    if (!st.ok) { out.replaceChildren(el('p', {}, '✖ ' + st.error)); return; }
+    go.disabled = true;
+    out.replaceChildren(el('p', { class: 'hint' }, 'พร้อมวัด · เริ่มตีหุ่นฟางได้เลย (เปิด AUTO ก็ได้) · นับจากดาเมจแรก'));
+    clearInterval(timer);
+    timer = setInterval(async () => {
+      const m = await dash.invoke('measure-get', accId);
+      if (!m) return;
+      if (!m.done) { out.firstChild.textContent = m.started ? `⏱ กำลังวัด ${m.secs}/${m.sec} วิ · DPS ตอนนี้ ${num(m.dps)} · ${m.hits} ฮิต` : 'พร้อมวัด · เริ่มตีหุ่นฟางได้เลย (เปิด AUTO ก็ได้) · นับจากดาเมจแรก'; return; }
+      clearInterval(timer); go.disabled = false;
+      const mob = Object.entries(m.mobs).sort((a, b) => b[1] - a[1])[0];
+      const p = { ...params(), target: mob ? mob[0] : 'training_dummy' };
+      let pr = null; try { pr = await dash.invoke('lab-predict', p); } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+      const diff = pr.dps ? Math.round((m.dps / pr.dps - 1) * 1000) / 10 : 0;
+      const rows = new Set([...Object.keys(m.perSkill), ...pr.perSkill.map((x) => x.sid)]);
+      out.replaceChildren(
+        el('div', { class: 'lab-row' }, el('b', {}, `🎯 ของจริง ${num(m.dps)} DPS`), el('span', { class: 'chip' }, `Build Lab คาด ${num(pr.dps)}`),
+          el('span', { class: 'chip ' + (Math.abs(diff) <= 5 ? 'ok' : 'warnc') }, `ต่าง ${diff > 0 ? '+' : ''}${diff}%`),
+          el('small', { class: 'hint' }, ` · เป้า ${labPretty(pr.target.id)} · ${m.secs} วิ · ${m.hits} ฮิต (คริ ${m.crits})${m.pet ? ` · สัตว์เลี้ยง/อัญเชิญ ${num(Math.round(m.pet / m.secs))}/วิ (ไม่นับ)` : ''}`)),
+        el('table', { class: 'lab-maps' }, el('tr', {}, ...['สกิล', 'ของจริง /วิ', 'คาด /วิ'].map((h) => el('th', {}, h))),
+          ...[...rows].map((sid) => { const real = Math.round((m.perSkill[sid] || 0) / m.secs); const exp = (pr.perSkill.find((x) => x.sid === sid) || {}).dps || 0;
+            return el('tr', {}, el('td', {}, sid === 'basic' ? 'โจมตีปกติ' : pr.names[sid] || labPretty(sid)), el('td', {}, num(real)), el('td', {}, num(exp))); })),
+        el('p', { class: 'hint' }, `ลำดับกดที่ Build Lab คิด: ${pr.hotbar.join(' > ')} · ถ้าในเกมจัดช่องลัดต่างไป ดาเมจต่อสกิลจะต่างตาม · ต่างไม่เกิน ±5% ถือว่าตรง`));
+    }, 1000);
+  } }, '🎯 เริ่มวัด DPS จริง');
+  return el('div', { class: 'lab-measure' },
+    el('div', { class: 'lab-row' }, el('b', {}, '🎯 ทดสอบกับตัวละครจริง: '), go, secs,
+      el('small', { class: 'hint' }, ' ไปห้องฝึก (Portal ข้างรูปปั้นวาร์ปในเมือง) แล้วตีหุ่นฟาง · หุ่นมุมล่างมีค่าป้องกันเท่า Pearlheart Titan')),
+    out);
 }
 
 // card result: the cards, what each adds, combos on and one card away
