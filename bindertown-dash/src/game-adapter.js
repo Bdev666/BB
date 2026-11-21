@@ -30,11 +30,13 @@ const { MOBS: MOB_TABLE, CATEGORY } = require('./mob-table');
 // NPC sell price of a monster drop, same formula as the game client:
 // round((3 + level * 0.5) * roleMult * (level >= 65 ? 0.7 : 1)), at least 2
 const ROLE_MULT = { trash: 1, pack: 0.9, ambush: 1.2, tank: 1.3, elite: 2.5, 'mini-boss': 6, boss: 12 };
-function dropPrice(mobType, liveLevel) {
+// The shop then pays price / sqrt(economy index) (the server's 'econ' index), at least 1.
+function dropPrice(mobType, liveLevel, econIndex = 1) {
   const def = MOB_TABLE[mobType];
   const role = def ? def[0] : 'trash';
   const level = (def && def[1]) || liveLevel || 1;
-  return Math.max(2, Math.round((3 + level * 0.5) * (ROLE_MULT[role] ?? 1) * (level >= 65 ? 0.7 : 1)));
+  const base = Math.max(2, Math.round((3 + level * 0.5) * (ROLE_MULT[role] ?? 1) * (level >= 65 ? 0.7 : 1)));
+  return Math.max(1, Math.round(base / Math.sqrt(econIndex > 0 ? econIndex : 1)));
 }
 
 const ROOM_DATA = 13;
@@ -248,6 +250,7 @@ class BinderTownAdapter {
     this.mobLevels = new Map();  // mobType -> level seen on the map
     this.locks = new Set();      // item ids the player locked in the game
     this.build = '';             // the game's build (from pong)
+    this.econIndex = 1;           // server economy index (NPC prices follow it)
     this.newTypes = new Map();   // server message types the client table didn't have -> field names
     this.stats = { frames: 0, decodeErrors: 0, unknownPacked: 0, snapshots: 0 };
     this.missing = [];           // required character fields the page didn't have
@@ -359,7 +362,7 @@ class BinderTownAdapter {
         if (text) out.push({ type: 'chat', channel: 'system', from: '', text, backlog: false, t: at });
         break;
       }
-      case 'notice': if (e.text) out.push({ type: 'info', text: String(e.text), t: at }); break;
+      case 'notice': if (e.text) out.push({ type: 'info', notice: true, text: String(e.text), t: at }); break;
       case 'maintenance': out.push({ type: 'info', text: 'เกมแจ้งปิดปรับปรุง', t: at }); break;
       case 'socialInvite':
         if (e.kind === 'party') out.push({ type: 'party', from: e.from, text: `${e.from} ชวนเข้า Party${e.partyName ? ` "${e.partyName}"` : ''}`, t: at });
@@ -418,6 +421,9 @@ class BinderTownAdapter {
       }
       case 'motherLode':
         out.push({ type: 'worldEvent', key: 'motherLode', t: at, active: e.view ? { id: 'motherLode', name: 'Mother Lode', perks: ['แหล่งแร่ใหญ่ปรากฏ'], endsAt: e.view.endsAt || e.view.until || 0 } : null, fresh: false });
+        break;
+      case 'econ':
+        if (e.state && e.state.index > 0) this.econIndex = e.state.index;
         break;
       case 'fieldBosses': {
         const skew = typeof e.now === 'number' ? at - e.now : 0; // server clock -> ours
@@ -487,7 +493,7 @@ class BinderTownAdapter {
         if (i.qty > before) {
           const qty = i.qty - before;
           const drop = /^drop_([a-z0-9_]+)/.exec(i.id);
-          const value = drop ? dropPrice(drop[1], this.mobLevels.get(drop[1])) * qty : 0;
+          const value = drop ? dropPrice(drop[1], this.mobLevels.get(drop[1]), this.econIndex) * qty : 0;
           out.push({ type: 'loot', id: i.id, item: pretty(i.id), qty, value, worthChecking: !drop && !SUPPLIES.test(i.id.replace(/[~#].*$/, '')), t: at });
         }
         this.inv.set(i.id, i.qty);

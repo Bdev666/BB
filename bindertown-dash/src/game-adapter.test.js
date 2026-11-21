@@ -123,6 +123,7 @@ assert.strictEqual(dropPrice('sprout'), 4, 'trash Lv 2: (3 + 1) x 1');
 assert.strictEqual(dropPrice('storm_petrel'), 46, 'trash Lv 124: (3 + 62) x 0.7');
 assert.strictEqual(dropPrice('elder_sprout'), 14, 'elite Lv 5: (3 + 2.5) x 2.5');
 assert.strictEqual(dropPrice('unknown_mob', 10), 8, 'unknown: live level, trash');
+assert.strictEqual(dropPrice('sprout', 2, 1.4714772602586597), 3, 'shop pays price / sqrt(econ index): 54 Sprout drops sold for 162 in the live game');
 ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'drop_sprout', qty: 3 }] }));
 assert.deepStrictEqual([ev[0].item, ev[0].qty, ev[0].value], ['Sprout · เยลลี่ต้นอ่อน', 3, 12]);
 assert.strictEqual(ev[0].value, 12);

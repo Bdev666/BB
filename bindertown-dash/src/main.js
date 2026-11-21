@@ -459,7 +459,8 @@ function handleEvents(id, events) {
       }
       case 'info':
         if (/^เลเวลอัป/.test(ev.text)) notify(id, 'levelUp', `🎉 ${ev.text}`);
-        g.lastNotice = { text: ev.text, at: Date.now() };
+        // only the server's notices answer a command (not our own level-up lines etc.)
+        if (ev.notice) g.lastNotice = { text: ev.text, at: Date.now() };
         break;
       case 'bag':
         for (const it of ev.items || []) {
@@ -513,8 +514,18 @@ async function runCommand(id, cmd, arg) {
   const click = (sel) => js(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.offsetParent || x.id === 'autobig'); if (!b) return false; b.click(); return true; })()`);
   let ok = false;
   switch (cmd) {
-    case 'auto': ok = await click('#autobig'); break;
-    case 'sleep': ok = await click('#autoeco'); break;
+    case 'auto':
+    case 'sleep': {
+      const before = await liveUi(id);
+      ok = await click(cmd === 'auto' ? '#autobig' : '#autoeco');
+      if (ok) {
+        await new Promise((res) => setTimeout(res, 400));
+        const after = await liveUi(id);
+        Object.assign(g.data.stats, { auto: after.auto, sleeping: after.sleeping });
+        if (cmd === 'auto' && after.auto === before.auto) return { ok: false, error: `เกมไม่${before.auto ? 'ปิด' : 'เปิด'} AUTO ให้ (เช่น อยู่ในเมือง ตัวละครตาย หรือกำลังวาร์ป)` };
+      }
+      break;
+    }
     case 'respawn': ok = await click('#deathoverlay button'); break;
     case 'sell': {
       const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
@@ -611,6 +622,14 @@ function eventsView() {
   ]).filter(Boolean);
 }
 
+// AUTO / sleep straight from the game page: the once-a-second snapshot can be a beat behind
+async function liveUi(id) {
+  const g = rt(id);
+  try {
+    return await g.win.webContents.executeJavaScript(`({ auto: document.body.classList.contains('auto-on'), sleeping: document.body.classList.contains('sleeping') })`, true);
+  } catch { return { auto: g.data.stats.auto, sleeping: g.data.stats.sleeping }; }
+}
+
 // ---------- every account at once (only what the player pressed) ----------
 async function commandAll(cmd, arg) {
   const results = [];
@@ -620,11 +639,18 @@ async function commandAll(cmd, arg) {
     let r;
     if (cmd === 'autoOn' || cmd === 'autoOff') {
       const want = cmd === 'autoOn';
-      r = g.data.stats.auto === want ? { ok: true, skipped: true } : await gameCommand(id, 'auto', {});
+      r = (await liveUi(id)).auto === want ? { ok: true, skipped: true } : await gameCommand(id, 'auto', {});
     } else if (cmd === 'sleep') {
-      r = g.data.stats.sleeping ? { ok: true, skipped: true } : await gameCommand(id, 'sleep', {});
+      r = (await liveUi(id)).sleeping ? { ok: true, skipped: true } : await gameCommand(id, 'sleep', {});
+    } else if (cmd === 'sellEtc' && !(g.adapter.inv && [...g.adapter.inv].some(([k, q]) => /^drop_/.test(k) && q > 0))) {
+      r = { ok: true, skipped: true, error: 'ไม่มีของดรอปให้ขาย' };
     } else if (['sellEtc', 'buy'].includes(cmd)) {
       r = await gameCommand(id, cmd, arg);
+    } else if (cmd === 'salvageAll') {
+      // every unlocked gear piece in this account's bag (the player confirmed the count first)
+      const ids = g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x)) : [];
+      r = ids.length ? await gameCommand(id, 'salvage', { itemIds: ids }) : { ok: true, skipped: true, error: 'ไม่มีอุปกรณ์ให้ย่อย' };
+      if (r.ok && ids.length) r.count = ids.length;
     } else {
       r = { ok: false, error: 'ไม่รู้จักคำสั่ง' };
     }
@@ -709,8 +735,10 @@ async function remoteCommand(text) {
         const g = rt(id);
         const name = (g.data.stats.name || account(id).name);
         if (!g.win || g.win.isDestroyed() || !g.inGame) { out.push(`– ${name}: ไม่ได้อยู่ในเกม`); continue; }
-        if (cmd === '/auto' && g.data.stats.auto === want) { out.push(`✔ ${name}: AUTO ${want ? 'เปิด' : 'ปิด'}อยู่แล้ว`); continue; }
-        if (cmd === '/sleep' && g.data.stats.sleeping) { out.push(`✔ ${name}: พักจออยู่แล้ว`); continue; }
+        // eslint-disable-next-line no-await-in-loop
+        const ui = await liveUi(id);
+        if (cmd === '/auto' && ui.auto === want) { out.push(`✔ ${name}: AUTO ${want ? 'เปิด' : 'ปิด'}อยู่แล้ว`); continue; }
+        if (cmd === '/sleep' && ui.sleeping) { out.push(`✔ ${name}: พักจออยู่แล้ว`); continue; }
         // eslint-disable-next-line no-await-in-loop
         const r = await gameCommand(id, cmd === '/auto' ? 'auto' : 'sleep', {});
         out.push(`${r.ok ? '✔' : '✖'} ${name}${r.ok ? (cmd === '/auto' ? `: AUTO ${want ? 'เปิด' : 'ปิด'}แล้ว` : ': พักจอแล้ว') : `: ${r.error}`}`);
@@ -1118,6 +1146,11 @@ function registerIpc() {
   });
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
+  // how many unlocked gear pieces each account would salvage (shown before confirming)
+  handle('salvage-preview', () => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
+    id, name: g.data.stats.name || account(id).name,
+    count: g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x)).length : 0,
+  })));
   handle('potions', () => POTIONS);
   handle('item-watch', (name, limit) => {
     const w = store.data.settings.itemWatch;

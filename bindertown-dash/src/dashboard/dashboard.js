@@ -415,7 +415,7 @@ async function openAll() {
     out.replaceChildren(el('p', { class: 'hint' }, `${label}…`));
     const res = await dash.invoke('game-cmd-all', cmd, arg);
     out.replaceChildren(...(res.length ? res.map((r) => el('div', { class: 'res ' + (r.ok ? 'ok' : 'bad') },
-      `${r.ok ? '✔' : '✖'} ${r.name}${r.skipped ? ' (เป็นอยู่แล้ว)' : ''}${r.error ? ` · ${r.error}` : ''}`)) : [el('p', {}, 'ไม่มีบัญชีที่อยู่ในเกม')]));
+      `${r.ok ? (r.skipped ? '–' : '✔') : '✖'} ${r.name}${r.skipped && !r.error ? ' (เป็นอยู่แล้ว)' : ''}${r.count ? ` · ${r.count} ชิ้น` : ''}${r.error ? ` · ${r.error}` : ''}`)) : [el('p', {}, 'ไม่มีบัญชีที่อยู่ในเกม')]));
   };
   const sel = el('select', {}, potionList.map((p) => el('option', { value: p.id }, `${p.kind === 'hp' ? '❤' : '💧'} ${p.name} · ${p.price} Silver`)));
   const qty = el('input', { type: 'number', min: '1', max: '999', value: '50' });
@@ -426,7 +426,13 @@ async function openAll() {
       el('button', { onclick: () => run('autoOff', {}, 'ปิด AUTO') }, '■ AUTO ปิดทุกบัญชี'),
       el('button', { onclick: () => run('sleep', {}, 'พักจอ') }, '☾ พักจอทุกบัญชี')),
     el('div', { class: 'quick' },
-      el('button', { onclick: () => { if (confirm('ขายของดรอป (ETC) ทั้งหมดของทุกบัญชีให้ NPC?')) run('sellEtc', {}, 'ขาย ETC'); } }, '🪙 ขาย ETC ทุกบัญชี')),
+      el('button', { onclick: () => { if (confirm('ขายของดรอป (ETC) ทั้งหมดของทุกบัญชีให้ NPC?')) run('sellEtc', {}, 'ขาย ETC'); } }, '🪙 ขาย ETC ทุกบัญชี'),
+      el('button', { onclick: async () => {
+        const pre = await dash.invoke('salvage-preview');
+        const total = pre.reduce((t, p) => t + p.count, 0);
+        if (!total) { out.replaceChildren(el('p', {}, 'ไม่มีอุปกรณ์ที่ย่อยได้ในบัญชีไหนเลย (ของที่ล็อกไว้ไม่นับ)')); return; }
+        if (confirm(`ย่อยอุปกรณ์ที่ไม่ได้ล็อกทั้งหมด ${total} ชิ้น?\n${pre.map((p) => `${p.name}: ${p.count} ชิ้น`).join('\n')}\nย่อยแล้วเอาคืนไม่ได้ (ล็อกของที่อยากเก็บในเกมก่อน)`)) run('salvageAll', {}, 'ย่อยของ');
+      } }, '🔨 ย่อยของทุกบัญชี')),
     el('label', {}, '🧪 ซื้อยา ', sel, qty, el('button', { onclick: () => run('buy', { itemId: sel.value, qty: Number(qty.value) }, 'ซื้อยา') }, 'ซื้อทุกบัญชี')),
     el('p', { class: 'hint' }, 'ซื้อ/ขายจากระยะไกลใช้ได้เฉพาะบัญชี Premium (กฎของเกม)'),
     out,
