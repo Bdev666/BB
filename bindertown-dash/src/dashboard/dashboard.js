@@ -6,7 +6,7 @@ const STATUS_TEXT = {
 const ALERT_TEXT = {
   disconnect: 'หลุดจากเซิร์ฟเวอร์', idle: 'ไม่มีข้อมูลจากเกม · AUTO อาจหยุด',
   crash: 'หน้าเกมค้าง/หยุดทำงาน', maintenance: 'เกมปิดปรับปรุง',
-  death: 'ตัวละครตาย', weight: 'กระเป๋าใกล้เต็ม', premium: 'Premium ใกล้หมด',
+  death: 'ตัวละครตาย', weight: 'กระเป๋าใกล้เต็ม', weightFull: 'กระเป๋าเต็ม', premium: 'Premium ใกล้หมด',
   elsewhere: 'ถูกเปิดที่อื่น', staff: 'ถูกตัดโดยทีมงาน', login: 'ต้องล็อกอินใหม่', human: 'เกมขอยืนยันว่าเป็นคน',
   reconnectLimit: 'ต่อใหม่ครบโควตาชั่วโมงนี้',
 };

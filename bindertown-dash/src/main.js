@@ -101,7 +101,7 @@ function pushState() {
 // ---------- notifications ----------
 function notify(id, kind, text) {
   const s = store.data.settings;
-  const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind;
+  const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind === 'weightFull' ? 'weight' : kind;
   if (s.notify[group] === false) return;
   // id null = about the game world (bosses), not one account
   const g = id == null ? null : rt(id);
@@ -414,8 +414,15 @@ function handleEvents(id, events) {
         break;
       case 'self':
         if (typeof ev.weightPct === 'number') {
-          if (ev.weightPct >= s.weightFullPct && !g.alerts.has('weight')) setAlert(id, 'weight', true, `กระเป๋าหนัก ${Math.round(ev.weightPct)}% · ใกล้เต็ม เก็บของไม่ได้`);
-          else if (ev.weightPct < s.weightFullPct - 5 && g.alerts.has('weight')) setAlert(id, 'weight', false);
+          // two steps: nearly full (default 90%) and full (default 95%: AUTO stops picking up loot)
+          const w = ev.weightPct;
+          if (w >= s.weightCriticalPct && !g.alerts.has('weightFull')) {
+            setAlert(id, 'weightFull', true, `🎒 กระเป๋าเต็ม ${Math.round(w)}% · เก็บของไม่ได้แล้ว ขาย/ย่อย/ฝากของด่วน`);
+          } else if (w >= s.weightFullPct && w < s.weightCriticalPct && !g.alerts.has('weight')) {
+            setAlert(id, 'weight', true, `🎒 กระเป๋าหนัก ${Math.round(w)}% · ใกล้เต็ม`);
+          }
+          if (w < s.weightCriticalPct - 2 && g.alerts.has('weightFull')) setAlert(id, 'weightFull', false);
+          if (w < s.weightFullPct - 5 && g.alerts.has('weight')) setAlert(id, 'weight', false);
         }
         if (ev.dead && !g.alerts.has('death')) setAlert(id, 'death', true, 'ตัวละครตาย');
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
@@ -1203,6 +1210,7 @@ function registerIpc() {
     if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
     if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
     if (patch.weightFullPct !== undefined) s.weightFullPct = Math.min(100, Math.max(50, Number(patch.weightFullPct) || 90));
+    if (patch.weightCriticalPct !== undefined) s.weightCriticalPct = Math.min(100, Math.max(50, Number(patch.weightCriticalPct) || 95));
     if (patch.ramLimitMB !== undefined) s.ramLimitMB = Math.min(8000, Math.max(500, Number(patch.ramLimitMB) || 1500));
     if (patch.gameUrl !== undefined) {
       const u = String(patch.gameUrl).trim();

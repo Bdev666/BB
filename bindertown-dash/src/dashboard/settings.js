@@ -30,6 +30,7 @@ function render(state) {
     $('#bossLeadMinutes').value = s.bossLeadMinutes;
     $('#reconnectMinutes').value = s.reconnectMinutes;
     $('#weightFullPct').value = s.weightFullPct;
+    $('#weightCriticalPct').value = s.weightCriticalPct;
     if (info) $('#gameUrl').value = s.gameUrl || info.defaultGameUrl;
   }
   $('#tg-on').hidden = !s.telegram.connected;
@@ -44,7 +45,7 @@ for (const box of $$('[data-set]')) {
 for (const box of $$('[data-notify]')) {
   box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
 }
-for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'bossLeadMinutes', 'reconnectMinutes']) {
+for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'weightCriticalPct', 'bossLeadMinutes', 'reconnectMinutes']) {
   $('#' + id).addEventListener('change', (e) => dash.invoke('settings', { [id]: e.target.value }));
 }
 function urlNote(saved) {
