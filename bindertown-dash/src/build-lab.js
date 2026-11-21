@@ -387,11 +387,17 @@ L.cards = async (p) => {
   const q = { ...p, goal, pack: Math.max(1, p.pack || 4), mode: goal === 'boss' ? 'boss' : 'farm' };
   curP = q;
   const b = { ...baseBuild({ ...q, target, targetLevel: targetLevelFor(target, goal === 'boss' ? 'boss' : 'farm', p.level) }), ...JSON.parse(JSON.stringify(p.build || {})) };
+  const q0 = (b.cards && b.cards.length) ? cardScore(b, q) : null; // the character's own cards now
+  const nowCards = q0 ? b.cards.slice() : [];
   b.cards = []; b.cardStars = [];
   const slots = CARD_SLOTS.filter((l) => p.level >= l).length;
   const cap = loadCap(p.level);
   const star = Math.max(1, Math.min(5, p.stars || 5));
-  const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap);
+  // only the cards this character owns (how many of each, best star), or every card in the game
+  const owned = Array.isArray(p.owned) && p.owned.length ? Object.fromEntries(p.owned.map((o) => [o.mob, o])) : null;
+  const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap && (!owned || owned[id]));
+  const starOf = (id) => (owned && owned[id] ? Math.max(1, Math.min(5, owned[id].stars || 1)) : star);
+  const haveLeft = (id) => !owned || b.cards.filter((c) => c === id).length < (owned[id].n || 1);
   const used = () => b.cards.reduce((t, c) => t + cardLoad(c), 0);
   const sc = () => cardScore(b, q).v;
   const base = cardScore(b, q);
@@ -400,14 +406,14 @@ L.cards = async (p) => {
   while (b.cards.length < slots) {
     let best = null;
     for (const id of pool) {
-      if (used() + cardLoad(id) > cap) continue;
-      b.cards.push(id); b.cardStars.push(star);
+      if (used() + cardLoad(id) > cap || !haveLeft(id)) continue;
+      b.cards.push(id); b.cardStars.push(starOf(id));
       const v = sc(); const g = (v - cur) / cardLoad(id);
       if (!best || g > best.g) best = { id, v, g };
       b.cards.pop(); b.cardStars.pop();
     }
     if (!best || best.v <= cur) break;
-    b.cards.push(best.id); b.cardStars.push(star); cur = best.v;
+    b.cards.push(best.id); b.cardStars.push(starOf(best.id)); cur = best.v;
     await new Promise((r) => setTimeout(r, 0));
   }
   // swaps: replace one card by another while it helps (catches region sets and load trade-offs)
@@ -416,10 +422,11 @@ L.cards = async (p) => {
     for (let i = 0; i < b.cards.length; i++) {
       const old = b.cards[i];
       for (const id of pool) {
-        if (id === old || used() - cardLoad(old) + cardLoad(id) > cap) continue;
-        b.cards[i] = id; const v = sc();
+        if (id === old || used() - cardLoad(old) + cardLoad(id) > cap || !haveLeft(id)) continue;
+        const oldStar = b.cardStars[i];
+        b.cards[i] = id; b.cardStars[i] = starOf(id); const v = sc();
         if (v > cur * 1.001) { cur = v; moved = true; break; }
-        b.cards[i] = old;
+        b.cards[i] = old; b.cardStars[i] = oldStar;
       }
     }
     await new Promise((r) => setTimeout(r, 0));
@@ -431,7 +438,9 @@ L.cards = async (p) => {
   const magic = !!(fin.r && fin.r.basic && fin.r.basic.usesMatk) || ((fin.r && fin.r.skills) || []).filter((x) => x.magic && b.skills[x.sid]).length > ((fin.r && fin.r.skills) || []).filter((x) => !x.magic && x.damages && b.skills[x.sid]).length;
   return {
     goal, target: { id: target, level: b.calc.targetLevel }, slots, cap, load: used(), star, magic,
-    cards: b.cards.map((id) => ({ id, role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, star)) })),
+    owned: !!owned, poolSize: pool.length,
+    now: q0 ? { dps: Math.round(q0.dps), gold: Math.round(q0.gold * 10) / 10, drop: Math.round(q0.drop * 10) / 10, cards: nowCards } : null,
+    cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
     sets, evals, ms: Math.round(performance.now() - t0),

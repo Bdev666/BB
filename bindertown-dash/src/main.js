@@ -1384,7 +1384,19 @@ function registerIpc() {
     if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;
     try {
       const me = await g.win.webContents.executeJavaScript(ME_JS, true);
-      return me && { ...me, loadout: g.adapter.loadout };
+      if (!me) return null;
+      // class 2: the game keeps it as a path name or a small JSON object (path, jobLevel, points)
+      let c2 = me.c2; let c2obj = null;
+      if (typeof c2 === 'string' && c2.trim().startsWith('{')) { try { c2obj = JSON.parse(c2); } catch { /* keep string */ } }
+      else if (c2 && typeof c2 === 'object') c2obj = c2;
+      const r = me.c2r && typeof me.c2r === 'object' ? me.c2r : {};
+      const c2info = { path: (c2obj && c2obj.path) || (typeof c2 === 'string' && !c2obj ? c2 : '') || r.path || '', jobLevel: (c2obj && c2obj.jobLevel) || r.jobLevel || 0, points: (c2obj && c2obj.points) ?? r.points ?? 0 };
+      // cards this character owns: equipped (album) + card items in the bag ("spirit_card+N|monster")
+      const owned = {};
+      const addCard = (str, n) => { const v = String(str); const bar = v.indexOf('|'); if (bar < 0 || !/^spirit_card/.test(v)) return; const plus = /\+(\d+)/.exec(v.slice(0, bar)); const mob = v.slice(bar + 1).split('#')[0]; const st = (plus ? Number(plus[1]) : 0) + 1; const o = owned[mob] || (owned[mob] = { mob, stars: 0, n: 0 }); o.stars = Math.max(o.stars, st); o.n += n; };
+      for (const v of Object.values(g.adapter.loadout.album || {})) addCard(v, 1);
+      if (g.adapter.inv) for (const [k, q] of g.adapter.inv) addCard(k, q || 1);
+      return { ...me, c2: c2info.path, c2info, loadout: g.adapter.loadout, ownedCards: Object.values(owned), name: (account(id) || {}).name };
     } catch { return null; }
   });
   handle('salvage-preview', (rarities) => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
