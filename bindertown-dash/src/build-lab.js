@@ -435,12 +435,29 @@ L.cards = async (p) => {
   const fin = cardScore(b, q);
   const al = (fin.r && fin.r.album) || {};
   const sets = (al.res || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => x.name + ' ' + x.count + ' ใบ');
+  // why each card: damage lost without it, and the skill it lifts the most
+  const shareOf = (r) => Object.fromEntries((((r && r.rotation) || {}).share || []).map((x) => [x.key, x.dmg]));
+  const fullShare = shareOf(fin.r);
+  const setsOf = (r) => ((((r && r.album) || {}).res) || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => ({ name: x.name, tier: x.count >= 5 ? 5 : 3 }));
+  const fullSets = setsOf(fin.r);
+  const keepC = b.cards; const keepS = b.cardStars;
+  const why = keepC.map((id, i) => {
+    b.cards = keepC.filter((_, j) => j !== i); b.cardStars = keepS.filter((_, j) => j !== i);
+    const w = cardScore(b, q);
+    b.cards = keepC; b.cardStars = keepS;
+    const lost = fullSets.filter((x) => !setsOf(w.r).some((y) => y.name === x.name && y.tier === x.tier)).map((x) => x.name + ' ' + x.tier + ' ใบ');
+    const ws = shareOf(w.r);
+    let top = null;
+    for (const [k, v] of Object.entries(fullShare)) { const g = v - (ws[k] || 0); if (!top || g > top.g) top = { k, g, base: ws[k] || 0 }; }
+    const name = top ? (top.k === 'basic' ? 'โจมตีปกติ' : (G.skills[top.k] || {}).name || top.k) : '';
+    return { set: lost.join(', '), pct: fin.v ? Math.round((fin.v - w.v) / fin.v * 1000) / 10 : 0, skill: top && top.g > 0 ? name : '', skillPct: top && top.base ? Math.round(top.g / top.base * 100) : 0 };
+  });
   const magic = !!(fin.r && fin.r.basic && fin.r.basic.usesMatk) || ((fin.r && fin.r.skills) || []).filter((x) => x.magic && b.skills[x.sid]).length > ((fin.r && fin.r.skills) || []).filter((x) => !x.magic && x.damages && b.skills[x.sid]).length;
   return {
     goal, target: { id: target, level: b.calc.targetLevel }, slots, cap, load: used(), star, magic,
     owned: !!owned, poolSize: pool.length,
     now: q0 ? { dps: Math.round(q0.dps), gold: Math.round(q0.gold * 10) / 10, drop: Math.round(q0.drop * 10) / 10, cards: nowCards } : null,
-    cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
+    cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], why: why[i], proc: (G.cardDefs[id].fx || []).some((f) => f.k !== 'stat' && !/Pct$|^(crit|critDmg|cdr|aspd|armorPen|boss|elite|night|gold|drop|spellAmp|castSpd|hit|flee|def|mdef|matk|atk|maxHp|maxMp|dmgTaken|slayer|ward|wardBoss|wardNight|debuffed|opener|desperate|haste|barrier|spirit|gather|block|lifesteal|magicRes|thorns)$/.test(f.k)), role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
     sets, evals, ms: Math.round(performance.now() - t0),

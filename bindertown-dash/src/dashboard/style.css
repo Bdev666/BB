@@ -265,3 +265,4 @@ h3.foldable::before { content: '▾ '; opacity: .6; }
 .lab-maps td.gold { color: var(--gold, #f5c542); font-weight: 700; white-space: nowrap; }
 .lab-maps tr.risky td:nth-child(7) { color: #f87171; }
 .lab-maps tr.low { opacity: .7; }
+.lab-card1 .why { color: #4ade80; font-size: 12px; margin-top: 2px; }

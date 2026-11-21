@@ -665,7 +665,7 @@ async function openLab(opt = {}) {
 // card build for one Build Lab result: best cards for boss DPS, farm DPS or gold farming
 function cardBox(x) {
   const out = el('div', { class: 'lab-cards' });
-  const stars = el('select', {}, ...[5, 4, 3, 2, 1].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
+  const stars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
   const hasOwned = !!(lastLab && lastLab.owned && lastLab.owned.length);
   const onlyMine = el('input', { type: 'checkbox', checked: hasOwned ? '' : null, disabled: hasOwned ? null : '' });
   const run = async (goal, btn) => {
@@ -685,8 +685,10 @@ function cardBox(x) {
           ...r.sets.map((t) => el('span', { class: 'chip' }, '🔗 เซ็ต ' + t))),
         el('div', { class: 'lab-cardlist' }, ...r.cards.map((c, i) => el('div', { class: 'lab-card1' },
           el('b', {}, `${i + 1}. ${labPretty(c.id)}`), el('small', { class: 'hint' }, ` ${'★'.repeat(c.star || 1)} · ${c.role || ''} Lv ${c.level} · Load ${c.load}`),
-          el('div', { class: 'hint' }, c.fx.join(' · '))))),
-        el('p', { class: 'hint' }, goal === 'gold' ? 'คะแนนฟาร์มเงิน = ความเร็วฆ่ามอน × (1 + Gold%) × (1 + Drop%/2) · การ์ด slayer(ชนิด) แรงเฉพาะมอนชนิดนั้น (จัดตามเป้าด้านบน) ถ้าฟาร์มแมพอื่นให้เปลี่ยนเป็นการ์ดเพิ่ม ATK/MATK/INT/STR แทน' : 'จัดจากดาเมจจริงในเครื่องคิดเลขของเกม (รวมโบนัสเซ็ตภูมิภาค) · ไม่รวมการ์ดบอสโลก'));
+          el('div', { class: 'hint' }, c.fx.join(' · ')),
+          c.why ? el('div', { class: 'why' }, `${goal === 'gold' ? 'คะแนน' : 'DPS'} +${c.why.pct}%${c.why.skill ? ` · ช่วย ${c.why.skill} มากสุด${c.why.skillPct ? ` (+${c.why.skillPct}%)` : ''}` : ''}${c.why.set ? ` · ทำให้ครบเซ็ต ${c.why.set}` : ''}`) : null,
+          c.proc ? el('div', { class: 'hint' }, '⚠ มีเอฟเฟกต์พิเศษ (proc) ที่เครื่องคิดเลขของเกมคิดแบบเฉลี่ย') : null))),
+        el('p', { class: 'hint' }, goal === 'gold' ? 'คะแนนฟาร์มเงิน = ความเร็วฆ่ามอน × (1 + Gold%) × (1 + Drop%/2) · การ์ด slayer(ชนิด) แรงเฉพาะมอนชนิดนั้น (จัดตามเป้าด้านบน) ถ้าฟาร์มแมพอื่นให้เปลี่ยนเป็นการ์ดเพิ่ม ATK/MATK/INT/STR แทน' : 'จัดจากเครื่องคิดเลขของเกม (ตัวเดียวกับหน้าคำนวณดาเมจใน wiki) รวมโบนัสเซ็ตภูมิภาค · "ช่วยสกิลไหน" = สกิลที่ดาเมจหายมากสุดถ้าถอดใบนั้น · ค่าการ์ดตามดาวที่เลือก (wiki แสดง ★1) · ไม่รวมการ์ดบอสโลก'));
     } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = false;
   };
