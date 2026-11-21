@@ -9,7 +9,7 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { BinderTownAdapter, SNAPSHOT_JS, encodeInput } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const updater = require('./updater');
@@ -422,7 +422,8 @@ function handleEvents(id, events) {
         const wait = g.valuableWait.get(ev.item);
         if (wait) {
           g.valuableWait.delete(ev.item);
-          if (ev.price && ev.price * wait.qty >= s.valuableMinGold) {
+          // only real player-market prices (listings / sales), never NPC prices
+          if (ev.price && (ev.basis === 'listed' || ev.basis === 'sales') && ev.price * wait.qty >= s.valuableMinGold) {
             notify(id, 'valuable', `💰 ดรอป ${ev.item}${wait.qty > 1 ? ' x' + wait.qty : ''} · ราคาตลาด ~${Math.round(ev.price).toLocaleString('en-US')} G${wait.qty > 1 ? '/ชิ้น' : ''}`);
           }
         }
@@ -467,7 +468,7 @@ function requestPrice(id, itemId, force = false) {
 
 async function gameCommand(id, cmd, arg) {
   const r = await runCommand(id, cmd, arg);
-  if (!r.ok || !['sell', 'sellEtc', 'chat'].includes(cmd)) return r;
+  if (!r.ok || !['sell', 'sellEtc', 'chat', 'buy', 'salvage'].includes(cmd)) return r;
   // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
   const g = rt(id);
   const sentAt = Date.now();
@@ -506,6 +507,27 @@ async function runCommand(id, cmd, arg) {
       break;
     }
     case 'price': ok = await requestPrice(id, arg.itemId, true); break;
+    case 'buy': {
+      // NPC shop potions only (the game's vendor list); the game charges Silver
+      const p = POTIONS.find((x) => x.id === arg.itemId);
+      const qty = Math.max(1, Math.min(999, Math.floor(Number(arg.qty) || 0)));
+      if (!p) return { ok: false, error: 'ซื้อได้เฉพาะยาจากร้าน NPC' };
+      ok = await sendInput(id, { type: 'vendorBuy', itemId: p.id, qty });
+      break;
+    }
+    case 'salvage': {
+      // one or more gear pieces from the bag; locked ones are skipped like in the game
+      const ids = (Array.isArray(arg.itemIds) ? arg.itemIds : [arg.itemId]).filter((x) => typeof x === 'string' && x.includes('#'));
+      const usable = ids.filter((x) => !g.adapter.locks.has(x) && g.adapter.inv && g.adapter.inv.has(x));
+      if (!usable.length) return { ok: false, error: 'ไม่มีของที่ย่อยได้ (ของที่ล็อกไว้จะไม่ถูกย่อย)' };
+      for (const itemId of usable) {
+        // eslint-disable-next-line no-await-in-loop
+        ok = (await sendInput(id, { type: 'salvage', itemId })) || ok;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      break;
+    }
     case 'chat': {
       const text = String(arg.text || '').trim().slice(0, 200);
       const channel = ['world', 'map', 'party', 'guild', 'whisper', 'trade'].includes(arg.channel) ? arg.channel : 'map';
@@ -768,6 +790,7 @@ function registerIpc() {
     return !!first;
   });
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
+  handle('potions', () => POTIONS);
   handle('item-watch', (name, limit) => {
     const w = store.data.settings.itemWatch;
     const n = Number(limit);

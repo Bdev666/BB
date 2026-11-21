@@ -109,6 +109,22 @@ function marketPrice(guide, now = Date.now()) {
   return { price: sales.length % 2 ? sales[m] : (sales[m - 1] + sales[m]) / 2, basis: 'sales', sales: sales.length };
 }
 
+// The NPC shop's potions (from the client's vendor table, Silver, before the economy index)
+const POTIONS = [
+  { id: 'potion', name: 'โพชั่น', kind: 'hp', price: 12 },
+  { id: 'hi_potion', name: 'ไฮโพชั่น', kind: 'hp', price: 32 },
+  { id: 'mega_potion', name: 'เมก้าโพชั่น', kind: 'hp', price: 75 },
+  { id: 'elixir', name: 'Elixir', kind: 'hp', price: 150 },
+  { id: 'grand_elixir', name: 'Grand Elixir', kind: 'hp', price: 260 },
+  { id: 'pearl_elixir', name: 'Pearl Elixir', kind: 'hp', price: 400 },
+  { id: 'sovereign_elixir', name: 'Sovereign Elixir', kind: 'hp', price: 560 },
+  { id: 'mana_potion', name: 'ยามานา', kind: 'mp', price: 16 },
+  { id: 'ether', name: 'Ether', kind: 'mp', price: 40 },
+  { id: 'high_ether', name: 'High Ether', kind: 'mp', price: 100 },
+  { id: 'pearl_ether', name: 'Pearl Ether', kind: 'mp', price: 150 },
+  { id: 'sovereign_ether', name: 'Sovereign Ether', kind: 'mp', price: 210 },
+];
+
 // Items that are everyday supplies, not loot worth a market check
 const SUPPLIES = /^(potion|mana_potion|.*_potion|arrow.*|bullet.*|throwing_.*|fly_wing|butterfly_wing|herb_leaf|raw_fish)$/;
 
@@ -194,6 +210,7 @@ class BinderTownAdapter {
     this.inv = null;             // Map itemId -> qty
     this.pings = new Map();      // t -> sentAt
     this.mobLevels = new Map();  // mobType -> level seen on the map
+    this.locks = new Set();      // item ids the player locked in the game
   }
 
   mobName(id) {
@@ -295,6 +312,12 @@ class BinderTownAdapter {
         out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
         break;
       }
+      case 'salvaged': {
+        const ok = e.ok !== false;
+        const gains = Object.entries(e).filter(([k, v]) => typeof v === 'number' && !['qty'].includes(k)).map(([k, v]) => `${pretty(k)} ${v}`).join(' · ');
+        out.push({ type: 'info', text: ok ? `ย่อยของแล้ว${e.itemId ? ` ${pretty(e.itemId)}` : ''}${gains ? ` · ${gains}` : ''}` : `ย่อยไม่ได้: ${e.reason || ''}`, t: at });
+        break;
+      }
       case 'pass':
         if (typeof e.premiumUntil === 'number') out.push({ type: 'premium', until: e.premiumUntil, t: at });
         break;
@@ -323,6 +346,7 @@ class BinderTownAdapter {
 
   inventory(e, at, out) {
     const items = Array.isArray(e.items) ? e.items : [];
+    if (Array.isArray(e.locks)) this.locks = new Set(e.locks);
     if (!e.d || !this.inv) {
       this.inv = new Map(items.map((i) => [i.id, i.qty]));
     } else {
@@ -344,7 +368,8 @@ class BinderTownAdapter {
       const name = pretty(id);
       const m = merged.get(name) || { name, qty: 0, ids: [] };
       m.qty += Number(qty) || 0;
-      m.ids.push({ id, qty: Number(qty) || 0 });
+      // gear pieces are single instances "<item>#<uuid>"; locked ones can't be sold or salvaged
+      m.ids.push({ id, qty: Number(qty) || 0, gear: id.includes('#'), locked: this.locks.has(id) });
       merged.set(name, m);
     }
     out.push({ type: 'bag', items: [...merged.values()], t: at });
@@ -402,4 +427,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

@@ -1,8 +1,9 @@
 name: BinderDash Windows build
 
-# Every push to bindertown-dash/ builds the installer as a workflow artifact.
-# A tag "binderdash-v<version>" also publishes a GitHub Release, which installed
-# copies of BinderDash pick up through their in-app updater.
+# Every push to bindertown-dash/ builds the installer and publishes it as the
+# GitHub Release "v<version>" (version from package.json) when that release
+# doesn't exist yet. Installed copies of BinderDash pick new releases up through
+# their in-app updater, so bumping "version" ships an update to everyone.
 on:
   push:
     # with tags listed, branches must be listed too or branch pushes stop triggering
@@ -33,14 +34,22 @@ jobs:
           cache-dependency-path: bindertown-dash/package-lock.json
       - run: npm ci
       - run: npm run check
-      - name: Build
-        if: ${{ !startsWith(github.ref, 'refs/tags/binderdash-v') }}
-        run: npx electron-builder --win nsis --x64 --publish never
-      - name: Build and publish release
-        if: ${{ startsWith(github.ref, 'refs/tags/binderdash-v') }}
+      - name: Is this version released yet?
+        id: rel
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win nsis --x64 --publish always
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$v is already released: build only"; echo "publish=never" >> "$GITHUB_OUTPUT"
+          else
+            echo "releasing v$v"; echo "publish=always" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build (and publish the release when new)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win nsis --x64 --publish ${{ steps.rel.outputs.publish }}
       - uses: actions/upload-artifact@v4
         with:
           name: BinderDash-Setup

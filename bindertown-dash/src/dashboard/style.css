@@ -172,3 +172,13 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .logs.chat-min .chat .chat-send { display: none; }
 .tiny[disabled] { opacity: .35; cursor: not-allowed; }
 .logs:not(.chat-min) .chat .log-head { flex-wrap: wrap; }
+.modal { position: fixed; inset: 0; background: #0008; display: grid; place-items: center; z-index: 10; }
+.modal-box { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; width: min(520px, 92vw); max-height: 80vh; overflow: auto; }
+.modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.modal-box label { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.modal-box select, .modal-box input[type=number] { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+.modal-box select { flex: 1; }
+.modal-box .quick { display: flex; gap: 4px; }
+.gearlist { max-height: 45vh; overflow: auto; margin: 8px 0; }
+.gearlist .gear { margin: 4px 0; }
+.gearlist .gear .tiny { margin-left: auto; }

@@ -357,16 +357,79 @@ async function cmd(name, arg, pending) {
 const SELL_RULE = 'ขายจากระยะไกลได้เฉพาะบัญชี Premium (กฎของเกม) · ไม่มี Premium ต้องไปขายกับร้านค้า NPC ในเมือง';
 function canSell() { return !!(detail && detail.stats && detail.stats.premium); }
 
+// ---------- modal: buy potions / salvage gear ----------
+function openModal(title, body) {
+  $('#modal-title').textContent = title;
+  $('#modal-body').replaceChildren(...body.filter((n) => n != null && n !== false));
+  $('#modal').hidden = false;
+}
+function closeModal() { $('#modal').hidden = true; }
+$('#modal-x').addEventListener('click', closeModal);
+$('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+let potionList = null;
+async function openBuy() {
+  potionList = potionList || await dash.invoke('potions');
+  const s = (detail && detail.stats) || {};
+  const have = Object.fromEntries(((detail && detail.bag) || []).flatMap((b) => (b.ids || []).map((x) => [x.id, x.qty])));
+  const sel = el('select', { id: 'buy-item' }, potionList.map((p) => el('option', { value: p.id }, `${p.kind === 'hp' ? '❤ HP' : '💧 MP'} · ${p.name} · ${p.price} Silver${have[p.id] ? ` · มี ${have[p.id]}` : ''}`)));
+  const qty = el('input', { type: 'number', id: 'buy-qty', min: '1', max: '999', value: '50' });
+  const cost = el('p', { class: 'hint' });
+  const upd = () => {
+    const p = potionList.find((x) => x.id === sel.value);
+    cost.textContent = `ราคาประมาณ ${num(p.price * (Number(qty.value) || 0))} Silver (ราคาจริงตามดัชนีเศรษฐกิจของเซิร์ฟ) · Silver ที่มี ${num(s.silver)}`;
+  };
+  sel.addEventListener('change', upd); qty.addEventListener('input', upd); upd();
+  const go = el('button', { class: 'primary', onclick: async () => {
+    const r = await cmd('buy', { itemId: sel.value, qty: Number(qty.value) }, 'กำลังซื้อยา…');
+    if (r && r.ok) closeModal();
+  } }, 'ซื้อ');
+  const quick = el('div', { class: 'quick' }, [10, 50, 100, 300].map((n) => el('button', { class: 'tiny', onclick: () => { qty.value = n; upd(); } }, String(n))));
+  openModal('🧪 ซื้อยา HP/MP', [
+    el('p', { class: 'hint' }, 'ซื้อจากร้าน NPC ผ่าน HUD โดยไม่ต้องเปิดหน้าเกม (ตามกฎเกม ใช้ได้กับบัญชี Premium)'),
+    el('label', {}, 'ยา ', sel), el('label', {}, 'จำนวน ', qty, quick), cost, go,
+  ]);
+}
+
+function gearList() {
+  return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked).map((x) => ({ ...x, name: b.name, market: b.market })));
+}
+function gearCount() { return gearList().length; }
+
+function openSalvage() {
+  const gear = gearList();
+  const boxes = gear.map((g) => {
+    const box = el('input', { type: 'checkbox', value: g.id });
+    return el('label', { class: 'gear' }, box, ` ${g.name}`, g.market != null ? el('small', {}, ` · ตลาด ~${short(g.market)} G`) : null,
+      el('button', { class: 'tiny', type: 'button', title: 'ดูราคาตลาดก่อนย่อย', onclick: (e) => { e.preventDefault(); cmd('price', { itemId: g.id }, 'กำลังถามราคาตลาด…'); } }, 'G?'));
+  });
+  const go = el('button', { class: 'primary', onclick: async () => {
+    const ids = boxes.map((b) => b.querySelector('input')).filter((x) => x.checked).map((x) => x.value);
+    if (!ids.length) { showBanner('เลือกของที่จะย่อยก่อน'); return; }
+    if (!confirm(`ย่อย ${ids.length} ชิ้น? ย่อยแล้วเอาคืนไม่ได้`)) return;
+    const r = await cmd('salvage', { itemIds: ids }, `กำลังย่อย ${ids.length} ชิ้น…`);
+    if (r && r.ok) closeModal();
+  } }, 'ย่อยที่เลือก');
+  openModal('🔨 ย่อยของ', [
+    el('p', { class: 'hint' }, 'แยกชิ้นอุปกรณ์ในกระเป๋าเป็นวัตถุดิบ · ของที่ล็อกไว้ในเกมไม่แสดงและจะไม่ถูกย่อย · ดูราคาตลาดก่อนได้ด้วยปุ่ม G?'),
+    gear.length ? el('div', { class: 'gearlist' }, boxes) : el('p', {}, 'ไม่มีอุปกรณ์ในกระเป๋าที่ย่อยได้'),
+    gear.length ? go : null,
+  ]);
+}
+
 function renderControls(a) {
   const s = (detail && detail.stats) || {};
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount()]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
     el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
     s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
+    el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
+    el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
     el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
       if (confirm(`ขายของดรอปทั้งหมด ${num(etcQty)} ชิ้นให้ NPC?`)) cmd('sellEtc', {}, 'กำลังขายของดรอป…');
     } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`),

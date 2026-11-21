@@ -49,7 +49,13 @@ assert.deepStrictEqual(ev, [{ type: 'kill', target: 'Cosmic Warden', exp: 18450,
 ev = ad.incoming(frame('server', { type: 'inv', items: [{ id: 'yellow_potion', qty: 10 }, { id: 'refine_stone', qty: 2 }] }));
 const strip = (items) => items.map(({ name, qty }) => ({ name, qty }));
 assert.deepStrictEqual(strip(ev[0].items), [{ name: 'Yellow Potion', qty: 10 }, { name: 'Refine Stone', qty: 2 }]);
-assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10 }]);
+assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear: false, locked: false }]);
+// gear instances and locks
+{
+  const a2 = new BinderTownAdapter();
+  const e2 = a2.incoming(frame('server', { type: 'inv', items: [{ id: 'chipped_blade#u1', qty: 1 }, { id: 'buckler#u2', qty: 1 }], locks: ['buckler#u2'] }));
+  assert.deepStrictEqual(e2[0].items.map((i) => [i.name, i.ids[0].gear, i.ids[0].locked]), [['Chipped Blade', true, false], ['Buckler', true, true]]);
+}
 ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'yellow_potion', qty: 9 }, { id: 'warden_shard', qty: 1 }], gone: ['refine_stone'] }));
 assert.deepStrictEqual(ev.map((e) => e.type), ['loot', 'bag']);
 assert.strictEqual(ev[0].item, 'Warden Shard');
