@@ -636,6 +636,117 @@ async function commandAll(cmd, arg) {
   return results;
 }
 
+// ---------- remote control from Telegram (owner's chat only, off by default) ----------
+const remote = new telegram.Remote({
+  onCommand: (text) => remoteCommand(text),
+  onIgnored: (m) => log.warn(`telegram: ignored a message from another chat (${m.chat && m.chat.id})`),
+  onError: (err) => log.once('tg-remote', 60000, 'warn', 'telegram remote:', err.message || err),
+});
+function syncRemote() {
+  const s = store.data.settings;
+  if (s.telegramRemote && s.telegram.token && s.telegram.chatId) { remote.start(s.telegram.token, s.telegram.chatId); log.info('telegram remote: on'); }
+  else if (remote.running) { remote.stop(); log.info('telegram remote: off'); }
+}
+
+const pctText = (cur, max) => (max ? `${Math.round((cur / max) * 100)}%` : '-');
+const shortNum = (n) => (typeof n !== 'number' ? '-' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)));
+const mins = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
+
+// "all" or account numbers as shown in the Dashboard list (1 = top)
+function pickAccounts(arg) {
+  const list = store.data.accounts;
+  if (!arg || arg === 'all' || arg === 'ทั้งหมด') return list.map((a) => a.id);
+  return String(arg).split(/[ ,]+/).map(Number).filter((n) => n >= 1 && n <= list.length).map((n) => list[n - 1].id);
+}
+
+async function remoteCommand(text) {
+  const [cmdRaw, ...rest] = text.split(/\s+/);
+  const cmd = cmdRaw.toLowerCase().replace(/@.*$/, '');
+  const arg = rest.join(' ');
+  log.info(`telegram command: ${cmd}${arg ? ' ' + arg.slice(0, 20) : ''}`);
+  const list = store.data.accounts;
+  switch (cmd) {
+    case '/start':
+    case '/help':
+      return [
+        'BinderDash รีโมต 🎮',
+        '/status — สถานะทุกบัญชี',
+        '/auto on|off [all|1 2 …] — เปิด/ปิด AUTO',
+        '/sleep [all|1 2 …] — พักจอ',
+        '/daily — ของรอรับ (Pass / จดหมาย)',
+        '/bosses — บอสที่เกิดแล้ว / ใกล้เกิด',
+        '/events — อีเวนต์ที่กำลังมี',
+        'เลขบัญชี = ลำดับในรายการบน Dashboard',
+      ].join('\n');
+    case '/status': {
+      const now = Date.now();
+      const lines = list.map((a, i) => {
+        const g = rt(a.id);
+        const s = g.data.stats;
+        const r = g.data.rates(now);
+        if (!g.win || g.win.isDestroyed()) return `${i + 1}. ${a.name} — ปิดอยู่`;
+        if (!g.inGame) return `${i + 1}. ${a.name} — ${g.status === 'maintenance' ? 'ปิดปรับปรุง' : 'ยังไม่เข้าเกม'}`;
+        return `${i + 1}. ${s.name || a.name} Lv${s.level ?? '?'} ${s.auto ? '▶AUTO' : '■หยุด'}${s.dead ? ' 💀ตาย' : ''}`
+          + `\n   HP ${pctText(s.hp, s.maxHp)} · EXP ${typeof s.expPct === 'number' ? s.expPct.toFixed(1) + '%' : '-'} · ${shortNum(r.expPerHour)} EXP/ชม. · รายได้ ${shortNum(r.incomePerHour)}/ชม.`
+          + (g.alerts.size ? `\n   ⚠ ${[...g.alerts].map((k) => k.replace(/:.*/, '')).join(', ')}` : '');
+      });
+      const online = Math.max(0, ...[...games.values()].map((g) => g.data.net.online || 0));
+      return `📊 สถานะ${online ? ` · คนในเซิร์ฟ ${online}` : ''}\n${lines.join('\n') || 'ยังไม่มีบัญชี'}`;
+    }
+    case '/auto':
+    case '/sleep': {
+      let target = arg;
+      let want = null;
+      if (cmd === '/auto') {
+        const m = /^(on|off|เปิด|ปิด)\b\s*(.*)$/i.exec(arg);
+        if (!m) return 'ใช้แบบนี้: /auto on หรือ /auto off (เติมเลขบัญชีได้ เช่น /auto off 2 3)';
+        want = /^(on|เปิด)$/i.test(m[1]);
+        target = m[2];
+      }
+      const ids = pickAccounts(target);
+      const out = [];
+      for (const id of ids) {
+        const g = rt(id);
+        const name = (g.data.stats.name || account(id).name);
+        if (!g.win || g.win.isDestroyed() || !g.inGame) { out.push(`– ${name}: ไม่ได้อยู่ในเกม`); continue; }
+        if (cmd === '/auto' && g.data.stats.auto === want) { out.push(`✔ ${name}: AUTO ${want ? 'เปิด' : 'ปิด'}อยู่แล้ว`); continue; }
+        if (cmd === '/sleep' && g.data.stats.sleeping) { out.push(`✔ ${name}: พักจออยู่แล้ว`); continue; }
+        // eslint-disable-next-line no-await-in-loop
+        const r = await gameCommand(id, cmd === '/auto' ? 'auto' : 'sleep', {});
+        out.push(`${r.ok ? '✔' : '✖'} ${name}${r.ok ? (cmd === '/auto' ? `: AUTO ${want ? 'เปิด' : 'ปิด'}แล้ว` : ': พักจอแล้ว') : `: ${r.error}`}`);
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((res) => setTimeout(res, 300));
+      }
+      return out.join('\n') || 'ไม่มีบัญชีที่เลือก';
+    }
+    case '/daily': {
+      const lines = list.map((a, i) => {
+        const g = rt(a.id);
+        const w = g.data.rewardsWaiting();
+        const c = g.data.checklist;
+        if (!c.pass && !c.mail) return `${i + 1}. ${a.name} — ยังไม่มีข้อมูล`;
+        const done = c.pass ? c.pass.daily.filter((x) => x.claimed).length : 0;
+        return `${i + 1}. ${g.data.stats.name || a.name} — Pass ${done}/${c.pass ? c.pass.daily.length : 4}${w.pass ? ` · 🎁 รอกดรับ ${w.pass}` : ''}${w.mail ? ` · ✉ จดหมายมีของ ${w.mail}` : ''}`;
+      });
+      return `📋 รายวัน\n${lines.join('\n')}`;
+    }
+    case '/bosses': {
+      const b = bossView();
+      const up = b.field.filter((f) => f.up).map((f) => `♛ ${f.name} (${mapName(f.map)}) — เกิดแล้ว`);
+      const soon = b.field.filter((f) => !f.up && f.inMs < 30 * 60000).map((f) => `♛ ${f.name} (${mapName(f.map)}) — อีก ${mins(f.inMs)}`);
+      const world = b.world.map((w) => `🌋 ${w.name} — ${w.state === 'live' ? `กำลังสู้ ${w.fighters} คน` : `อีก ${mins(w.inMs)}`}`);
+      const all = [...world, ...up, ...soon];
+      return all.length ? `บอส\n${all.join('\n')}` : 'ยังไม่มีข้อมูลบอส (ต้องมีบัญชีที่อยู่ในเกม)';
+    }
+    case '/events': {
+      const ev = eventsView();
+      return ev.length ? ev.map((e) => (e.live ? `🔥 ${e.name}${e.perks.length ? ' · ' + e.perks.join(' · ') : ''}${e.endsInMs ? ` · เหลือ ${mins(e.endsInMs)}` : ''}` : `⏳ ${e.name} · เริ่มในอีก ${mins(e.startsInMs)}`)).join('\n') : 'ตอนนี้ไม่มีอีเวนต์';
+    }
+    default:
+      return 'ไม่รู้จักคำสั่งนี้ พิมพ์ /help ดูคำสั่งทั้งหมด';
+  }
+}
+
 // ---------- bosses (the same for every account on the server) ----------
 const bosses = { field: new Map(), world: new Map(), sent: new Set(), queriedAt: 0 };
 
@@ -667,7 +778,14 @@ function bossUp(b) {
   notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} เกิดแล้ว · ${mapName(b.map)}`);
 }
 
-function mapName(id) { return String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); }
+// map id -> name, from the same map table the Dashboard uses (one JSON object per line)
+const MAP_NAMES = (() => {
+  try {
+    return Object.fromEntries(fs.readFileSync(path.join(__dirname, 'dashboard', 'maps.js'), 'utf8').split('\n')
+      .filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l.trim().replace(/,$/, ''))).map((m) => [m.id, m.name]));
+  } catch { return {}; }
+})();
+function mapName(id) { return MAP_NAMES[id] || String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); }
 
 // timers: "about to spawn" heads-up, and spawns we can tell from the clock alone
 function bossTick() {
@@ -950,7 +1068,7 @@ function registerIpc() {
   });
   handle('settings', (patch) => {
     const s = store.data.settings;
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
     if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
     if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
@@ -966,6 +1084,7 @@ function registerIpc() {
     if (patch.debugCapture !== undefined) s.debugCapture = !!patch.debugCapture;
     if (patch.demo !== undefined) s.demo = !!patch.demo;
     store.save();
+    syncRemote();
     pushState();
   });
   handle('telegram-connect', async (token) => {
@@ -976,6 +1095,7 @@ function registerIpc() {
       if (!chatId) return { ok: false, error: 'ยังไม่เจอแชท · เปิดแชทกับบอทใน Telegram แล้วกด START ก่อน แล้วกดเชื่อมต่ออีกครั้ง' };
       store.data.settings.telegram = { token, chatId };
       store.save();
+      syncRemote();
       await telegram.send(token, chatId, 'BinderDash เชื่อมต่อแล้ว 👋');
       pushState();
       return { ok: true };
@@ -985,6 +1105,7 @@ function registerIpc() {
   });
   handle('telegram-disconnect', () => {
     store.data.settings.telegram = { token: '', chatId: '' };
+    syncRemote();
     store.save();
     pushState();
   });
@@ -1077,4 +1198,5 @@ app.whenReady().then(() => {
   setInterval(demoTick, 500);
   setInterval(pollSnapshots, 1000);
   setInterval(bossTick, 15 * 1000);
+  syncRemote();
 });

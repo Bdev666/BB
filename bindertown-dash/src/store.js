@@ -28,6 +28,7 @@ const DEFAULTS = {
     weightFullPct: 90,       // warn when the bag is this full
     itemWatch: {},           // item name -> warn when count drops below this
     telegram: { token: '', chatId: '' },
+    telegramRemote: false,   // accept commands from the owner's Telegram chat
     debugCapture: false,     // save raw game messages to a local file (to map the game's data)
     demo: false,             // fake data to preview the dashboard
   },
