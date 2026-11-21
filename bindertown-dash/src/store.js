@@ -20,7 +20,7 @@ const DEFAULTS = {
       disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
       crash: true, maintenance: true, sound: true,
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
-      fieldBoss: true, worldBoss: true,
+      fieldBoss: true, worldBoss: true, event: true, daily: true,
     },
     valuableMinGold: 300,    // notify drops whose player-market value is at least this (Gold)
     potionMinutes: 30,

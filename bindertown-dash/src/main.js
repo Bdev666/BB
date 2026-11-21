@@ -64,6 +64,7 @@ function publicState() {
     maxAccounts: MAX_ACCOUNTS,
     update: { ...updater.state(), current: app.getVersion() },
     bosses: bossView(),
+    events: eventsView(),
     accounts: store.data.accounts.map((a) => {
       const g = rt(a.id);
       return {
@@ -426,6 +427,22 @@ function handleEvents(id, events) {
         if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.item, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
         break;
       case 'fieldBosses': onFieldBosses(ev.list); break;
+      case 'worldEvent': onWorldEvent(ev); break;
+      case 'newType':
+        log.info(`acc ${id}: new server message type from the game: ${ev.name} (fields: ${ev.fields.join(', ') || '-'})`);
+        break;
+      case 'pass':
+      case 'mail': {
+        // once a day per account, when there is something new to collect
+        const w = g.data.rewardsWaiting();
+        const day = new Date().toDateString();
+        const [lastDay, lastCount] = (g.rewardsNotified || ':0').split(':');
+        if (w.total > 0 && (lastDay !== day || w.total > Number(lastCount))) {
+          g.rewardsNotified = `${day}:${w.total}`;
+          notify(id, 'daily', `🎁 มีของรอรับ: ${[w.pass ? `ภารกิจ Pass ${w.pass}` : null, w.mail ? `จดหมาย ${w.mail} ฉบับ` : null].filter(Boolean).join(' · ')}`);
+        }
+        break;
+      }
       case 'worldBoss': onWorldBoss(ev); break;
       case 'market': {
         // prices are the same for every account on the server
@@ -572,6 +589,53 @@ function logChanges() {
   }
 }
 
+// ---------- world events (EXP/drop boosts; the same for every account) ----------
+const worldEvents = new Map(); // key -> { active, next }
+function onWorldEvent(ev) {
+  const before = worldEvents.get(ev.key);
+  worldEvents.set(ev.key, { active: ev.active, next: ev.next || null });
+  const startedNow = ev.active && (!before || !before.active || before.active.id !== ev.active.id);
+  // a start we see live (or the server says it just began), not one already running at login
+  if (startedNow && (before || ev.fresh)) {
+    const left = ev.active.endsAt ? Math.round((ev.active.endsAt - Date.now()) / 60000) : 0;
+    notify(null, 'event', `🔥 อีเวนต์ ${ev.active.name} เริ่มแล้ว${ev.active.perks.length ? ` · ${ev.active.perks.join(' · ')}` : ''}${left > 0 ? ` · ${left >= 120 ? Math.round(left / 60) + ' ชม.' : left + ' นาที'}` : ''}`);
+    log.info(`world event started: ${ev.key} ${ev.active.id}`);
+  }
+  pushState();
+}
+function eventsView() {
+  const now = Date.now();
+  return [...worldEvents.values()].flatMap((e) => [
+    e.active && (!e.active.endsAt || e.active.endsAt > now) ? { name: e.active.name, perks: e.active.perks, endsInMs: e.active.endsAt ? e.active.endsAt - now : 0, live: true } : null,
+    e.next && e.next.startsAt > now ? { name: e.next.name, perks: [], startsInMs: e.next.startsAt - now, live: false } : null,
+  ]).filter(Boolean);
+}
+
+// ---------- every account at once (only what the player pressed) ----------
+async function commandAll(cmd, arg) {
+  const results = [];
+  for (const [id, g] of openGames()) {
+    if (!g.inGame || g.demo) continue;
+    const name = g.data.stats.name || account(id).name;
+    let r;
+    if (cmd === 'autoOn' || cmd === 'autoOff') {
+      const want = cmd === 'autoOn';
+      r = g.data.stats.auto === want ? { ok: true, skipped: true } : await gameCommand(id, 'auto', {});
+    } else if (cmd === 'sleep') {
+      r = g.data.stats.sleeping ? { ok: true, skipped: true } : await gameCommand(id, 'sleep', {});
+    } else if (['sellEtc', 'buy'].includes(cmd)) {
+      r = await gameCommand(id, cmd, arg);
+    } else {
+      r = { ok: false, error: 'ไม่รู้จักคำสั่ง' };
+    }
+    results.push({ id, name, ...r });
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((res) => setTimeout(res, 300)); // one after another, like a person clicking
+  }
+  log.info(`all accounts: ${cmd} -> ${results.map((r) => `${r.id}:${r.ok ? (r.skipped ? 'skip' : 'ok') : 'fail'}`).join(' ') || 'no account in game'}`);
+  return results;
+}
+
 // ---------- bosses (the same for every account on the server) ----------
 const bosses = { field: new Map(), world: new Map(), sent: new Set(), queriedAt: 0 };
 
@@ -660,6 +724,7 @@ function makeReport() {
     `Windows/OS: ${os.type()} ${os.release()} ${os.arch()} · RAM ${Math.round(os.totalmem() / 1073741824)} GB · CPU ${os.cpus().length} cores`,
     `เวลา: ${new Date().toString()}`,
     `ทดสอบกับเกม build: ${KNOWN_BUILDS.join(', ')}`,
+    `ชนิดข้อความใหม่จากเกม: ${[...new Set([...games.values()].flatMap((g) => [...g.adapter.newTypes.keys()]))].join(', ') || '-'}`,
     '',
     '== บัญชี ==',
     ...store.data.accounts.map((a) => {
@@ -931,6 +996,7 @@ function registerIpc() {
     return !!first;
   });
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
+  handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   handle('potions', () => POTIONS);
   handle('item-watch', (name, limit) => {
     const w = store.data.settings.itemWatch;

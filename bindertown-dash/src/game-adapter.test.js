@@ -176,4 +176,31 @@ assert.strictEqual(ev[1].price, 300);
   assert.deepStrictEqual([e4[1].name, e4[1].state, e4[1].fighters], ['Pearlheart Titan', 'live', 355]);
 }
 
+// daily checklist, world events, new message types
+{
+  const a5 = new BinderTownAdapter();
+  const e5 = a5.incoming(frame('server', [
+    { type: 'pass', state: { day: '2026-11-21', daily: { login: 1, kills: 40, gathers: 3 }, dailyDone: ['login'], weekly: { wlogin: 2 }, weeklyDone: [] }, premiumUntil: 0 },
+    { type: 'mail', list: [{ title: 'gift', items: [{ item: 'x', qty: 1 }], claimed: false, read: false }, { title: 'news', items: [], claimed: false, read: true }, { title: 'old', items: [{ item: 'y', qty: 1 }], claimed: true, read: true }] },
+    { type: 'hunt', view: { bounty: { prog: { a: 1 }, claimed: ['b', 'c'] } } },
+    { type: 'hotWeek', now: { id: 'h1', name: 'ชดเชย', pct: { xp: 100, drop: 50, gold: 0 }, endInMs: 3600000 }, next: null, fresh: false },
+    { type: 'randomEvent', id: 'golden_hour', leftMs: 1500000, fresh: true },
+    { type: 'brandNewThing', foo: 1, bar: 2 },
+  ]), 1000);
+  const byType = (t) => e5.filter((x) => x.type === t);
+  const pass = byType('pass')[0];
+  assert.deepStrictEqual(pass.daily.map((x) => [x.id, x.prog, x.claimed, x.ready]), [['login', 1, true, false], ['kills', 40, false, true], ['gathers', 3, false, false], ['crafts', 0, false, false]]);
+  assert.strictEqual(byType('premium')[0].until, 0, 'premium still read from pass');
+  assert.deepStrictEqual([byType('mail')[0].gifts, byType('mail')[0].titles], [1, ['gift']]);
+  assert.deepStrictEqual([byType('hunt')[0].claimed, byType('hunt')[0].active], [2, 1]);
+  const ev = byType('worldEvent');
+  assert.deepStrictEqual(ev[0].active.perks, ['EXP +100%', 'ดรอป +50%']);
+  assert.deepStrictEqual([ev[1].active.name, ev[1].active.endsAt, ev[1].fresh], ['Golden Hour', 1501000, true]);
+  assert.deepStrictEqual(byType('newType'), [{ type: 'newType', name: 'brandNewThing', fields: ['foo', 'bar'], t: 1000 }]);
+  assert.strictEqual(a5.incoming(frame('server', { type: 'brandNewThing', foo: 3 })).filter((x) => x.type === 'newType').length, 0, 'reported once');
+  const d5 = new AccountData();
+  for (const x of e5) d5.ingest(x);
+  assert.deepStrictEqual(d5.rewardsWaiting(), { pass: 1, mail: 1, total: 2 });
+}
+
 console.log('game-adapter tests passed');

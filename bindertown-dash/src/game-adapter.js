@@ -42,6 +42,36 @@ const ROOM_DATA = 13;
 // Game builds this adapter was checked against (the build comes with every pong).
 // A new build that still reads cleanly is fine; one that doesn't is reported.
 const KNOWN_BUILDS = ['20261120-084128', '20261120-112144'];
+// Server message types the game client handles (build 20261120). A type outside this
+// list means the game grew something new: it is logged (name + field names only).
+const KNOWN_TYPES = new Set(["friendSearch", "socialState", "socialParty", "raid", "raidUlt", "notice", "humanCheck", "humanResult", "guardInfo", "partyBoard", "guildList", "ranked", "rankedMatch", "rankedBoard", "guildWar", "guildWarFoes", "tradeInvite", "tradeState", "tradeEnd", "joinRequest", "socialNotice", "ranking", "mail", "mailClaimed", "zoneMove", "soulGained", "lantern", "partyRally", "partyGotoCd", "potionCd", "ledger", "sealResult", "forgeResult", "pactResult", "inscribeResult", "infuseResult", "binderStarResult", "rerollResult", "bossMeter", "census", "pong", "cdSync", "gemex", "mapFull", "mapQueue", "channels", "marketGuide", "topupHistory", "intlOrder", "payOrder", "slipResult", "slipClaimToken", "history", "gemexResult", "loginReward", "hw99", "candy", "candyGot", "pets", "petPulled", "hunt", "accountState", "linkRequired", "appearanceResult", "nameRequired", "nameResult", "socialInvite", "debugState", "profile", "myLikes", "ach", "achUnlocked", "promoState", "promoResult", "likeResult", "killGain", "worldBossTop", "worldBossLast", "motherLode", "worldBoss", "hotWeek", "randomEvent", "econ", "gatherResult", "life", "craftTryResult", "lifeLevel", "craftResult", "salvaged", "autoForged", "autoSold", "sold", "bought", "bond", "bindResult", "market", "marketBoard", "marketItem", "commissions", "commissionResult", "crafterNames", "marketResult", "bank", "bankResult", "cardClearPlan", "inv", "repairResult", "refineResult", "pvpKill", "guildFeed", "pvpState", "autoRespawned", "ll", "llBoard", "deathPenalty", "youDied", "cardFound", "spiritGain", "gatherFailed", "pass", "shopResult", "builds", "classes", "gfxNotice", "promo", "welcomeBack", "hit", "castStart", "castCancel", "cast", "mobBolt", "mobBoltEnd", "mobSkill", "bossMech", "classFx", "ccFx", "bossPhase", "mobAttack", "basicAttack", "levelUp", "jobLevelUp", "fieldBosses", "warps", "dialog", "jobChanged", "projectile", "projectileHit", "zone", "died", "respawned", "chat", "chatBacklog", "dashMove", "maintenance", "patchPlan", "drain", "announcement", "chatTyping", "warp", "soulforge"]);
+
+// Battle Pass tasks (client tables): daily and weekly
+const PASS_DAILY = [
+  { id: 'login', label: 'เข้าเกมวันนี้', goal: 1 },
+  { id: 'kills', label: 'กำจัดมอนสเตอร์ 40 ตัว', goal: 40 },
+  { id: 'gathers', label: 'เก็บเกี่ยว 15 ครั้ง', goal: 15 },
+  { id: 'crafts', label: 'ทำอาหารหรือปรุงยา 3 อย่าง', goal: 3 },
+];
+const PASS_WEEKLY = [
+  { id: 'wlogin', label: 'เข้าเกม 5 วันในสัปดาห์นี้', goal: 5 },
+  { id: 'wkills', label: 'กำจัดมอนสเตอร์ 1,500 ตัว', goal: 1500 },
+  { id: 'wgathers', label: 'เก็บเกี่ยว 300 ครั้ง', goal: 300 },
+  { id: 'wcrafts', label: 'ทำอาหารหรือปรุงยา 30 อย่าง', goal: 30 },
+  { id: 'wdaily', label: 'รับรางวัลภารกิจรายวัน 15 ครั้ง', goal: 15 },
+  { id: 'wbounty', label: 'รับรางวัลค่าหัว (Bounty) 6 ครั้ง', goal: 6 },
+];
+// Random world events (client table)
+const RANDOM_EVENTS = {
+  gathering_time: { name: 'Gathering Time', perks: ['Gathering + Fishing เร็วขึ้น 15%', 'EXP สาย Gathering +20%'] },
+  elite_surge: { name: 'Elite Surge', perks: ['Elite เกิดใหม่เร็วขึ้น ×2'] },
+  golden_hour: { name: 'Golden Hour', perks: ['Gold จากมอน +15%'] },
+  spirit_tide: { name: 'Spirit Tide', perks: ['โอกาสได้วิญญาณมอน +30%'] },
+  lucky_find: { name: 'Lucky Find', perks: ['โอกาสดรอปไอเทม +10%'] },
+  hunters_breeze: { name: "Hunter's Breeze", perks: ['EXP + Job EXP จากมอน +10%'] },
+};
+const HOT_WEEK_LABEL = { xp: 'EXP', drop: 'ดรอป', spirit: 'วิญญาณ', gatherXp: 'EXP Gathering', gatherFast: 'Gathering ไว', gold: 'Gold' };
+
 // Character fields the Dashboard needs from window.__game.me()
 const REQUIRED_FIELDS = ['name', 'level', 'hp', 'maxHp', 'mp', 'maxMp', 'xp', 'silver', 'job'];
 
@@ -218,6 +248,7 @@ class BinderTownAdapter {
     this.mobLevels = new Map();  // mobType -> level seen on the map
     this.locks = new Set();      // item ids the player locked in the game
     this.build = '';             // the game's build (from pong)
+    this.newTypes = new Map();   // server message types the client table didn't have -> field names
     this.stats = { frames: 0, decodeErrors: 0, unknownPacked: 0, snapshots: 0 };
     this.missing = [];           // required character fields the page didn't have
     // kind -> boss name (client table; worldBossTop/Last update it)
@@ -252,7 +283,13 @@ class BinderTownAdapter {
     const out = [];
     const raw = Array.isArray(f.message) && typeof f.message[0] !== 'number' ? f.message : [f.message];
     for (const m of raw) if (Array.isArray(m) && typeof m[0] === 'number' && !PACKED[m[0] - 1]) this.stats.unknownPacked++;
-    for (const e of serverEvents(f.message)) this.server(e, at, out);
+    for (const e of serverEvents(f.message)) {
+      if (e && e.type && !KNOWN_TYPES.has(e.type) && !this.newTypes.has(e.type)) {
+        this.newTypes.set(e.type, Object.keys(e).filter((k) => k !== 'type').slice(0, 20));
+        out.push({ type: 'newType', name: String(e.type).slice(0, 40), fields: this.newTypes.get(e.type), t: at });
+      }
+      this.server(e, at, out);
+    }
     return out;
   }
 
@@ -343,6 +380,45 @@ class BinderTownAdapter {
         out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
         break;
       }
+      case 'pass': {
+        const st = e.state || {};
+        const rows = (defs, prog, done) => defs.map((d) => {
+          const p = Math.min(d.goal, Number((prog || {})[d.id]) || 0);
+          return { ...d, prog: p, claimed: (done || []).includes(d.id), ready: p >= d.goal && !(done || []).includes(d.id) };
+        });
+        if (typeof e.premiumUntil === 'number') out.push({ type: 'premium', until: e.premiumUntil, t: at });
+        if (e.state) out.push({ type: 'pass', t: at, day: st.day || '', daily: rows(PASS_DAILY, st.daily, st.dailyDone), weekly: rows(PASS_WEEKLY, st.weekly, st.weeklyDone) });
+        break;
+      }
+      case 'mail':
+        if (Array.isArray(e.list)) {
+          const gifts = e.list.filter((m) => !m.claimed && ((m.items && m.items.length) || m.gold || m.crystals));
+          out.push({ type: 'mail', t: at, gifts: gifts.length, titles: gifts.slice(0, 5).map((m) => String(m.title || '').slice(0, 60)), unread: e.list.filter((m) => !m.read).length });
+        }
+        break;
+      case 'hunt': {
+        const b = (e.view && e.view.bounty) || {};
+        out.push({ type: 'hunt', t: at, claimed: (b.claimed || []).length, active: Object.keys(b.prog || {}).length });
+        break;
+      }
+      case 'hotWeek': {
+        const n = e.now;
+        out.push({
+          type: 'worldEvent', key: 'hotWeek', t: at,
+          active: n ? { id: n.id, name: n.name || n.nameEn || 'Hot Week', perks: Object.entries(n.pct || {}).filter(([, v]) => v).map(([k, v]) => `${HOT_WEEK_LABEL[k] || k} +${v}%`), endsAt: at + (n.endInMs || 0) } : null,
+          next: e.next ? { name: e.next.name || 'Hot Week', startsAt: at + (e.next.startInMs || 0) } : null,
+          fresh: !!e.fresh,
+        });
+        break;
+      }
+      case 'randomEvent': {
+        const def = e.id ? RANDOM_EVENTS[e.id] || { name: pretty(e.id), perks: [] } : null;
+        out.push({ type: 'worldEvent', key: 'random', t: at, active: def ? { id: e.id, name: def.name, perks: def.perks, endsAt: at + (e.leftMs || 0) } : null, fresh: !!e.fresh });
+        break;
+      }
+      case 'motherLode':
+        out.push({ type: 'worldEvent', key: 'motherLode', t: at, active: e.view ? { id: 'motherLode', name: 'Mother Lode', perks: ['แหล่งแร่ใหญ่ปรากฏ'], endsAt: e.view.endsAt || e.view.until || 0 } : null, fresh: false });
+        break;
       case 'fieldBosses': {
         const skew = typeof e.now === 'number' ? at - e.now : 0; // server clock -> ours
         out.push({
@@ -374,9 +450,7 @@ class BinderTownAdapter {
         out.push({ type: 'info', text: ok ? `ย่อยของแล้ว${e.itemId ? ` ${pretty(e.itemId)}` : ''}${gains ? ` · ${gains}` : ''}` : `ย่อยไม่ได้: ${e.reason || ''}`, t: at });
         break;
       }
-      case 'pass':
-        if (typeof e.premiumUntil === 'number') out.push({ type: 'premium', until: e.premiumUntil, t: at });
-        break;
+
       case 'cardFound': out.push({ type: 'card', mob: pretty(e.mob), level: e.level, t: at }); break;
       case 'pong': {
         const sent = this.pings.get(e.t);
@@ -487,4 +561,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { KNOWN_TYPES, KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

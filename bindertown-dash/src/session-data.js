@@ -51,6 +51,7 @@ class AccountData {
     this.prices = new Map();  // item name -> { price (Gold), basis, at } from the market
     this.premiumUntil = null; // ms epoch, 0 = no Premium
     this.soldSilver = 0;
+    this.checklist = { pass: null, mail: null, hunt: null }; // daily things to do / collect
   }
 
   log(kind, text, t = Date.now()) {
@@ -121,6 +122,9 @@ class AccountData {
         if (ev.item) this.prices.set(ev.item, { price: ev.price, basis: ev.basis, at: t });
         break;
       case 'premium': this.premiumUntil = ev.until; break;
+      case 'pass': this.checklist.pass = { day: ev.day, daily: ev.daily, weekly: ev.weekly, at: t }; break;
+      case 'mail': this.checklist.mail = { gifts: ev.gifts, titles: ev.titles, unread: ev.unread, at: t }; break;
+      case 'hunt': this.checklist.hunt = { claimed: ev.claimed, active: ev.active, at: t }; break;
       case 'rareDrop': this.log('loot', `✨ ดรอปหายาก: ${ev.item}`, t); break;
       case 'chat':
         this.chat.push({ t, channel: ev.channel || 'world', from: ev.from || '', guild: ev.guild || '', to: ev.to || '', text: ev.text || '', mine: !!ev.mine });
@@ -194,12 +198,19 @@ class AccountData {
     return out;
   }
 
+  // rewards waiting to be collected: pass tasks done but not claimed + mails with gifts
+  rewardsWaiting() {
+    const c = this.checklist;
+    const pass = c.pass ? [...c.pass.daily, ...c.pass.weekly].filter((x) => x.ready).length : 0;
+    return { pass, mail: c.mail ? c.mail.gifts : 0, total: pass + (c.mail ? c.mail.gifts : 0) };
+  }
+
   summary(now = Date.now()) {
     const s = this.stats;
     return {
       name: s.name, job: s.job, level: s.level, map: s.map,
       hp: s.hp, maxHp: s.maxHp, sp: s.sp, maxSp: s.maxSp, exp: s.exp, maxExp: s.maxExp, expPct: s.expPct,
-      ping: this.net.ping, online: this.net.online,
+      ping: this.net.ping, online: this.net.online, rewards: this.rewardsWaiting().total,
       silver: s.silver, ...this.rates(now),
     };
   }
@@ -210,6 +221,7 @@ class AccountData {
       stats: this.stats,
       net: this.net,
       cards: this.cards.slice(-20),
+      checklist: this.checklist,
       minimap: this.minimap,
       buffs: this.buffs,
       rates: this.rates(now),

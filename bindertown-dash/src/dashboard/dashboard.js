@@ -81,6 +81,7 @@ function accountCard(a) {
   el('div', { class: 'acc-top' }, el('span', { class: 'dot ' + a.status }), name),
   el('div', { class: 'acc-meta' },
     el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : '', s.ping != null ? ` · ${s.ping} ms` : ''),
+    open && s.rewards ? el('span', { class: 'gift', title: 'มีของรอรับ (Pass / จดหมาย)' }, `🎁 ${s.rewards}`) : null,
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
   a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map(alertText).join(' · ')) : null,
@@ -362,6 +363,77 @@ function renderCompat(a) {
   box.hidden = false;
 }
 
+// ---------- world events strip ----------
+function renderEvents() {
+  const ev = (state && state.events) || [];
+  const box = $('#events');
+  box.hidden = !ev.length;
+  rebuild(box, JSON.stringify(ev.map((e) => [e.name, e.perks, Math.round((e.endsInMs || e.startsInMs) / 60000)])), () => ev.map((e) => el('span', { class: 'ev' + (e.live ? ' live' : '') },
+    e.live ? '🔥 ' : '⏳ ', el('b', {}, e.name), e.perks.length ? ` · ${e.perks.join(' · ')}` : '',
+    e.live ? (e.endsInMs ? ` · เหลือ ${dur(e.endsInMs)}` : '') : ` · เริ่มในอีก ${dur(e.startsInMs)}`)));
+}
+
+// ---------- daily checklist ----------
+function dailySummary(c) {
+  if (!c || (!c.pass && !c.mail && !c.hunt)) return null;
+  const daily = c.pass ? c.pass.daily : [];
+  const done = daily.filter((x) => x.claimed).length;
+  const ready = c.pass ? [...c.pass.daily, ...c.pass.weekly].filter((x) => x.ready).length : 0;
+  return { done, total: daily.length, ready, gifts: c.mail ? c.mail.gifts : 0, bounty: c.hunt ? c.hunt.claimed : null };
+}
+function renderDaily() {
+  const c = detail && detail.checklist;
+  const sum = dailySummary(c);
+  rebuild($('#d-daily'), JSON.stringify(sum), () => (sum ? [
+    el('span', {}, '📋 รายวัน '),
+    el('span', { class: 'chip-d' }, `Pass ${sum.done}/${sum.total}`),
+    sum.ready ? el('span', { class: 'chip-d hot' }, `🎁 รอกดรับ ${sum.ready}`) : null,
+    sum.gifts ? el('span', { class: 'chip-d hot' }, `✉ จดหมายมีของ ${sum.gifts}`) : null,
+    sum.bounty != null ? el('span', { class: 'chip-d' }, `Bounty รับแล้ว ${sum.bounty}`) : null,
+    el('button', { class: 'tiny', onclick: openDaily }, 'ดูทั้งหมด'),
+  ] : [el('span', { class: 'hint' }, '📋 รายวัน: รอข้อมูลจากเกม')]));
+}
+function openDaily() {
+  const c = (detail && detail.checklist) || {};
+  const row = (x) => el('div', { class: 'task' + (x.ready ? ' ready' : x.claimed ? ' done' : '') },
+    el('span', {}, x.claimed ? '✔' : x.ready ? '🎁' : '○'), el('span', { class: 'tl' }, x.label), el('b', {}, `${num(x.prog)}/${num(x.goal)}`));
+  openModal('📋 เช็กลิสต์รายวัน', [
+    el('p', { class: 'hint' }, 'กดรับรางวัลในเกม (Pass / จดหมาย) · 🎁 = ทำครบแล้วยังไม่กดรับ'),
+    el('h4', {}, 'Pass รายวัน'), ...(c.pass ? c.pass.daily.map(row) : [el('p', { class: 'hint' }, 'ยังไม่มีข้อมูล')]),
+    el('h4', {}, 'Pass รายสัปดาห์'), ...(c.pass ? c.pass.weekly.map(row) : []),
+    el('h4', {}, 'จดหมาย'), el('p', {}, c.mail ? (c.mail.gifts ? `มีของรอรับ ${c.mail.gifts} ฉบับ: ${c.mail.titles.join(' · ')}` : 'ไม่มีของรอรับ') : 'ยังไม่มีข้อมูล'),
+    el('h4', {}, 'Bounty (ค่าหัว)'), el('p', {}, c.hunt ? `รับรางวัลแล้ว ${c.hunt.claimed} · กำลังทำ ${c.hunt.active}` : 'ยังไม่มีข้อมูล'),
+  ]);
+}
+
+// ---------- every account at once ----------
+async function openAll() {
+  potionList = potionList || await dash.invoke('potions');
+  const inGame = state.accounts.filter((a) => a.status === 'online');
+  const out = el('div', { class: 'results' });
+  const run = async (cmd, arg, label) => {
+    out.replaceChildren(el('p', { class: 'hint' }, `${label}…`));
+    const res = await dash.invoke('game-cmd-all', cmd, arg);
+    out.replaceChildren(...(res.length ? res.map((r) => el('div', { class: 'res ' + (r.ok ? 'ok' : 'bad') },
+      `${r.ok ? '✔' : '✖'} ${r.name}${r.skipped ? ' (เป็นอยู่แล้ว)' : ''}${r.error ? ` · ${r.error}` : ''}`)) : [el('p', {}, 'ไม่มีบัญชีที่อยู่ในเกม')]));
+  };
+  const sel = el('select', {}, potionList.map((p) => el('option', { value: p.id }, `${p.kind === 'hp' ? '❤' : '💧'} ${p.name} · ${p.price} Silver`)));
+  const qty = el('input', { type: 'number', min: '1', max: '999', value: '50' });
+  openModal(`สั่งทุกบัญชี (${inGame.length} บัญชีในเกม)`, [
+    el('p', { class: 'hint' }, 'ทำทีละบัญชีตามลำดับ เหมือนกดเองทีละบัญชี · บัญชีที่เป็นอยู่แล้วจะข้าม'),
+    el('div', { class: 'quick' },
+      el('button', { onclick: () => run('autoOn', {}, 'เปิด AUTO') }, '▶ AUTO เปิดทุกบัญชี'),
+      el('button', { onclick: () => run('autoOff', {}, 'ปิด AUTO') }, '■ AUTO ปิดทุกบัญชี'),
+      el('button', { onclick: () => run('sleep', {}, 'พักจอ') }, '☾ พักจอทุกบัญชี')),
+    el('div', { class: 'quick' },
+      el('button', { onclick: () => { if (confirm('ขายของดรอป (ETC) ทั้งหมดของทุกบัญชีให้ NPC?')) run('sellEtc', {}, 'ขาย ETC'); } }, '🪙 ขาย ETC ทุกบัญชี')),
+    el('label', {}, '🧪 ซื้อยา ', sel, qty, el('button', { onclick: () => run('buy', { itemId: sel.value, qty: Number(qty.value) }, 'ซื้อยา') }, 'ซื้อทุกบัญชี')),
+    el('p', { class: 'hint' }, 'ซื้อ/ขายจากระยะไกลใช้ได้เฉพาะบัญชี Premium (กฎของเกม)'),
+    out,
+  ]);
+}
+$('#all-btn').addEventListener('click', openAll);
+
 // ---------- bosses ----------
 function renderBosses() {
   const b = (state && state.bosses) || { field: [], world: [] };
@@ -485,7 +557,7 @@ function renderNow() {
   if (!state || editing) return;
   if (!state.accounts.some((a) => a.id === selected)) selected = state.accounts.length ? state.accounts[0].id : null;
   // account list: rebuild only when something on it changed
-  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
+  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && a.summary.rewards, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
   rebuild($('#accounts'), listKey, () => state.accounts.map(accountCard));
   $('#add').disabled = state.accounts.length >= state.maxAccounts;
 
@@ -511,8 +583,10 @@ function renderNow() {
     renderLogs();
     renderMap();
     renderBag();
+    renderDaily();
   }
   renderBosses();
+  renderEvents();
 
 }
 
