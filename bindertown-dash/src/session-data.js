@@ -49,6 +49,7 @@ class AccountData {
     this.dropValue = 0;       // NPC sell value of drops picked up
     this.cards = [];          // [{ t, mob, level }]
     this.prices = new Map();  // item name -> { price (Gold), basis, at } from the market
+    this.itemPrices = new Map(); // item id -> market view for that piece (kind + grade)
     this.premiumUntil = null; // ms epoch, 0 = no Premium
     this.soldSilver = 0;
     this.checklist = { pass: null, mail: null, hunt: null }; // daily things to do / collect
@@ -121,6 +122,8 @@ class AccountData {
       }
       case 'market':
         if (ev.bagName || ev.item) this.prices.set(ev.bagName || ev.item, { price: ev.price, basis: ev.basis, at: t });
+        // per piece (gear differs by grade): what the market board shows for its kind + grade
+        if (ev.id) this.itemPrices.set(ev.id, { price: ev.price, basis: ev.basis, last: ev.last || 0, stock: ev.stock || 0, vol7: ev.vol7 || 0, key: ev.key || '', name: ev.item, at: t });
         break;
       case 'premium': this.premiumUntil = ev.until; break;
       case 'pass': this.checklist.pass = { day: ev.day, daily: ev.daily, weekly: ev.weekly, at: t }; break;
@@ -224,6 +227,7 @@ class AccountData {
       net: this.net,
       cards: this.cards.slice(-20),
       checklist: this.checklist,
+      itemPrices: Object.fromEntries(this.itemPrices),
       minimap: this.minimap,
       buffs: this.buffs,
       rates: this.rates(now),

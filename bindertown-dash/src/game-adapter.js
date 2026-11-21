@@ -270,6 +270,7 @@ class BinderTownAdapter {
     this.pings = new Map();      // t -> sentAt
     this.mobLevels = new Map();  // mobType -> level seen on the map
     this.locks = new Set();      // item ids the player locked in the game
+    this.bound = new Set();      // item ids bound to the character (no market)
     this.build = '';             // the game's build (from pong)
     this.econIndex = 1;           // server economy index (NPC prices follow it)
     this.newTypes = new Map();   // server message types the client table didn't have -> field names
@@ -421,6 +422,12 @@ class BinderTownAdapter {
         });
         break;
       }
+      case 'linkRequired':
+        out.push({ type: 'marketResult', ok: false, linkRequired: true, reason: `ต้องผูกบัญชี (ไม่ใช่ Guest) ก่อนจึงจะ${e.what || 'ใช้ตลาดกลาง'}ได้`, t: at });
+        break;
+      case 'marketResult':
+        out.push({ type: 'marketResult', ok: !!e.ok, reason: e.reason ? String(e.reason) : '', t: at });
+        break;
       case 'marketGuide': {
         const p = marketPrice(e, at);
         out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
@@ -527,6 +534,7 @@ class BinderTownAdapter {
   inventory(e, at, out) {
     const items = Array.isArray(e.items) ? e.items : [];
     if (Array.isArray(e.locks)) this.locks = new Set(e.locks);
+    if (Array.isArray(e.bound)) this.bound = new Set(e.bound); // bound to the character: can't be traded
     if (!e.d || !this.inv) {
       this.inv = new Map(items.map((i) => [i.id, i.qty]));
     } else {
@@ -550,7 +558,7 @@ class BinderTownAdapter {
       m.qty += Number(qty) || 0;
       // gear pieces are single instances "<item>#<uuid>"; locked ones can't be sold or salvaged
       const gear = id.includes('#');
-      m.ids.push({ id, qty: Number(qty) || 0, gear, locked: this.locks.has(id), ...(gear ? { rarity: rarityOf(id) } : {}) });
+      m.ids.push({ id, qty: Number(qty) || 0, gear, locked: this.locks.has(id), bound: this.bound.has(id), ...(gear ? { rarity: rarityOf(id) } : {}) });
       if (isSupply(id)) m.supply = true;
       merged.set(name, m);
     }

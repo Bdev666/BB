@@ -550,17 +550,81 @@ function openSalvage() {
   ]);
 }
 
+// ---------- sell gear on the central market ----------
+function tradableGear() {
+  return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked && !x.bound).map((x) => ({ ...x, name: b.name })));
+}
+
+async function openMarketSell() {
+  const gear = tradableGear();
+  const minBox = el('input', { type: 'number', min: '0', step: '100000', value: String((state && state.settings.valuableMinGold) || 1000000) });
+  const list = el('div', { class: 'gearlist mklist' });
+  const out = el('div', { class: 'results' });
+  const rows = gear.map((g) => {
+    const box = el('input', { type: 'checkbox' });
+    const price = el('input', { type: 'number', min: '1', step: '1000', class: 'mkprice', placeholder: 'ราคา' });
+    const info = el('small', { class: 'hint' }, 'กำลังถามราคาตลาด…');
+    const res = el('small', {});
+    const row = el('div', { class: 'mkrow' }, box, el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]),
+      el('div', { class: 'bn' }, g.name, info, res), price, el('span', { class: 'hint' }, 'G'));
+    return { g, box, price, info, res, row, filled: false };
+  });
+  list.replaceChildren(...(rows.length ? rows.map((r) => r.row) : [el('p', {}, 'ไม่มีอุปกรณ์ที่ลงขายได้ (ของที่ล็อกหรือผูกตัวไม่แสดง)')]));
+  const G = (n) => num(n) + ' G';
+  const fill = () => {
+    const ip = (detail && detail.itemPrices) || {};
+    const min = Number(minBox.value) || 0;
+    for (const r of rows) {
+      const p = ip[r.g.id];
+      if (!p || r.filled) continue;
+      r.filled = true;
+      r.info.textContent = p.price ? `ตลาด: ถูกสุด ${G(p.price)}${p.last ? ` · ขายล่าสุด ${G(p.last)}` : ''} · วางขาย ${p.stock} · ขาย 7 วัน ${p.vol7}` : 'ยังไม่มีคนขายชนิด+เกรดนี้ในตลาด ตั้งราคาเอง';
+      if (p.price) r.price.value = String(Math.max(1, (p.basis === 'listed' ? p.price - 1 : p.price))); // just under the cheapest
+      r.box.checked = !!p.price && p.price >= min;
+    }
+  };
+  minBox.addEventListener('change', () => { for (const r of rows) r.filled = false; fill(); });
+  const go = el('button', { class: 'primary', onclick: async () => {
+    const pick = rows.filter((r) => r.box.checked);
+    if (!pick.length) { out.replaceChildren(el('p', {}, 'เลือกของที่จะลงขายก่อน')); return; }
+    const bad = pick.find((r) => !(Number(r.price.value) >= 1));
+    if (bad) { out.replaceChildren(el('p', {}, `ใส่ราคาให้ ${bad.g.name} ก่อน`)); return; }
+    const total = pick.reduce((t, r) => t + Number(r.price.value), 0);
+    if (!confirm(`ลงขายในตลาดกลาง ${pick.length} ชิ้น รวม ${G(total)}?\n${pick.map((r) => `${r.g.name}: ${G(Number(r.price.value))}`).join('\n')}\n(ภาษีตลาดตามกฎเกม · ยกเลิกประกาศได้ในหน้าตลาดของเกม)`)) return;
+    for (const r of pick) {
+      r.res.textContent = ' · กำลังลงขาย…';
+      // eslint-disable-next-line no-await-in-loop
+      const x = await dash.invoke('game-cmd', selected, 'marketList', { itemId: r.g.id, qty: 1, unitPrice: Number(r.price.value) });
+      r.res.textContent = x && x.ok ? ' · ✔ ลงขายแล้ว' : ` · ✖ ${(x && x.error) || 'ไม่สำเร็จ'}`;
+      r.res.className = x && x.ok ? 'res ok' : 'res bad';
+      r.box.checked = false;
+    }
+    out.replaceChildren(el('p', { class: 'hint' }, 'เสร็จแล้ว · ดูประกาศของคุณได้ในหน้าตลาดของเกม (แท็บ "ประกาศของฉัน")'));
+  } }, 'ลงขายที่เลือก');
+  openModal('🏪 ลงขายตลาดกลาง', [
+    el('p', { class: 'hint' }, 'ราคาตลาดตามชนิด+เกรด (ถูกสุดตอนนี้ / ขายจริงล่าสุด) · ราคาตั้งต้น = ต่ำกว่าถูกสุด 1 G แก้ได้ · ติ๊กให้อัตโนมัติเมื่อมูลค่าตั้งแต่'),
+    el('label', {}, 'ติ๊กอัตโนมัติเมื่อราคาตลาด ≥ ', minBox, ' G'),
+    list, rows.length ? go : null, out,
+  ]);
+  if (rows.length) {
+    await dash.invoke('game-cmd', selected, 'priceAll', {});
+    for (let i = 0; i < 20 && rows.some((r) => !r.filled); i++) { await refreshDetail(); fill(); await new Promise((r) => setTimeout(r, 700)); } // eslint-disable-line no-await-in-loop
+    for (const r of rows) if (!r.filled) r.info.textContent = 'ตลาดไม่ตอบ ตั้งราคาเอง';
+  }
+}
+
 function renderControls(a) {
   const s = (detail && detail.stats) || {};
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount()]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
     el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
     s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
     el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
+    el('button', { class: 'ctl', disabled: tradableGear().length ? null : '', title: 'ลงขายอุปกรณ์ในตลาดกลาง ดูราคาตลาดตามชนิด+เกรดก่อน', onclick: () => openMarketSell() }, `🏪 ลงขายตลาดกลาง (${tradableGear().length})`),
     el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
     el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
       if (confirm(`ขายของดรอปทั้งหมด ${num(etcQty)} ชิ้นให้ NPC?`)) cmd('sellEtc', {}, 'กำลังขายของดรอป…');

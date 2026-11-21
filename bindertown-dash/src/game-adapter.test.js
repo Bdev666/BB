@@ -49,7 +49,7 @@ assert.deepStrictEqual(ev, [{ type: 'kill', target: 'Cosmic Warden', exp: 18450,
 ev = ad.incoming(frame('server', { type: 'inv', items: [{ id: 'yellow_potion', qty: 10 }, { id: 'refine_stone', qty: 2 }] }));
 const strip = (items) => items.map(({ name, qty }) => ({ name, qty }));
 assert.deepStrictEqual(strip(ev[0].items), [{ name: 'Yellow Potion', qty: 10 }, { name: 'Refine Stone', qty: 2 }]);
-assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear: false, locked: false }]);
+assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear: false, locked: false, bound: false }]);
 // gear instances and locks
 {
   const a2 = new BinderTownAdapter();
@@ -226,6 +226,11 @@ assert.strictEqual(ev[1].price, 300);
   const d5 = new AccountData();
   for (const x of e5) d5.ingest(x);
   assert.deepStrictEqual(d5.rewardsWaiting(), { pass: 1, mail: 1, total: 2 });
+}
+
+{
+  const lr = new BinderTownAdapter().incoming(frame('server', { type: 'linkRequired', what: 'ลงขายในตลาดโลก' })).find((e) => e.type === 'marketResult');
+  assert.ok(lr && lr.ok === false && lr.linkRequired && /ผูกบัญชี/.test(lr.reason), 'guest market listing is refused with a clear reason');
 }
 
 console.log('game-adapter tests passed');

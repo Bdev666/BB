@@ -446,6 +446,7 @@ function handleEvents(id, events) {
         if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.id, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
         break;
       case 'fieldBosses': onFieldBosses(ev.list); break;
+      case 'marketResult': g.lastMarket = { ok: ev.ok, reason: ev.reason, at: Date.now() }; break;
       case 'worldEvent': onWorldEvent(ev); break;
       case 'newType':
         log.info(`acc ${id}: new server message type from the game: ${ev.name} (fields: ${ev.fields.join(', ') || '-'})`);
@@ -569,6 +570,43 @@ async function runCommand(id, cmd, arg) {
       break;
     }
     case 'price': ok = await requestPrice(id, arg.itemId, true); break;
+    case 'priceAll': {
+      // ask the market about every tradable gear piece in the bag (one after another, like browsing)
+      const ids = tradableGear(g);
+      for (const itemId of ids) {
+        // eslint-disable-next-line no-await-in-loop
+        await requestPrice(id, itemId, true);
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      return { ok: true, count: ids.length };
+    }
+    case 'marketList': {
+      // list one piece / stack on the central market at the price the player confirmed
+      const itemId = String(arg.itemId || '');
+      const unit = Math.floor(Number(arg.unitPrice) || 0);
+      const have = g.adapter.inv ? g.adapter.inv.get(itemId) || 0 : 0;
+      const qty = Math.max(1, Math.min(have, Math.floor(Number(arg.qty) || 1)));
+      if (!have) return { ok: false, error: 'ไม่มีของชิ้นนี้ในกระเป๋าแล้ว' };
+      if (g.adapter.locks.has(itemId)) return { ok: false, error: 'ของชิ้นนี้ล็อกไว้ในเกม' };
+      if (g.adapter.bound.has(itemId)) return { ok: false, error: 'ของผูกตัว ลงขายไม่ได้' };
+      if (unit < 1) return { ok: false, error: 'ใส่ราคาก่อน' };
+      const sentAt = Date.now();
+      if (!(await sendInput(id, { type: 'marketList', itemId, qty, price: qty * unit }))) return { ok: false, error: 'เกมยังไม่พร้อม' };
+      for (let i = 0; i < 20; i++) {
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 200));
+        const m = g.lastMarket;
+        if (m && m.at >= sentAt) {
+          log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> ${m.ok ? 'listed' : 'refused: ' + m.reason}`);
+          return m.ok ? { ok: true } : { ok: false, error: m.reason || 'ตลาดไม่รับรายการนี้' };
+        }
+        const n = g.lastNotice;
+        if (n && n.at >= sentAt) return { ok: false, error: n.text };
+      }
+      return { ok: false, error: 'ไม่ได้รับคำตอบจากตลาด ลองดูในหน้าตลาดของเกม' };
+    }
+    case 'marketCancel': ok = await sendInput(id, { type: 'marketCancel', id: Number(arg.listingId) }); break;
     case 'buy': {
       // NPC shop potions only (the game's vendor list); the game charges Silver
       const p = POTIONS.find((x) => x.id === arg.itemId);
@@ -725,6 +763,11 @@ function eventsView() {
     e.active && (!e.active.endsAt || e.active.endsAt > now) ? { name: e.active.name, perks: e.active.perks, endsInMs: e.active.endsAt ? e.active.endsAt - now : 0, live: true } : null,
     e.next && e.next.startsAt > now ? { name: e.next.name, perks: [], startsInMs: e.next.startsAt - now, live: false } : null,
   ]).filter(Boolean);
+}
+
+// gear that may go on the market: not locked, not bound
+function tradableGear(g) {
+  return g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && !g.adapter.bound.has(x)) : [];
 }
 
 // gear pieces that may be salvaged: unlocked, of the chosen grades (default Normal + Magic)
