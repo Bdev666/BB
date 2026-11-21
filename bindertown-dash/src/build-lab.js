@@ -48,6 +48,7 @@ function detect(mod) {
         else if (Array.isArray(v.mage) && v.knight && v.mage.every((x) => typeof x === 'string')) r.c2opts = v;
         else if (v.stormcaller && Array.isArray(v.stormcaller.lines)) r.c2defs = v;
         else if (v.blade && v.blade.a && v.blade.a.perk) r.traits = v;
+        else if (!r.cardDefs && Object.keys(v).length > 20 && Object.values(v).slice(0, 25).every((x) => x && Array.isArray(x.fx))) r.cardDefs = v;
         else if (!r.mobs) {
           const vals = Object.values(v);
           if (vals.length > 30 && vals.slice(0, 40).some((m) => m && typeof m === 'object' && m.role && typeof m.hp === 'number')) r.mobs = v;
@@ -311,6 +312,88 @@ function pickTarget(mode, level, want) {
   list.sort((a, b) => Math.abs(a[1].level - level) - Math.abs(b[1].level - level));
   return list.length ? list[0][0] : 'sprout';
 }
+
+// ---------- card builds ----------
+// 9 slots open at these levels; Spirit Load: boss 5, mini-boss 3, elite 2, others 1; cap by level
+const CARD_SLOTS = [12, 18, 25, 32, 40, 50, 60, 70, 85];
+const cardLoad = (id) => { const r = (G.mobs[id] || {}).role; return r === 'boss' ? 5 : r === 'mini-boss' ? 3 : r === 'elite' ? 2 : 1; };
+const loadCap = (lv) => (lv < 12 ? 0 : Math.min(18, 4 + Math.floor((lv - 12) / 6)));
+const fxText = (f, star) => {
+  const v = f.v ? f.v[0] + (f.v[1] - f.v[0]) * (Math.max(1, Math.min(5, star)) - 1) / 4 : f.a;
+  const n = f.k === 'stat' ? Math.round(v) : Math.round(v * 10) / 10;
+  return f.k === 'stat' ? (f.stat || '').toUpperCase() + ' +' + n : f.k + (f.species ? '(' + f.species + ')' : '') + ' +' + n + (f.k === 'stat' ? '' : '%');
+};
+function cardScore(b, p) {
+  evals++;
+  let r; try { r = G.calc(b); } catch { return { v: 0 }; }
+  const rot = r.rotation || { dps: 0, share: [] };
+  let dps = rot.dps;
+  if (p.goal !== 'boss') { dps = 0; for (const s of rot.share) dps += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack)); dps /= rot.seconds || 60; }
+  const al = r.album || {};
+  const gold = al.gold || 0; const drop = al.drop || 0;
+  const v = p.goal === 'gold' ? dps * (1 + gold / 100) * (1 + drop / 200) : dps;
+  return { v, dps, gold, drop, r };
+}
+L.cards = async (p) => {
+  await load();
+  if (!G.cardDefs || !G.mobs) throw new Error('หาข้อมูลการ์ดของเกมไม่เจอ');
+  evals = 0; const t0 = performance.now();
+  const goal = p.goal || 'boss';
+  const target = pickTarget(goal === 'boss' ? 'boss' : 'farm', p.level, goal === 'boss' ? p.target : '');
+  const tmob = G.mobs[target];
+  const q = { ...p, goal, pack: Math.max(1, p.pack || 4), mode: goal === 'boss' ? 'boss' : 'farm' };
+  curP = q;
+  const b = { ...baseBuild({ ...q, target, targetLevel: goal === 'boss' && tmob && tmob.level ? tmob.level : p.level }), ...JSON.parse(JSON.stringify(p.build || {})) };
+  b.cards = []; b.cardStars = [];
+  const slots = CARD_SLOTS.filter((l) => p.level >= l).length;
+  const cap = loadCap(p.level);
+  const star = Math.max(1, Math.min(5, p.stars || 5));
+  const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap);
+  const used = () => b.cards.reduce((t, c) => t + cardLoad(c), 0);
+  const sc = () => cardScore(b, q).v;
+  const base = cardScore(b, q);
+  let cur = base.v;
+  // greedy: add the card with the best gain per Spirit Load
+  while (b.cards.length < slots) {
+    let best = null;
+    for (const id of pool) {
+      if (used() + cardLoad(id) > cap) continue;
+      b.cards.push(id); b.cardStars.push(star);
+      const v = sc(); const g = (v - cur) / cardLoad(id);
+      if (!best || g > best.g) best = { id, v, g };
+      b.cards.pop(); b.cardStars.pop();
+    }
+    if (!best || best.v <= cur) break;
+    b.cards.push(best.id); b.cardStars.push(star); cur = best.v;
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  // swaps: replace one card by another while it helps (catches region sets and load trade-offs)
+  for (let round = 0; round < 3; round++) {
+    let moved = false;
+    for (let i = 0; i < b.cards.length; i++) {
+      const old = b.cards[i];
+      for (const id of pool) {
+        if (id === old || used() - cardLoad(old) + cardLoad(id) > cap) continue;
+        b.cards[i] = id; const v = sc();
+        if (v > cur * 1.001) { cur = v; moved = true; break; }
+        b.cards[i] = old;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    if (!moved) break;
+  }
+  const fin = cardScore(b, q);
+  const al = (fin.r && fin.r.album) || {};
+  const sets = (al.res || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => x.name + ' ' + x.count + ' ใบ');
+  const magic = !!(fin.r && fin.r.basic && fin.r.basic.usesMatk) || ((fin.r && fin.r.skills) || []).filter((x) => x.magic && b.skills[x.sid]).length > ((fin.r && fin.r.skills) || []).filter((x) => !x.magic && x.damages && b.skills[x.sid]).length;
+  return {
+    goal, target: { id: target, level: b.calc.targetLevel }, slots, cap, load: used(), star, magic,
+    cards: b.cards.map((id) => ({ id, role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, star)) })),
+    before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
+    after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
+    sets, evals, ms: Math.round(performance.now() - t0),
+  };
+};
 
 L.info = async () => {
   await load();

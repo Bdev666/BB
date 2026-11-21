@@ -1376,6 +1376,7 @@ function registerIpc() {
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(p)})`));
   handle('lab-me', async (id) => {
     const g = games.get(id);
     if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;

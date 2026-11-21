@@ -246,3 +246,16 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .lab-sk.pas span { opacity: .75; }
 .lab-sk .evo { color: #f0a8ff; }
 .pos { color: #4ade80; } .neg { color: #f87171; }
+
+/* foldable right-column panels */
+h3.foldable { cursor: pointer; user-select: none; }
+h3.foldable::before { content: '▾ '; opacity: .6; }
+.folded h3.foldable::before { content: '▸ '; }
+.folded > :not(h3) { display: none !important; }
+.panel.folded { flex: none !important; min-height: 0; }
+.hivalue { max-height: 240px; overflow-y: auto; flex: none; }
+
+.lab-cards { margin-top: 4px; }
+.lab-cardlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px; margin-top: 6px; }
+.lab-card1 { background: var(--panel2, #1c2230); border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+.lab-row select { width: auto; flex: none; }

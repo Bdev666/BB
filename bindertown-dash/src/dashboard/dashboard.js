@@ -586,6 +586,7 @@ function renderHighValue() {
 
 // ---------- Build Lab: strongest skill build for farming / bosses (the game's own calculator) ----------
 let labInfo = null;
+let lastLab = null; // the settings of the last Build Lab run (card builds reuse them)
 const labPretty = (id) => String(id || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 async function openLab() {
   const out = el('div', { class: 'lab-out' }, el('p', { class: 'hint' }, 'กำลังโหลดตัวคำนวณของเกม…'));
@@ -618,6 +619,7 @@ async function openLab() {
     const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
+    lastLab = p;
     try { renderLab(res, await dash.invoke('lab-run', p)); } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     go.disabled = false;
   };
@@ -632,6 +634,38 @@ async function openLab() {
     go, res,
     el('p', { class: 'hint' }, 'ไม่รวมเกียร์/การ์ด (คูณดาเมจเท่ากันทุกบิลด์ จึงไม่เปลี่ยนอันดับ) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
   ].filter(Boolean));
+}
+
+// card build for one Build Lab result: best cards for boss DPS, farm DPS or gold farming
+function cardBox(x) {
+  const out = el('div', { class: 'lab-cards' });
+  const stars = el('select', {}, ...[5, 4, 3, 2, 1].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
+  const run = async (goal, btn) => {
+    for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = true;
+    out.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองการ์ดทุกใบในเกม ตามช่องที่เปิดและ Spirit Load…'));
+    try {
+      const r = await dash.invoke('lab-cards', { ...lastLab, build: x.build, goal, stars: +stars.value });
+      const pct = (a, b) => (b ? `${a >= b ? '+' : ''}${Math.round((a / b - 1) * 100)}%` : '');
+      out.replaceChildren(
+        el('div', { class: 'lab-row' }, el('b', {}, `${{ boss: '👑 การ์ด DPS ตีบอส', farm: '🌾 การ์ด DPS ฟาร์ม', gold: '💰 การ์ดฟาร์มเงิน' }[goal]} · ${r.magic ? 'สายเวท' : 'สายกายภาพ'}`),
+          el('small', { class: 'hint' }, ` · ${r.cards.length}/${r.slots} ช่อง · Spirit Load ${r.load}/${r.cap} · ${'★'.repeat(r.star)} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}`)),
+        el('div', { class: 'lab-row' }, el('span', { class: 'chip' }, `DPS ${num(r.before.dps)} → ${num(r.after.dps)} (${pct(r.after.dps, r.before.dps)})`),
+          r.after.gold ? el('span', { class: 'chip' }, `Gold +${r.after.gold}%`) : null, r.after.drop ? el('span', { class: 'chip' }, `Drop +${r.after.drop}%`) : null,
+          ...r.sets.map((t) => el('span', { class: 'chip' }, '🔗 เซ็ต ' + t))),
+        el('div', { class: 'lab-cardlist' }, ...r.cards.map((c, i) => el('div', { class: 'lab-card1' },
+          el('b', {}, `${i + 1}. ${labPretty(c.id)}`), el('small', { class: 'hint' }, ` ${c.role || ''} Lv ${c.level} · Load ${c.load}`),
+          el('div', { class: 'hint' }, c.fx.join(' · '))))),
+        el('p', { class: 'hint' }, goal === 'gold' ? 'คะแนนฟาร์มเงิน = ความเร็วฆ่ามอน × (1 + Gold%) × (1 + Drop%/2) · การ์ด slayer(ชนิด) แรงเฉพาะมอนชนิดนั้น (จัดตามเป้าด้านบน) ถ้าฟาร์มแมพอื่นให้เปลี่ยนเป็นการ์ดเพิ่ม ATK/MATK/INT/STR แทน' : 'จัดจากดาเมจจริงในเครื่องคิดเลขของเกม (รวมโบนัสเซ็ตภูมิภาค) · ไม่รวมการ์ดบอสโลก'));
+    } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); }
+    for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = false;
+  };
+  return el('div', {},
+    el('div', { class: 'lab-row' }, el('small', {}, '🃏 จัดการ์ดให้บิลด์นี้: '),
+      el('button', { class: 'tiny lab-cardbtn', onclick: (e) => run('boss', e.target) }, '👑 DPS ตีบอส'),
+      el('button', { class: 'tiny lab-cardbtn', onclick: (e) => run('farm', e.target) }, '🌾 DPS ฟาร์ม'),
+      el('button', { class: 'tiny lab-cardbtn', onclick: (e) => run('gold', e.target) }, '💰 ฟาร์มเงิน'),
+      el('small', { class: 'hint' }, ' ดาวการ์ด '), stars),
+    out);
 }
 
 function renderLab(box, r) {
@@ -649,6 +683,7 @@ function renderLab(box, r) {
       el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
+    cardBox(x),
     x.notes.length ? el('details', {}, el('summary', {}, `ข้อสังเกต ${x.notes.length} ข้อ (ส่วนที่เครื่องคิดเลขของเกมไม่ได้นับ)`), ...x.notes.map((n) => el('div', { class: 'hint' }, '· ' + n))) : null);
   box.replaceChildren(...[head,
     cur ? el('p', { class: 'hint' }, `บิลด์ปัจจุบัน: ${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(cur.score)}`) : null,
@@ -841,6 +876,16 @@ $('#chat-panel').addEventListener('click', () => { if (document.querySelector('.
 try { setChatMin(localStorage.getItem('chatMin') === '1'); } catch { /* storage off */ }
 
 $('#lab-btn').addEventListener('click', () => openLab());
+// right-column panels fold by clicking their title (remembered per panel)
+for (const sec of document.querySelectorAll('[data-fold]')) {
+  const key = 'fold-' + sec.dataset.fold;
+  const h = sec.querySelector('h3');
+  const set = (on) => { sec.classList.toggle('folded', on); try { localStorage.setItem(key, on ? '1' : ''); } catch { /* private window */ } };
+  let saved = false; try { saved = localStorage.getItem(key) === '1'; } catch { /* ignore */ }
+  set(saved);
+  h.classList.add('foldable'); h.title = 'คลิกเพื่อย่อ/ขยาย';
+  h.addEventListener('click', (e) => { if (e.target.closest('button,input')) return; set(!sec.classList.contains('folded')); });
+}
 $('#toggle-all').addEventListener('click', () => dash.invoke('toggle-all'));
 $('#toggle-settings').addEventListener('click', () => dash.invoke('open-settings'));
 
