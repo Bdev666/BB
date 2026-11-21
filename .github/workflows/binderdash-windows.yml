@@ -5,6 +5,9 @@ name: BinderDash Windows build
 # copies of BinderDash pick up through their in-app updater.
 on:
   push:
+    # with tags listed, branches must be listed too or branch pushes stop triggering
+    branches:
+      - '**'
     paths:
       - 'bindertown-dash/**'
       - '.github/workflows/binderdash-windows.yml'
