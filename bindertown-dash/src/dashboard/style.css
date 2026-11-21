@@ -226,3 +226,23 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .hivalue .item.pend.listed small { color: var(--ok, #4ade80); }
 .hivalue .item.pend.failed small { color: var(--bad, #f87171); }
 .hivalue .ctl.small { width: 100%; margin-top: 6px; }
+
+/* Build Lab */
+#modal.wide .modal-box { width: min(980px, 96vw); max-height: 92vh; }
+.lab-form { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 8px 0; }
+.lab-form input[type=number] { width: 70px; }
+.lab-stats { display: flex; flex-wrap: wrap; gap: 6px 10px; width: 100%; }
+.lab-stats input[type=number] { width: 56px; }
+.lab-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 10px 0; }
+.lab-card.best { border-color: var(--gold, #f5c542); box-shadow: 0 0 0 1px var(--gold, #f5c542) inset; }
+.lab-top { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.lab-score { font-weight: 700; color: var(--gold, #f5c542); }
+.lab-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; }
+.lab-row .chip { background: var(--panel2, #1c2230); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.lab-skills { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 10px; margin-top: 8px; }
+.lab-sk span { white-space: nowrap; }
+.lab-sk { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+.lab-sk.c2 span { color: #7cc4ff; }
+.lab-sk.pas span { opacity: .75; }
+.lab-sk .evo { color: #f0a8ff; }
+.pos { color: #4ade80; } .neg { color: #f87171; }

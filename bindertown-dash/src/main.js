@@ -1249,6 +1249,28 @@ function createTray() {
 }
 
 // ---------- dashboard API ----------
+// ---------- Build Lab: the game's own damage calculator, in a hidden window on the game's site ----------
+const { LAB_JS } = require('./build-lab');
+let labWin = null;
+let labReady = null;
+function labCall(expr) {
+  if (!labWin || labWin.isDestroyed()) {
+    labWin = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:lab', contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+    labWin.on('closed', () => { labWin = null; labReady = null; });
+    // any small page on the game's site will do: the lab imports the game's own module from there
+    labReady = labWin.loadURL(new URL(gameUrl).origin + '/robots.txt').catch(() => {}).then(() => labWin.webContents.executeJavaScript(LAB_JS));
+  }
+  return labReady.then(() => labWin.webContents.executeJavaScript(expr, true))
+    .catch((e) => { log.warn('build lab: ' + (e && e.message)); throw new Error('Build Lab: ' + String((e && e.message) || e).replace(/^.*Error: /, '')); });
+}
+const ME_JS = `(() => { const m = window.__game && window.__game.me(); if (!m) return null;
+  const o = (v) => (v instanceof Map ? Object.fromEntries(v) : v && typeof v.toJSON === 'function' ? v.toJSON() : v);
+  let traits = o(m.traits); try { if (typeof traits === 'string') traits = JSON.parse(traits); } catch { traits = {}; }
+  let c2r = o(m.c2r); try { if (typeof c2r === 'string') c2r = JSON.parse(c2r); } catch { c2r = null; }
+  return { job: m.job, level: m.level, jobLevel: m.jobLevel, skillPoints: m.skillPoints, c2: m.c2 || '', c2r,
+    stats: { str: m.str, agi: m.agi, vit: m.vit, int: m.int, dex: m.dex, luk: m.luk }, statPoints: m.statPoints,
+    skills: o(m.skillLevels) || {}, evo: o(m.skillMods) || {}, traits: traits || {} }; })()`;
+
 function handle(cmd, fn) { ipcMain.handle('dash:' + cmd, (_e, ...args) => fn(...args)); }
 
 function registerIpc() {
@@ -1352,6 +1374,13 @@ function registerIpc() {
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   // how many unlocked gear pieces each account would salvage (shown before confirming)
+  handle('lab-info', () => labCall('window.__bdLab.info()'));
+  handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  handle('lab-me', async (id) => {
+    const g = games.get(id);
+    if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;
+    try { return await g.win.webContents.executeJavaScript(ME_JS, true); } catch { return null; }
+  });
   handle('salvage-preview', (rarities) => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
     id, name: g.data.stats.name || account(id).name, count: salvageable(g, rarities).length,
   })));

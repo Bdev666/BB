@@ -484,7 +484,7 @@ function openModal(title, body) {
   $('#modal-body').replaceChildren(...body.filter((n) => n != null && n !== false));
   $('#modal').hidden = false;
 }
-function closeModal() { $('#modal').hidden = true; }
+function closeModal() { $('#modal').hidden = true; $('#modal').classList.remove('wide'); }
 $('#modal-x').addEventListener('click', closeModal);
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
@@ -582,6 +582,77 @@ function renderHighValue() {
     else if (unknown) out.push(el('small', { class: 'hint' }, `ยังเช็คราคาไม่ครบ อีก ${unknown} ชิ้น`));
     return out;
   });
+}
+
+// ---------- Build Lab: strongest skill build for farming / bosses (the game's own calculator) ----------
+let labInfo = null;
+const labPretty = (id) => String(id || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+async function openLab() {
+  const out = el('div', { class: 'lab-out' }, el('p', { class: 'hint' }, 'กำลังโหลดตัวคำนวณของเกม…'));
+  openModal('🧪 Build Lab · หาชุดสกิลที่แรงที่สุด', [out]);
+  $('#modal').classList.add('wide');
+  try { labInfo = labInfo || await dash.invoke('lab-info'); } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+  const me = selected ? await dash.invoke('lab-me', selected) : null;
+  const jobs = labInfo.jobs;
+  const myJob = me && jobs.some((j) => j.id === me.job) ? me.job : 'mage';
+  const num_ = (v, min, max, step = 1) => el('input', { type: 'number', min: String(min), max: String(max), step: String(step), value: String(v) });
+  const job = el('select', {}, ...jobs.map((j) => el('option', { value: j.id, selected: j.id === myJob ? '' : null }, labPretty(j.id))));
+  const lv = num_(me && me.job === myJob ? me.level : 100, 1, 200);
+  const jlv = num_(me && me.job === myJob ? Math.min(50, me.jobLevel) : 50, 1, 50);
+  const c2r = (me && me.c2r) || {};
+  const c2SkillPts = me ? Object.entries(me.skills).filter(([k]) => /^[a-z]+_/.test(k) && me.c2 && k.startsWith(me.c2 + '_')).reduce((t, [, v]) => t + v, 0) : 0;
+  const c2lv = num_(c2r.jobLevel || 50, 1, 50);
+  const c2pts = num_(me && me.c2 ? c2SkillPts + (c2r.points || 0) : 40, 0, 200);
+  const st = {}; for (const k of ['str', 'agi', 'vit', 'int', 'dex', 'luk']) st[k] = num_(me && me.stats ? me.stats[k] || 1 : 1, 0, 999);
+  const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'), el('option', { value: 'farm' }, '🌾 ฟาร์มมอน (ตีหลายตัว)'));
+  const pack = num_(4, 1, 12);
+  const boss = el('select', {}, el('option', { value: '' }, 'บอสเลเวลใกล้ตัวที่สุด'), ...labInfo.bosses.map((b) => el('option', { value: b.id }, `${labPretty(b.id)} (Lv ${b.level})`)));
+  const useCur = el('input', { type: 'checkbox', checked: me && me.job === myJob ? '' : null });
+  const packRow = el('label', { hidden: '' }, 'มอนต่อกลุ่ม ', pack, el('small', { class: 'hint' }, ' ตัว (สกิลวง/ทะลุ/กวาด ตีได้หลายตัว)'));
+  const bossRow = el('label', {}, 'เป้า ', boss);
+  mode.addEventListener('change', () => { packRow.hidden = mode.value !== 'farm'; bossRow.hidden = mode.value !== 'boss'; });
+  const go = el('button', { class: 'primary' }, 'คำนวณหาบิลด์ที่ดีที่สุด');
+  const res = el('div', { class: 'lab-res' });
+  go.onclick = async () => {
+    go.disabled = true; res.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองชุดสกิล + Evolution + Trait + ช่องลัด ทั้งคลาส 1 และคลาส 2 ทุกสาย…'));
+    const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+      stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
+    if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
+    try { renderLab(res, await dash.invoke('lab-run', p)); } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
+    go.disabled = false;
+  };
+  out.replaceChildren(...[
+    el('p', { class: 'hint' }, 'ใช้สูตรดาเมจของเกมเอง (ตัวเดียวกับหน้าบิลด์แนะนำในเกม) ลองลงแต้มสกิล · Evolution A/B · Trait ของสาย · ลำดับช่องลัด แล้วจัดอันดับ คลาส 1 อย่างเดียว เทียบกับคลาส 2 ทั้งสองสาย'),
+    el('div', { class: 'lab-form' },
+      el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', {}, 'Job Lv ', jlv),
+      el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: 'แต้มคลาส 2 ทั้งหมด (ที่ใช้ไปแล้ว + ที่เหลือ) · ถ้ามีคลาส 2 อยู่แล้วจะอ่านจากตัวละคร' }, 'แต้มคลาส 2 ', c2pts),
+      el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
+      el('label', {}, 'โหมด ', mode), bossRow, packRow,
+      me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null),
+    go, res,
+    el('p', { class: 'hint' }, 'ไม่รวมเกียร์/การ์ด (คูณดาเมจเท่ากันทุกบิลด์ จึงไม่เปลี่ยนอันดับ) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
+  ].filter(Boolean));
+}
+
+function renderLab(box, r) {
+  const best = r.results[0];
+  const cur = r.current;
+  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ลอง ${num(r.evals)} แบบ ใน ${(r.ms / 1000).toFixed(1)} วิ`);
+  const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
+    el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
+      el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
+      i ? el('small', { class: 'hint' }, ` (${Math.round((x.score / best.score - 1) * 100)}%)`) : null,
+      cur ? el('small', { class: x.score >= cur.score ? 'pos' : 'neg' }, ` · ${x.score >= cur.score ? '+' : ''}${Math.round((x.score / Math.max(1, cur.score) - 1) * 100)}% จากบิลด์ปัจจุบัน`) : null),
+    el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, `แต้มคลาส 1 ${x.points.c1}/${x.points.c1Max}${x.c2 ? ` · แต้มคลาส 2 ${x.points.c2}/${x.points.c2Max}` : ''}`)),
+    el('div', { class: 'lab-row' }, el('small', {}, 'ช่องลัด (ลำดับกด): '), x.hotbar.map((h, k) => el('span', { class: 'chip' }, `${k + 1}. ${h}`))),
+    el('div', { class: 'lab-skills' }, ...x.skills.sort((a, b) => (a.c2 - b.c2) || a.line.localeCompare(b.line)).map((s) => el('div', { class: 'lab-sk' + (s.c2 ? ' c2' : '') + (s.passive ? ' pas' : '') },
+      el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
+    x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
+    el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
+    x.notes.length ? el('details', {}, el('summary', {}, `ข้อสังเกต ${x.notes.length} ข้อ (ส่วนที่เครื่องคิดเลขของเกมไม่ได้นับ)`), ...x.notes.map((n) => el('div', { class: 'hint' }, '· ' + n))) : null);
+  box.replaceChildren(...[head,
+    cur ? el('p', { class: 'hint' }, `บิลด์ปัจจุบัน: ${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(cur.score)}`) : null,
+    ...r.results.map(card)].filter(Boolean));
 }
 
 async function openMarketSell(opt = {}) {
@@ -769,6 +840,7 @@ $('#chat-toggle').addEventListener('click', (e) => { e.stopPropagation(); setCha
 $('#chat-panel').addEventListener('click', () => { if (document.querySelector('.logs').classList.contains('chat-min')) setChatMin(false); });
 try { setChatMin(localStorage.getItem('chatMin') === '1'); } catch { /* storage off */ }
 
+$('#lab-btn').addEventListener('click', () => openLab());
 $('#toggle-all').addEventListener('click', () => dash.invoke('toggle-all'));
 $('#toggle-settings').addEventListener('click', () => dash.invoke('open-settings'));
 
