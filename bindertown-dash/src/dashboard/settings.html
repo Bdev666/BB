@@ -121,6 +121,14 @@
           <label class="switch"><input type="checkbox" data-notify="premium"><i></i></label>
         </div>
         <div class="row">
+          <div><b>♛ บอสสนาม</b><p>แจ้งก่อนเกิด <input type="number" id="bossLeadMinutes" min="1" max="60"> นาที และตอนเกิดแล้ว (ทุกแมพ ข้อมูลจากกระดานบอสของเกม)</p></div>
+          <label class="switch"><input type="checkbox" data-notify="fieldBoss"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🌋 World Boss</b><p>แจ้งก่อนเริ่ม (ใช้เวลาเดียวกับบอสสนาม) และตอนเริ่มสู้</p></div>
+          <label class="switch"><input type="checkbox" data-notify="worldBoss"><i></i></label>
+        </div>
+        <div class="row">
           <div><b>🎉 เลเวลอัป</b></div>
           <label class="switch"><input type="checkbox" data-notify="levelUp"><i></i></label>
         </div>
@@ -166,6 +174,17 @@
         <div class="row">
           <input type="text" id="userData" class="mono grow" readonly>
           <button id="open-userdata" class="primary">เปิดโฟลเดอร์</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>แก้ปัญหา</h2>
+        <div class="row">
+          <div><b>สร้างรายงานปัญหา</b><p>รวมเวอร์ชัน สถานะทุกบัญชี การตั้งค่า (ไม่มี KEY) และ log ล่าสุดไว้ในไฟล์เดียว ส่งให้ผู้พัฒนาตอนเจอปัญหา · ไม่มีข้อความแชทหรือรหัสผ่าน</p></div>
+          <button id="make-report" class="primary">สร้างรายงาน</button>
+        </div>
+        <div class="row">
+          <div><b>ไฟล์ log</b><p>บันทึกการทำงานของโปรแกรม (สูงสุดราว 4 MB)</p></div>
+          <button id="open-logs">เปิดโฟลเดอร์ log</button>
         </div>
       </div>
       <div class="card">

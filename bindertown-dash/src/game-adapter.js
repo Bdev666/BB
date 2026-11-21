@@ -39,6 +39,12 @@ function dropPrice(mobType, liveLevel) {
 
 const ROOM_DATA = 13;
 
+// Game builds this adapter was checked against (the build comes with every pong).
+// A new build that still reads cleanly is fine; one that doesn't is reported.
+const KNOWN_BUILDS = ['20261120-084128', '20261120-112144'];
+// Character fields the Dashboard needs from window.__game.me()
+const REQUIRED_FIELDS = ['name', 'level', 'hp', 'maxHp', 'mp', 'maxMp', 'xp', 'silver', 'job'];
+
 // Packed server events (from the client's own table; index + 1 = code)
 const PACKED = [
   ['hit', 'targetId', 'amount', 'kind', 'actorId', 'skillId', 'sm', 'gz'],
@@ -211,6 +217,11 @@ class BinderTownAdapter {
     this.pings = new Map();      // t -> sentAt
     this.mobLevels = new Map();  // mobType -> level seen on the map
     this.locks = new Set();      // item ids the player locked in the game
+    this.build = '';             // the game's build (from pong)
+    this.stats = { frames: 0, decodeErrors: 0, unknownPacked: 0, snapshots: 0 };
+    this.missing = [];           // required character fields the page didn't have
+    // kind -> boss name (client table; worldBossTop/Last update it)
+    this.worldBossNames = { vale: 'Wraithroot Colossus', nacreon: 'Pearlheart Titan' };
   }
 
   mobName(id) {
@@ -235,10 +246,30 @@ class BinderTownAdapter {
   // A frame the page received -> normalized events
   incoming(buf, at = Date.now()) {
     const f = decodeFrame(buf);
+    if (f && f.bad) this.stats.decodeErrors++;
     if (!f || f.type !== 'server' || f.message === undefined) return [];
+    this.stats.frames++;
     const out = [];
+    const raw = Array.isArray(f.message) && typeof f.message[0] !== 'number' ? f.message : [f.message];
+    for (const m of raw) if (Array.isArray(m) && typeof m[0] === 'number' && !PACKED[m[0] - 1]) this.stats.unknownPacked++;
     for (const e of serverEvents(f.message)) this.server(e, at, out);
     return out;
+  }
+
+  // Is the game still the shape this adapter expects?
+  health() {
+    const s = this.stats;
+    const problems = [];
+    if (this.missing.length) problems.push(`ไม่พบข้อมูลตัวละคร: ${this.missing.join(', ')}`);
+    if (s.decodeErrors > 3 && s.decodeErrors > s.frames * 0.02) problems.push(`ถอดข้อความจากเกมไม่ได้ ${s.decodeErrors} ครั้ง`);
+    if (s.unknownPacked > 3) problems.push(`เจอรูปแบบข้อความใหม่ ${s.unknownPacked} ครั้ง`);
+    return {
+      build: this.build,
+      knownBuild: !this.build || KNOWN_BUILDS.includes(this.build),
+      ok: problems.length === 0,
+      problems,
+      frames: s.frames,
+    };
   }
 
   server(e, at, out) {
@@ -312,6 +343,31 @@ class BinderTownAdapter {
         out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
         break;
       }
+      case 'fieldBosses': {
+        const skew = typeof e.now === 'number' ? at - e.now : 0; // server clock -> ours
+        out.push({
+          type: 'fieldBosses', t: at,
+          list: (e.list || []).map((b) => ({
+            mobType: b.type, name: pretty(b.type), map: b.pin || '', killer: b.killer || '',
+            closed: !!b.closed, until: b.until ? b.until + skew : 0, // 0 = up now
+          })),
+        });
+        break;
+      }
+      case 'worldBossTop':
+      case 'worldBossLast':
+        if (e.kind && e.boss) this.worldBossNames[e.kind] = e.boss;
+        break;
+      case 'worldBoss': {
+        const v = e.view || {};
+        if (!v.kind) break;
+        out.push({
+          type: 'worldBoss', t: at, kind: v.kind, name: this.worldBossNames[v.kind] || pretty(v.kind),
+          state: v.state, startAt: v.startAt || 0, endsAt: v.endsAt || 0, nextAt: v.nextAt || 0,
+          fighters: v.fighters || 0, hpFrac: typeof v.frac === 'number' ? v.frac : null,
+        });
+        break;
+      }
       case 'salvaged': {
         const ok = e.ok !== false;
         const gains = Object.entries(e).filter(([k, v]) => typeof v === 'number' && !['qty'].includes(k)).map(([k, v]) => `${pretty(k)} ${v}`).join(' · ');
@@ -327,6 +383,7 @@ class BinderTownAdapter {
         const ev = { type: 'net', t: at };
         if (sent !== undefined) { ev.ping = Math.max(0, at - sent); this.pings.delete(e.t); }
         if (typeof e.online === 'number') ev.online = e.online;
+        if (e.build) { this.build = String(e.build); ev.build = this.build; }
         out.push(ev);
         break;
       }
@@ -379,6 +436,9 @@ class BinderTownAdapter {
   snapshot(s, at = Date.now()) {
     if (!s || !s.ready) return [];
     const out = [];
+    this.stats.snapshots++;
+    this.missing = REQUIRED_FIELDS.filter((k) => !(k in (s.self || {})));
+    if (!/%/.test(s.xpText || '')) this.missing.push('EXP% (HUD)');
     this.sessionId = s.sessionId || this.sessionId;
     const me = s.self || {};
     if (me.uid) this.uid = String(me.uid);
@@ -427,4 +487,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

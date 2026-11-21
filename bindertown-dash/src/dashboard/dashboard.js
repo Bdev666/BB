@@ -83,7 +83,8 @@ function accountCard(a) {
     el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : '', s.ping != null ? ` · ${s.ping} ms` : ''),
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
-  a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map(alertText).join(' · ')) : null);
+  a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map(alertText).join(' · ')) : null,
+  a.compat && !a.compat.ok ? el('div', { class: 'acc-alert' }, '⚠ อ่านข้อมูลเกมไม่ครบ (เกมอัปเดต)') : null);
 }
 
 function startRename(a, node) {
@@ -343,6 +344,41 @@ function editAmount(row, name, mode, value, itemId) {
   input.select();
 }
 
+// ---------- game version / read health ----------
+function renderCompat(a) {
+  const c = a.compat;
+  const box = $('#compat');
+  if (!c || (c.ok && c.knownBuild)) { box.hidden = true; return; }
+  const key = JSON.stringify(c);
+  if (box.dataset.key === key && !box.hidden) return;
+  box.dataset.key = key;
+  box.className = 'compat' + (c.ok ? ' info' : ' warn');
+  box.replaceChildren(...[
+    el('span', {}, c.ok
+      ? `ℹ เกมอัปเดตเป็น build ${c.build} · BinderDash อ่านข้อมูลได้ปกติ`
+      : `⚠ เกม build ${c.build || '?'} · ${c.problems.join(' · ')} — ตัวเลขบางส่วนอาจผิด รออัปเดต BinderDash`),
+    c.ok ? null : el('button', { class: 'tiny', onclick: async () => { await dash.invoke('make-report'); showBanner('สร้างรายงานแล้ว ส่งไฟล์ในโฟลเดอร์ที่เปิดขึ้นมาให้ผู้พัฒนาได้เลย'); } }, 'สร้างรายงานปัญหา'),
+  ].filter(Boolean));
+  box.hidden = false;
+}
+
+// ---------- bosses ----------
+function renderBosses() {
+  const b = (state && state.bosses) || { field: [], world: [] };
+  const rows = [
+    ...b.world.map((w) => ({ cls: w.state === 'live' ? 'up' : '', icon: '🌋', name: w.name,
+      sub: w.state === 'live' ? `กำลังสู้ · ${w.fighters} คน${w.hpFrac != null ? ` · HP ${Math.round(w.hpFrac * 100)}%` : ''}` : 'World Boss',
+      when: w.state === 'live' ? (w.endsInMs ? `จบใน ${dur(w.endsInMs)}` : 'สด') : w.inMs ? `อีก ${dur(w.inMs)}` : '-' })),
+    ...b.field.map((f) => {
+      const info = findMap(f.map);
+      return { cls: f.up ? 'up' : '', icon: '♛', name: f.name, sub: info ? info.name : f.map, when: f.up ? 'เกิดแล้ว' : `อีก ${dur(f.inMs)}` };
+    }),
+  ];
+  $('#boss-note').textContent = rows.length ? '' : 'รอข้อมูลจากเกม (เปิดเกมอย่างน้อย 1 บัญชี)';
+  rebuild($('#bosses'), JSON.stringify(rows), () => rows.map((r) => el('div', { class: 'boss ' + r.cls },
+    el('span', { class: 'bi' }, r.icon), el('div', { class: 'bn' }, r.name, el('small', {}, r.sub)), el('b', {}, r.when))));
+}
+
 // ---------- game controls ----------
 async function cmd(name, arg, pending) {
   if (pending) showBanner(pending);
@@ -449,7 +485,7 @@ function renderNow() {
   if (!state || editing) return;
   if (!state.accounts.some((a) => a.id === selected)) selected = state.accounts.length ? state.accounts[0].id : null;
   // account list: rebuild only when something on it changed
-  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
+  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
   rebuild($('#accounts'), listKey, () => state.accounts.map(accountCard));
   $('#add').disabled = state.accounts.length >= state.maxAccounts;
 
@@ -469,12 +505,14 @@ function renderNow() {
   const a = state.accounts.find((x) => x.id === selected);
   $('#detail').hidden = !a;
   if (a) {
+    renderCompat(a);
     renderProfile(a);
     renderControls(a);
     renderLogs();
     renderMap();
     renderBag();
   }
+  renderBosses();
 
 }
 

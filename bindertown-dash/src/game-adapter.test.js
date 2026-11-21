@@ -151,4 +151,29 @@ ev = ad.incoming(frame('server', [{ type: 'sold', itemId: 'drop_sprout', qty: 5,
 assert.deepStrictEqual(ev.map((e) => e.type), ['sold', 'market', 'premium']);
 assert.strictEqual(ev[1].price, 300);
 
+// game version / read health
+{
+  const a3 = new BinderTownAdapter();
+  assert.strictEqual(a3.health().ok, true);
+  a3.incoming(frame('server', { type: 'pong', t: 1, build: '20991231-000000' }));
+  assert.deepStrictEqual([a3.health().build, a3.health().knownBuild, a3.health().ok], ['20991231-000000', false, true], 'new build that reads fine: info only');
+  a3.snapshot({ ready: true, sessionId: 's', self: { name: 'x', level: 1 }, mobs: {}, players: [], xpText: '' });
+  const h = a3.health();
+  assert.strictEqual(h.ok, false);
+  assert.ok(h.problems[0].includes('hp') && h.problems[0].includes('EXP%'), 'missing fields are named');
+  for (let i = 0; i < 5; i++) a3.incoming(frame('server', [[99, 'x']]));
+  assert.ok(a3.health().problems.some((p) => p.includes('รูปแบบข้อความใหม่')), 'unknown packed codes counted');
+}
+// bosses
+{
+  const a4 = new BinderTownAdapter();
+  const e4 = a4.incoming(frame('server', [
+    { type: 'worldBossTop', kind: 'nacreon', boss: 'Pearlheart Titan', top: [] },
+    { type: 'fieldBosses', now: 1000, list: [{ pin: 'ember_hollow', type: 'cinder_plume_roc', until: 61000, killer: 'A' }, { pin: 'riverside', type: 'bloom_crowned_stag', until: 0 }] },
+    { type: 'worldBoss', view: { kind: 'nacreon', state: 'live', frac: 0.2, fighters: 355, startAt: 5, endsAt: 9, nextAt: 0 } },
+  ]), 2000);
+  assert.deepStrictEqual(e4[0].list.map((b) => [b.name, b.map, b.until]), [['Cinder Plume Roc', 'ember_hollow', 62000], ['Bloom Crowned Stag', 'riverside', 0]], 'server time shifted to ours');
+  assert.deepStrictEqual([e4[1].name, e4[1].state, e4[1].fighters], ['Pearlheart Titan', 'live', 355]);
+}
+
 console.log('game-adapter tests passed');

@@ -27,6 +27,7 @@ function render(state) {
     $('#ramLimitMB').value = s.ramLimitMB;
     $('#valuableMinGold').value = s.valuableMinGold;
     $('#potionMinutes').value = s.potionMinutes;
+    $('#bossLeadMinutes').value = s.bossLeadMinutes;
     $('#weightFullPct').value = s.weightFullPct;
     if (info) $('#gameUrl').value = s.gameUrl || info.defaultGameUrl;
   }
@@ -42,7 +43,7 @@ for (const box of $$('[data-set]')) {
 for (const box of $$('[data-notify]')) {
   box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
 }
-for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct']) {
+for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'bossLeadMinutes']) {
   $('#' + id).addEventListener('change', (e) => dash.invoke('settings', { [id]: e.target.value }));
 }
 function urlNote(saved) {
@@ -79,6 +80,8 @@ $('#tg-connect').addEventListener('click', async () => {
 });
 $('#tg-disconnect').addEventListener('click', () => { dash.invoke('telegram-disconnect'); $('#tg-msg').textContent = ''; });
 $('#open-userdata').addEventListener('click', () => dash.invoke('open-userdata'));
+$('#open-logs').addEventListener('click', () => dash.invoke('open-logs'));
+$('#make-report').addEventListener('click', async () => { await dash.invoke('make-report'); alert('สร้างรายงานแล้ว · ไฟล์อยู่ในโฟลเดอร์ที่เปิดขึ้นมา ส่งให้ผู้พัฒนาได้เลย'); });
 $('#open-captures').addEventListener('click', () => dash.invoke('open-captures'));
 
 function updateText(u) {

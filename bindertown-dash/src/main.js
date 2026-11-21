@@ -9,10 +9,11 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const updater = require('./updater');
+const log = require('./logger');
 
 const DEFAULT_GAME_URL = 'https://play.bindertowngame.com/';
 let gameUrl = DEFAULT_GAME_URL; // read from settings once at startup
@@ -62,6 +63,7 @@ function publicState() {
     settings: { ...store.data.settings, telegram: { connected: !!(store.data.settings.telegram.token && store.data.settings.telegram.chatId) } },
     maxAccounts: MAX_ACCOUNTS,
     update: { ...updater.state(), current: app.getVersion() },
+    bosses: bossView(),
     accounts: store.data.accounts.map((a) => {
       const g = rt(a.id);
       return {
@@ -71,6 +73,7 @@ function publicState() {
         hidden: !!(g.win && !g.win.isVisible()),
         summary: g.data.summary(now),
         memoryMB: g.memoryMB || null,
+        compat: g.inGame && !g.demo ? g.adapter.health() : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
       };
@@ -85,6 +88,7 @@ function pushState() {
   pushTimer = setTimeout(() => {
     pushTimer = null;
     updateTray();
+    logChanges();
     // nobody looking: don't build or send anything
     const targets = [dashboard, settingsWin].filter(visible);
     if (!targets.length) return;
@@ -98,15 +102,17 @@ function notify(id, kind, text) {
   const s = store.data.settings;
   const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind;
   if (s.notify[group] === false) return;
-  const g = rt(id);
-  if (g.demo) return; // demo data never notifies
+  // id null = about the game world (bosses), not one account
+  const g = id == null ? null : rt(id);
+  if (g && g.demo) return; // demo data never notifies
   // don't interrupt the account you're looking at right now
-  if (g.win && !g.win.isDestroyed() && g.win.isVisible() && g.win.isFocused()) return;
-  const a = account(id);
+  if (g && g.win && !g.win.isDestroyed() && g.win.isVisible() && g.win.isFocused()) return;
+  log.info(`notify ${id == null ? 'world' : 'acc ' + id} ${kind}`);
+  const a = id == null ? null : account(id);
   const title = a ? (g.data.stats.name ? `${a.name} · ${g.data.stats.name}` : a.name) : 'BinderDash';
   if (Notification.isSupported()) {
     const n = new Notification({ title, body: text, silent: !s.notify.sound, icon: nativeImage.createFromDataURL(icons.alert) });
-    n.on('click', () => showGame(id));
+    n.on('click', () => (id == null ? createDashboard() : showGame(id)));
     n.show();
   }
   telegram.send(s.telegram.token, s.telegram.chatId, `${title}: ${text}`).catch(() => {});
@@ -116,9 +122,11 @@ function setAlert(id, key, on, text) {
   const g = rt(id);
   if (on && !g.alerts.has(key)) {
     g.alerts.add(key);
+    log.info(`acc ${id}: alert on ${key.replace(/:.*/, ':…')}`);
     notify(id, key, text);
-  } else if (!on) {
+  } else if (!on && g.alerts.has(key)) {
     g.alerts.delete(key);
+    log.info(`acc ${id}: alert off ${key.replace(/:.*/, ':…')}`);
   }
   pushState();
 }
@@ -257,6 +265,7 @@ function openGame(id, opts = {}) {
     if (isMain && code !== -3) { g.status = 'offline'; pushState(); }
   });
   wc.on('render-process-gone', (_e, details) => {
+    log.error(`acc ${id}: game page gone: ${details.reason} (exit ${details.exitCode})`);
     g.status = 'crashed';
     setAlert(id, 'crash', true, `หน้าเกมหยุดทำงาน (${details.reason}) · กด Ctrl+R ในหน้าต่างเกมเพื่อโหลดใหม่`);
   });
@@ -273,7 +282,7 @@ function openGame(id, opts = {}) {
 function attachWatcher(id, wc) {
   const g = rt(id);
   const dbg = wc.debugger;
-  try { dbg.attach('1.3'); } catch (err) { console.warn('debugger attach failed', err); return; }
+  try { dbg.attach('1.3'); } catch (err) { log.error(`acc ${id}: debugger attach failed`, err); return; }
   // small buffers: we only need WebSocket frames, not response bodies kept in memory
   dbg.sendCommand('Network.enable', { maxTotalBufferSize: 1024 * 1024, maxResourceBufferSize: 64 * 1024 }).catch(() => {});
   dbg.on('message', (_e, method, params) => {
@@ -290,7 +299,7 @@ function attachWatcher(id, wc) {
       if (params.response.opcode === 2) rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64'));
     }
   });
-  dbg.on('detach', (_e, reason) => console.warn(`debugger detached for ${id}: ${reason}`));
+  dbg.on('detach', (_e, reason) => log.warn(`acc ${id}: debugger detached: ${reason}`));
 }
 
 function onFrame(id, frame) {
@@ -305,7 +314,7 @@ function onFrame(id, frame) {
   try {
     handleEvents(id, g.adapter.incoming(Buffer.from(frame.payloadData, 'base64')));
   } catch (err) {
-    console.warn('frame decode failed', err);
+    log.once(`decode:${id}`, 60000, 'error', `acc ${id}: frame decode failed`, err);
   }
   pushState();
 }
@@ -416,6 +425,8 @@ function handleEvents(id, events) {
         // something that isn't a plain monster drop: ask the market what it's worth, notify if it's worth it
         if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.item, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
         break;
+      case 'fieldBosses': onFieldBosses(ev.list); break;
+      case 'worldBoss': onWorldBoss(ev); break;
       case 'market': {
         // prices are the same for every account on the server
         for (const [, other] of games) if (other !== g) other.data.ingest(ev);
@@ -539,7 +550,136 @@ async function runCommand(id, cmd, arg) {
     }
     default: return { ok: false, error: 'ไม่รู้จักคำสั่ง' };
   }
+  log.info(`acc ${id}: command ${cmd}${cmd === 'chat' ? ` (${arg.channel}, ${String(arg.text || '').length} chars)` : arg.itemId ? ` ${arg.itemId}` : ''} -> ${ok ? 'sent' : 'not sent'}`);
   return ok ? { ok: true } : { ok: false, error: 'เกมยังไม่พร้อม ลองใหม่อีกครั้ง' };
+}
+
+// ---------- logging of state changes (status, game build / read health) ----------
+function logChanges() {
+  for (const [id, g] of games) {
+    if (g.loggedStatus !== g.status) {
+      if (g.loggedStatus !== undefined || g.status !== 'closed') log.info(`acc ${id}: status ${g.loggedStatus || '-'} -> ${g.status}`);
+      g.loggedStatus = g.status;
+    }
+    if (!g.inGame || g.demo) continue;
+    const h = g.adapter.health();
+    const key = JSON.stringify([h.build, h.ok, h.problems]);
+    if (g.loggedHealth !== key && (h.build || !h.ok)) {
+      g.loggedHealth = key;
+      if (h.ok) log.info(`acc ${id}: game build ${h.build || '?'}${h.knownBuild ? '' : ' (not tested yet)'}, data reads fine`);
+      else log.warn(`acc ${id}: game build ${h.build || '?'} data problems: ${h.problems.join(' | ')}`);
+    }
+  }
+}
+
+// ---------- bosses (the same for every account on the server) ----------
+const bosses = { field: new Map(), world: new Map(), sent: new Set(), queriedAt: 0 };
+
+function onFieldBosses(list) {
+  const now = Date.now();
+  for (const b of list) {
+    const key = `${b.mobType}@${b.map}`;
+    const before = bosses.field.get(key);
+    bosses.field.set(key, { ...b, seenAt: now });
+    // up now, and it wasn't before (first sight doesn't count: no spam on start)
+    if (before && before.until > now && !b.until && !b.closed) bossUp(b);
+  }
+  pushState();
+}
+
+function onWorldBoss(v) {
+  const before = bosses.world.get(v.kind);
+  bosses.world.set(v.kind, { ...v, seenAt: Date.now() });
+  if (before && before.state !== 'live' && v.state === 'live') {
+    notify(null, 'worldBoss', `🌋 World Boss ${v.name} เริ่มแล้ว · เข้าร่วม ${v.fighters} คน`);
+  }
+  pushState();
+}
+
+function bossUp(b) {
+  const key = `up:${b.mobType}@${b.map}:${b.until}`;
+  if (bosses.sent.has(key)) return;
+  bosses.sent.add(key);
+  notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} เกิดแล้ว · ${mapName(b.map)}`);
+}
+
+function mapName(id) { return String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); }
+
+// timers: "about to spawn" heads-up, and spawns we can tell from the clock alone
+function bossTick() {
+  const s = store.data.settings;
+  const now = Date.now();
+  const lead = s.bossLeadMinutes * 60000;
+  for (const b of bosses.field.values()) {
+    if (b.closed || !b.until) continue;
+    const left = b.until - now;
+    const soon = `soon:${b.mobType}@${b.map}:${b.until}`;
+    if (left > 0 && left <= lead && !bosses.sent.has(soon)) {
+      bosses.sent.add(soon);
+      notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} จะเกิดในอีก ~${Math.max(1, Math.round(left / 60000))} นาที · ${mapName(b.map)}`);
+    }
+    if (left <= 0 && left > -60000) bossUp(b);
+  }
+  for (const w of bosses.world.values()) {
+    const start = w.state === 'live' ? 0 : w.nextAt || w.startAt;
+    const left = start - now;
+    const soon = `wsoon:${w.kind}:${start}`;
+    if (start && left > 0 && left <= lead && !bosses.sent.has(soon)) {
+      bosses.sent.add(soon);
+      notify(null, 'worldBoss', `🌋 World Boss ${w.name} จะเริ่มในอีก ~${Math.max(1, Math.round(left / 60000))} นาที`);
+    }
+  }
+  if (bosses.sent.size > 500) bosses.sent.clear();
+  // ask the game for the field-boss board (what its atlas map asks), from one account, once a minute
+  if (now - bosses.queriedAt > 60000 && (s.notify.fieldBoss || visible(dashboard))) {
+    const first = openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo);
+    if (first) { bosses.queriedAt = now; sendInput(first[0], { type: 'fieldBossQuery' }); }
+  }
+}
+
+function bossView() {
+  const now = Date.now();
+  return {
+    field: [...bosses.field.values()]
+      .filter((b) => !b.closed)
+      .map((b) => ({ name: b.name, map: b.map, up: !b.until || b.until <= now, inMs: b.until ? Math.max(0, b.until - now) : 0, killer: b.killer }))
+      .sort((a, b) => (a.up === b.up ? a.inMs - b.inMs : a.up ? -1 : 1)),
+    world: [...bosses.world.values()].map((w) => ({
+      name: w.name, kind: w.kind, state: w.state, fighters: w.fighters, hpFrac: w.hpFrac,
+      inMs: w.state === 'live' ? 0 : Math.max(0, (w.nextAt || w.startAt) - now), endsInMs: w.endsAt ? Math.max(0, w.endsAt - now) : 0,
+    })),
+  };
+}
+
+// ---------- problem report ----------
+function makeReport() {
+  const s = store.data.settings;
+  const os = require('os');
+  const lines = [
+    `BinderDash ${app.getVersion()} · Electron ${process.versions.electron} · Chrome ${process.versions.chrome}`,
+    `Windows/OS: ${os.type()} ${os.release()} ${os.arch()} · RAM ${Math.round(os.totalmem() / 1073741824)} GB · CPU ${os.cpus().length} cores`,
+    `เวลา: ${new Date().toString()}`,
+    `ทดสอบกับเกม build: ${KNOWN_BUILDS.join(', ')}`,
+    '',
+    '== บัญชี ==',
+    ...store.data.accounts.map((a) => {
+      const g = rt(a.id);
+      const h = g.inGame ? g.adapter.health() : null;
+      return `#${a.id} status=${g.status} alerts=[${[...g.alerts].map((k) => k.replace(/:.*/, ':…')).join(',')}] mem=${g.memoryMB || '-'}MB`
+        + (h ? ` build=${h.build || '?'} ok=${h.ok} frames=${h.frames}${h.problems.length ? ` problems=${h.problems.join(' | ')}` : ''}` : '');
+    }),
+    '',
+    '== ตั้งค่า (ไม่มี KEY) ==',
+    JSON.stringify({ ...s, telegram: { connected: !!(s.telegram.token && s.telegram.chatId) }, itemWatch: Object.keys(s.itemWatch || {}).length }),
+    '',
+    '== log ล่าสุด ==',
+    log.tail(400),
+  ];
+  const file = path.join(log.dir(), `report-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
+  fs.writeFileSync(file, lines.join('\n'));
+  log.info('problem report written');
+  shell.showItemInFolder(file);
+  return file;
 }
 
 // ---------- demo mode ----------
@@ -747,6 +887,7 @@ function registerIpc() {
     const s = store.data.settings;
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
+    if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
     if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
     if (patch.weightFullPct !== undefined) s.weightFullPct = Math.min(100, Math.max(50, Number(patch.weightFullPct) || 90));
     if (patch.ramLimitMB !== undefined) s.ramLimitMB = Math.min(8000, Math.max(500, Number(patch.ramLimitMB) || 1500));
@@ -822,6 +963,8 @@ function registerIpc() {
     for (const a of store.data.accounts) await session.fromPartition(`persist:acc-${a.id}`).clearCache().catch(() => {});
     for (const [, g] of openGames()) g.win.webContents.reloadIgnoringCache();
   });
+  handle('open-logs', () => shell.openPath(log.dir()));
+  handle('make-report', () => makeReport());
   handle('open-captures', () => {
     const dir = path.join(app.getPath('userData'), 'captures');
     fs.mkdirSync(dir, { recursive: true });
@@ -838,7 +981,13 @@ app.on('before-quit', () => { quitting = true; });
 // their sign-in popups) presents itself as plain Chrome
 app.userAgentFallback = chromeUA(app.userAgentFallback);
 
+// Log errors instead of showing Electron's crash dialog (which would freeze the app)
+process.on('uncaughtException', (err) => log.error('uncaught', err));
+process.on('unhandledRejection', (err) => log.error('unhandled rejection', err));
+
 app.whenReady().then(() => {
+  log.init(app.getPath('userData'));
+  log.info(`BinderDash ${app.getVersion()} start · Electron ${process.versions.electron} · ${process.platform} ${require('os').release()}`);
   store = new Store(app.getPath('userData'));
   gameUrl = store.data.settings.gameUrl || DEFAULT_GAME_URL;
   registerIpc();
@@ -861,4 +1010,5 @@ app.whenReady().then(() => {
   setInterval(tick, 15 * 1000);
   setInterval(demoTick, 500);
   setInterval(pollSnapshots, 1000);
+  setInterval(bossTick, 15 * 1000);
 });

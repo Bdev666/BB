@@ -11,7 +11,14 @@ let onChange = () => {};
 let beforeInstall = () => {};
 let busyAsking = false;
 
-function set(patch) { Object.assign(state, patch); onChange({ ...state }); }
+const log = require('./logger');
+function set(patch) {
+  if (patch.status && patch.status !== state.status && patch.status !== 'downloading') {
+    log.info(`update: ${patch.status}${patch.version ? ' ' + patch.version : ''}${patch.error ? ' ' + patch.error : ''}`);
+  }
+  Object.assign(state, patch);
+  onChange({ ...state });
+}
 
 function notesText(info) {
   const n = info && info.releaseNotes;

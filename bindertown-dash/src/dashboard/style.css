@@ -182,3 +182,16 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .gearlist { max-height: 45vh; overflow: auto; margin: 8px 0; }
 .gearlist .gear { margin: 4px 0; }
 .gearlist .gear .tiny { margin-left: auto; }
+.compat { border-radius: 10px; padding: 8px 12px; display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
+.compat.warn { background: #3a1420; color: #ffb3c1; border: 1px solid var(--bad); }
+.compat.info { background: #10233a; color: #93c5fd; border: 1px solid #1e3a5f; }
+.compat .tiny { margin-left: auto; }
+.bosses { max-height: 210px; overflow-y: auto; flex: none; }
+.bosses h3 { margin-bottom: 6px; }
+.boss { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+.boss .bi { width: 18px; text-align: center; }
+.boss .bn { flex: 1; min-width: 0; }
+.boss .bn small { display: block; color: var(--muted); font-size: 11px; }
+.boss b { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.boss.up b { color: var(--ok); }
+.boss.up .bi { color: var(--gold); }

@@ -20,9 +20,11 @@ const DEFAULTS = {
       disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
       crash: true, maintenance: true, sound: true,
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
+      fieldBoss: true, worldBoss: true,
     },
     valuableMinGold: 300,    // notify drops whose player-market value is at least this (Gold)
-    potionMinutes: 30,       // warn when supplies run out within this many minutes
+    potionMinutes: 30,
+    bossLeadMinutes: 5,      // heads-up this many minutes before a boss spawns / starts       // warn when supplies run out within this many minutes
     weightFullPct: 90,       // warn when the bag is this full
     itemWatch: {},           // item name -> warn when count drops below this
     telegram: { token: '', chatId: '' },
