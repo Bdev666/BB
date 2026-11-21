@@ -1,12 +1,14 @@
 /* global dash */
 const STATUS_TEXT = {
-  closed: 'ยังไม่เปิด', loading: 'กำลังโหลด', lobby: 'ยังไม่เข้าเกม (ล็อกอิน/โหลด)', online: 'ออนไลน์', disconnected: 'หลุด', demo: 'ตัวอย่าง',
+  closed: 'ยังไม่เปิด', loading: 'กำลังโหลด', reconnecting: 'กำลังต่อใหม่…', lobby: 'ยังไม่เข้าเกม (ล็อกอิน/โหลด)', online: 'ออนไลน์', disconnected: 'หลุด', demo: 'ตัวอย่าง',
   maintenance: 'ปิดปรับปรุง', crashed: 'หน้าเกมหยุดทำงาน', offline: 'โหลดเกมไม่ได้',
 };
 const ALERT_TEXT = {
   disconnect: 'หลุดจากเซิร์ฟเวอร์', idle: 'ไม่มีข้อมูลจากเกม · AUTO อาจหยุด',
   crash: 'หน้าเกมค้าง/หยุดทำงาน', maintenance: 'เกมปิดปรับปรุง',
   death: 'ตัวละครตาย', weight: 'กระเป๋าใกล้เต็ม', premium: 'Premium ใกล้หมด',
+  elsewhere: 'ถูกเปิดที่อื่น', staff: 'ถูกตัดโดยทีมงาน', login: 'ต้องล็อกอินใหม่', human: 'เกมขอยืนยันว่าเป็นคน',
+  reconnectLimit: 'ต่อใหม่ครบโควตาชั่วโมงนี้',
 };
 const alertText = (k) => ALERT_TEXT[k] || (k.startsWith('potion:') ? `${k.slice(7)} ใกล้หมด` : k.startsWith('item:') ? `${k.slice(5)} เหลือน้อย` : k);
 const EV_KINDS = [

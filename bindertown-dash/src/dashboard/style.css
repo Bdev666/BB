@@ -53,7 +53,7 @@ h3 { font-size: 14px; margin: 0; }
 .mini.hp > i { background: var(--hp); } .mini.sp > i { background: var(--sp); } .mini.exp > i { background: var(--exp); }
 .acc-alert { color: var(--bad); font-size: 11px; margin-top: 4px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
-.dot.online, .dot.demo { background: var(--ok); } .dot.loading, .dot.lobby, .dot.maintenance { background: var(--warn); }
+.dot.online, .dot.demo { background: var(--ok); } .dot.loading, .dot.lobby, .dot.reconnecting, .dot.maintenance { background: var(--warn); }
 .dot.disconnected, .dot.crashed, .dot.offline { background: var(--bad); }
 
 /* detail */

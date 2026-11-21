@@ -201,11 +201,15 @@ function announcementText(e) {
 
 // Runs in the game page (main world). Read-only: reads window.__game and two HUD texts.
 const SNAPSHOT_JS = `(() => {
+  // what the game is showing on top: its disconnect boxes (title text) or the sign-in screen
+  const veil = [...document.querySelectorAll('.wbveil .cwtitle')].filter((e) => e.offsetParent).map((e) => e.textContent.trim()).join('|');
+  const login = !!document.body && document.body.innerText.includes('เข้าสู่ระบบด้วย Google');
+  const screen = { veil, login };
   const g = window.__game;
-  if (!g || typeof g.me !== 'function') return { ready: false };
+  if (!g || typeof g.me !== 'function') return { ready: false, screen };
   let me, st;
-  try { me = g.me(); st = g.state(); } catch (e) { return { ready: false }; }
-  if (!me || !st) return { ready: false, loading: true };
+  try { me = g.me(); st = g.state(); } catch (e) { return { ready: false, screen }; }
+  if (!me || !st) return { ready: false, loading: true, screen };
   const prim = (o) => { const r = {}; for (const k in o) { const v = o[k]; if (v == null || typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') r[k] = v; } return r; };
   let self = {}; try { self = prim(me.toJSON ? me.toJSON() : me); } catch (e) {}
   for (const k of ['x', 'y', 'state']) { try { self[k] = me[k]; } catch (e) {} }
@@ -231,7 +235,7 @@ const SNAPSHOT_JS = `(() => {
     weightPct: wf && wf.style.width ? parseFloat(wf.style.width) : null,
     deadScreen: !!(dead && dead.offsetParent),
   };
-  return { ready: true, sessionId, self, players, mobs, loots, mapId, ui, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
+  return { ready: true, screen, sessionId, self, players, mobs, loots, mapId, ui, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
 })()`;
 
 // One per account: keeps what's needed to give events names and owners.
@@ -362,6 +366,8 @@ class BinderTownAdapter {
         if (text) out.push({ type: 'chat', channel: 'system', from: '', text, backlog: false, t: at });
         break;
       }
+      case 'humanCheck': out.push({ type: 'humanCheck', why: String(e.why || ''), t: at }); break;
+      case 'humanResult': out.push({ type: 'humanResult', ok: !!e.ok, t: at }); break;
       case 'notice': if (e.text) out.push({ type: 'info', notice: true, text: String(e.text), t: at }); break;
       case 'maintenance': out.push({ type: 'info', text: 'เกมแจ้งปิดปรับปรุง', t: at }); break;
       case 'socialInvite':

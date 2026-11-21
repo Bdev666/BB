@@ -9,7 +9,10 @@ const DEFAULTS = {
     // general
     openDashboardOnStart: true,
     openAllOnStart: false,
-    openHidden: false,       // open games without showing their window (lighter on the PC)
+    openHidden: false,
+    autoReconnect: true,     // reload the game page when it's cut off / stuck / crashed (see main.js)
+    reconnectMinutes: 3,     // ... after being disconnected this long
+    startWithWindows: false,       // open games without showing their window (lighter on the PC)
     gameUrl: '',             // empty = default server; takes effect after restart
     autoRam: false,          // reload a game page whose memory passes ramLimitMB
     ramLimitMB: 1500,

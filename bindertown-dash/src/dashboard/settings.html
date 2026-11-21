@@ -30,6 +30,14 @@
           <label class="switch"><input type="checkbox" data-set="openHidden"><i></i></label>
         </div>
         <div class="row">
+          <div><b>🔄 ต่อใหม่อัตโนมัติ</b><p>โหลดหน้าเกมใหม่ให้เมื่อเกมตัดการเชื่อมต่อ, หลุดนานเกิน <input type="number" id="reconnectMinutes" min="1" max="60"> นาที, หน้าเกมค้างหรือพัง · เกมล็อกอินและเปิด AUTO ต่อเอง · ไม่เกิน 5 ครั้งต่อชั่วโมงต่อบัญชี · ไม่ทำเมื่อถูกเปิดที่อื่น, ถูกทีมงานตัด, เกมขอยืนยันว่าเป็นคน หรือล็อกอินหมดอายุ (แจ้งเตือนแทน)</p></div>
+          <label class="switch"><input type="checkbox" data-set="autoReconnect"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>เปิด BinderDash พร้อม Windows</b><p>ใช้คู่กับ "เปิดทุกบัญชีตอนเปิดโปรแกรม" = เปิดคอมแล้วฟาร์มต่อเองได้เลย</p></div>
+          <label class="switch"><input type="checkbox" data-set="startWithWindows"><i></i></label>
+        </div>
+        <div class="row">
           <div><b>เปิดทุกบัญชีตอนเปิดโปรแกรม</b><p>ถ้าไม่เลือก จะเปิดแค่ Dashboard แล้วกดเปิดเองทีละบัญชี</p></div>
           <label class="switch"><input type="checkbox" data-set="openAllOnStart"><i></i></label>
         </div>

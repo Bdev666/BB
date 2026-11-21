@@ -268,10 +268,14 @@ function openGame(id, opts = {}) {
   wc.on('render-process-gone', (_e, details) => {
     log.error(`acc ${id}: game page gone: ${details.reason} (exit ${details.exitCode})`);
     g.status = 'crashed';
-    setAlert(id, 'crash', true, `หน้าเกมหยุดทำงาน (${details.reason}) · กด Ctrl+R ในหน้าต่างเกมเพื่อโหลดใหม่`);
+    setAlert(id, 'crash', true, `หน้าเกมหยุดทำงาน (${details.reason})`);
+    if (details.reason !== 'clean-exit') scheduleReload(id, 'หน้าเกมหยุดทำงาน', 5000);
   });
-  wc.on('unresponsive', () => setAlert(id, 'crash', true, 'หน้าเกมค้าง ไม่ตอบสนอง'));
-  wc.on('responsive', () => setAlert(id, 'crash', false));
+  wc.on('unresponsive', () => {
+    setAlert(id, 'crash', true, 'หน้าเกมค้าง ไม่ตอบสนอง');
+    g.hangSince = Date.now();
+  });
+  wc.on('responsive', () => { g.hangSince = 0; setAlert(id, 'crash', false); });
   wc.on('did-start-loading', () => { g.sockets.clear(); g.loadedAt = Date.now(); });
 
   attachWatcher(id, wc);
@@ -339,6 +343,7 @@ async function pollSnapshots() {
       handleEvents(id, g.adapter.snapshot(snap));
       if (snap && snap.ready) g.inGame = true;
       else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
+      watchScreen(id, snap);
       if (g.data.stats.name !== prevName) g.win.setTitle(windowTitle(id));
     } catch { /* page reloading */ } finally {
       g.snapshotBusy = false;
@@ -399,6 +404,13 @@ function handleEvents(id, events) {
       case 'kill':
         g.lastHitAt = Date.now();
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
+        break;
+      case 'humanCheck':
+        g.humanCheck = true;
+        setAlert(id, 'human', true, '🧩 เกมขอให้ยืนยันว่าเป็นคน · เปิดหน้าเกมแล้วทำให้เสร็จ (BinderDash ไม่ทำแทน)');
+        break;
+      case 'humanResult':
+        if (ev.ok) { g.humanCheck = false; setAlert(id, 'human', false); }
         break;
       case 'self':
         if (typeof ev.weightPct === 'number') {
@@ -582,6 +594,88 @@ async function runCommand(id, cmd, arg) {
   return ok ? { ok: true } : { ok: false, error: 'เกมยังไม่พร้อม ลองใหม่อีกครั้ง' };
 }
 
+// ---------- auto reconnect ----------
+// The game reconnects ordinary drops by itself. On top of that BinderDash reloads the game
+// page (the same as the game's own "reconnect" buttons, which call __hardReload) when:
+//   the game says the connection was cut (4008) · it stays disconnected or stuck too long ·
+//   the page crashed. The game then signs back in by itself and resumes AUTO.
+// It never reconnects when the character is playing elsewhere (4001), was disconnected by
+// the game's staff (4005), the game asks for a human check, or the sign-in has expired:
+// those are notified for the player to handle.
+const RECONNECT_MAX_PER_HOUR = 5;
+
+function classifyVeil(veil) {
+  if (!veil) return null;
+  if (veil.includes('กำลังเล่นอยู่ที่อื่น')) return 'elsewhere';
+  if (veil.includes('ถูกตัดการเชื่อมต่อโดย')) return 'staff';
+  if (veil.includes('การเชื่อมต่อถูกตัด')) return 'cut';
+  if (veil.includes('การเชื่อมต่อหลุด') || veil.includes('กำลังอัปเดตแพตช์')) return 'dropping';
+  return null;
+}
+
+function scheduleReload(id, reason, baseDelayMs) {
+  const s = store.data.settings;
+  const g = rt(id);
+  if (!s.autoReconnect || !g.win || g.win.isDestroyed()) return;
+  if (g.rc && g.rc.pending) return; // one at a time
+  const now = Date.now();
+  g.rcAttempts = (g.rcAttempts || []).filter((t) => now - t < 3600 * 1000);
+  if (g.rcAttempts.length >= RECONNECT_MAX_PER_HOUR) {
+    setAlert(id, 'reconnectLimit', true, `ต่อใหม่อัตโนมัติครบ ${RECONNECT_MAX_PER_HOUR} ครั้งในชั่วโมงนี้แล้ว (${reason}) · หยุดลองเพื่อไม่ให้วนไม่จบ กรุณาดูหน้าเกม`);
+    return;
+  }
+  // back off: each extra try this hour waits twice as long (at most 15 minutes)
+  const delay = Math.min(15 * 60000, baseDelayMs * 2 ** g.rcAttempts.length);
+  g.rc = { pending: true, at: now + delay, reason };
+  log.info(`acc ${id}: reconnect in ${Math.round(delay / 1000)} s (${reason}, try ${g.rcAttempts.length + 1}/${RECONNECT_MAX_PER_HOUR} this hour)`);
+  pushState();
+}
+
+function reconnectTick() {
+  const now = Date.now();
+  const s = store.data.settings;
+  for (const [id, g] of openGames()) {
+    if (g.demo) continue;
+    // stuck page (not answering) for 30 s
+    if (g.hangSince && now - g.hangSince > 30000) { g.hangSince = 0; scheduleReload(id, 'หน้าเกมค้าง', 1000); }
+    // disconnected (or the game's own reconnect still spinning) for too long
+    const lost = g.status === 'disconnected' || g.status === 'offline' || g.veil === 'dropping';
+    if (lost) g.lostSince = g.lostSince || now; else g.lostSince = 0;
+    // tries 30 s, 1, 2, 4, 8 min apart: covers ~15 minutes of an outage before giving up
+    if (g.lostSince && now - g.lostSince > s.reconnectMinutes * 60000) scheduleReload(id, 'หลุดนานเกินไป', 30000);
+    if (g.rc && g.rc.pending && now >= g.rc.at) {
+      const reason = g.rc.reason;
+      g.rc = null;
+      g.rcAttempts = [...(g.rcAttempts || []), now];
+      g.lostSince = 0;
+      g.status = 'reconnecting';
+      g.loadedAt = now;
+      log.info(`acc ${id}: reconnecting (reload page) — ${reason}`);
+      try { g.win.webContents.reload(); } catch (err) { log.error(`acc ${id}: reload failed`, err); }
+      pushState();
+    }
+  }
+}
+
+// What the game page shows: disconnect boxes, sign-in screen. Called with every snapshot.
+function watchScreen(id, snap) {
+  const g = rt(id);
+  const scr = (snap && snap.screen) || {};
+  const kind = classifyVeil(scr.veil);
+  if (kind !== g.veil) { if (kind || g.veil) log.info(`acc ${id}: game screen ${g.veil || '-'} -> ${kind || '-'}`); g.veil = kind; }
+  setAlert(id, 'elsewhere', kind === 'elsewhere', 'ตัวละครนี้ถูกเปิดที่อื่น (แท็บ/เครื่องอื่น) · ไม่ต่อใหม่เองเพื่อไม่ให้แย่งกัน');
+  setAlert(id, 'staff', kind === 'staff', 'ถูกตัดการเชื่อมต่อโดยทีมงานเกม · ไม่ต่อใหม่เอง');
+  if (kind === 'cut') scheduleReload(id, 'เกมตัดการเชื่อมต่อ', 45000);
+  // sign-in screen on an account that was signed in before = the sign-in expired
+  const acc = account(id);
+  if (snap && snap.ready && acc && !acc.signedIn) { acc.signedIn = true; store.save(); }
+  setAlert(id, 'login', !!(scr.login && acc && acc.signedIn), 'ต้องล็อกอินใหม่ (การล็อกอินหมดอายุ) · เปิดหน้าเกมแล้วล็อกอิน');
+  if (snap && snap.ready) {
+    if (g.status === 'reconnecting') log.info(`acc ${id}: back in the game after reconnect`);
+    for (const k of ['crash', 'reconnectLimit']) if (g.alerts.has(k) && g.status !== 'crashed') setAlert(id, k, false);
+  }
+}
+
 // ---------- logging of state changes (status, game build / read health) ----------
 function logChanges() {
   for (const [id, g] of games) {
@@ -660,6 +754,12 @@ async function commandAll(cmd, arg) {
   }
   log.info(`all accounts: ${cmd} -> ${results.map((r) => `${r.id}:${r.ok ? (r.skipped ? 'skip' : 'ok') : 'fail'}`).join(' ') || 'no account in game'}`);
   return results;
+}
+
+// Start BinderDash when Windows starts (with "open all accounts on start" = fully hands-off)
+function applyStartWithWindows() {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  try { app.setLoginItemSettings({ openAtLogin: !!store.data.settings.startWithWindows }); } catch (err) { log.warn('login item:', err.message); }
 }
 
 // ---------- remote control from Telegram (owner's chat only, off by default) ----------
@@ -1096,7 +1196,9 @@ function registerIpc() {
   });
   handle('settings', (patch) => {
     const s = store.data.settings;
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
+    if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
     if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
     if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
@@ -1231,5 +1333,7 @@ app.whenReady().then(() => {
   setInterval(demoTick, 500);
   setInterval(pollSnapshots, 1000);
   setInterval(bossTick, 15 * 1000);
+  setInterval(reconnectTick, 5000);
+  applyStartWithWindows();
   syncRemote();
 });

@@ -28,6 +28,7 @@ function render(state) {
     $('#valuableMinGold').value = s.valuableMinGold;
     $('#potionMinutes').value = s.potionMinutes;
     $('#bossLeadMinutes').value = s.bossLeadMinutes;
+    $('#reconnectMinutes').value = s.reconnectMinutes;
     $('#weightFullPct').value = s.weightFullPct;
     if (info) $('#gameUrl').value = s.gameUrl || info.defaultGameUrl;
   }
@@ -43,7 +44,7 @@ for (const box of $$('[data-set]')) {
 for (const box of $$('[data-notify]')) {
   box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
 }
-for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'bossLeadMinutes']) {
+for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct', 'bossLeadMinutes', 'reconnectMinutes']) {
   $('#' + id).addEventListener('change', (e) => dash.invoke('settings', { [id]: e.target.value }));
 }
 function urlNote(saved) {
