@@ -19,10 +19,11 @@
 //   { type:'card', mob, level }                  { type:'bag', items:[{ name, qty }] }
 //   { type:'chat', channel, from, guild, text, mine, backlog } { type:'info', text }
 //   { type:'death', by } { type:'revive' }     { type:'party', from, text }
-//   { type:'net', ping, online }               { type:'minimap', url }
+//   { type:'net', ping, online }              { type:'sold', item, qty, silver }
+//   { type:'market', id, item, price, basis }  { type:'premium', until } { type:'rareDrop', item }               { type:'minimap', url }
 //   { type:'buffs', list:[{ name, until, stacks }] }
 //   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[{x,y}], drops:[] }
-const { unpack } = require('msgpackr');
+const { unpack, Packr } = require('msgpackr');
 const DROP_NAMES = require('./drop-names');
 const { MOBS: MOB_TABLE, CATEGORY } = require('./mob-table');
 
@@ -89,6 +90,28 @@ function decodeFrame(buf) {
   return { type, message };
 }
 
+// Build the frame the game's own client sends for room.send("input", obj).
+// A fresh Packr per frame gives byte-identical output to the client (verified
+// against 422 recorded frames).
+function encodeInput(obj) {
+  const type = Buffer.from('input', 'utf8');
+  return Buffer.concat([Buffer.from([ROOM_DATA, 0xa0 | type.length]), type, new Packr().pack(obj)]);
+}
+
+// Market price the way the game's sell window estimates it: cheapest listing if
+// any, else the median of real sales in the last 14 days. Gold per unit.
+function marketPrice(guide, now = Date.now()) {
+  const listed = (guide.listed || []).map(Number).filter((n) => n > 0);
+  if (listed.length) return { price: Math.min(...listed), basis: 'listed', listed: listed.length };
+  const sales = (guide.sales || []).filter((x) => x && x.unit > 0 && now - x.t <= 14 * 864e5).map((x) => x.unit).sort((a, b) => a - b);
+  if (!sales.length) return null;
+  const m = sales.length >> 1;
+  return { price: sales.length % 2 ? sales[m] : (sales[m - 1] + sales[m]) / 2, basis: 'sales', sales: sales.length };
+}
+
+// Items that are everyday supplies, not loot worth a market check
+const SUPPLIES = /^(potion|mana_potion|.*_potion|arrow.*|bullet.*|throwing_.*|fly_wing|butterfly_wing|herb_leaf|raw_fish)$/;
+
 // Server payload -> list of plain events (mirrors the client's onServer)
 function serverEvents(message) {
   const one = (m) => (Array.isArray(m) && typeof m[0] === 'number' ? unpackEvent(m) : m);
@@ -146,7 +169,15 @@ const SNAPSHOT_JS = `(() => {
     window.__bdMiniAt = Date.now();
     try { const c = document.getElementById('minimap'); if (c && c.width) mini = c.toDataURL('image/png'); } catch (e) {}
   }
-  return { ready: true, sessionId, self, players, mobs, loots, mapId, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
+  const wf = document.querySelector('.wfill');
+  const dead = document.getElementById('deathoverlay');
+  const ui = {
+    auto: document.body.classList.contains('auto-on'), // the game's own flag while AUTO runs
+    sleeping: document.body.classList.contains('sleeping'),
+    weightPct: wf && wf.style.width ? parseFloat(wf.style.width) : null,
+    deadScreen: !!(dead && dead.offsetParent),
+  };
+  return { ready: true, sessionId, self, players, mobs, loots, mapId, ui, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
 })()`;
 
 // One per account: keeps what's needed to give events names and owners.
@@ -239,6 +270,7 @@ class BinderTownAdapter {
         break;
       case 'announcement': {
         const text = announcementText(e);
+        if (e.kind === 'epic' && this.name && e.name === this.name) out.push({ type: 'rareDrop', item: e.item, t: at });
         if (text) out.push({ type: 'chat', channel: 'system', from: '', text, backlog: false, t: at });
         break;
       }
@@ -255,6 +287,17 @@ class BinderTownAdapter {
       case 'tradeInvite': out.push({ type: 'info', text: `${e.from} ขอเทรด`, t: at }); break;
       case 'inv': this.inventory(e, at, out); break;
       case 'autoSold': out.push({ type: 'info', text: `ขายอัตโนมัติ ${pretty(e.itemId)} x${e.qty}`, t: at }); break;
+      case 'sold':
+        out.push({ type: 'sold', item: e.itemId === '*' ? 'ของหลายชิ้น' : pretty(e.itemId), qty: e.qty, silver: e.silver, t: at });
+        break;
+      case 'marketGuide': {
+        const p = marketPrice(e, at);
+        out.push({ type: 'market', id: e.itemId, item: pretty(e.itemId), ...(p || { price: null }), t: at });
+        break;
+      }
+      case 'pass':
+        if (typeof e.premiumUntil === 'number') out.push({ type: 'premium', until: e.premiumUntil, t: at });
+        break;
       case 'cardFound': out.push({ type: 'card', mob: pretty(e.mob), level: e.level, t: at }); break;
       case 'pong': {
         const sent = this.pings.get(e.t);
@@ -290,7 +333,7 @@ class BinderTownAdapter {
           const qty = i.qty - before;
           const drop = /^drop_([a-z0-9_]+)/.exec(i.id);
           const value = drop ? dropPrice(drop[1], this.mobLevels.get(drop[1])) * qty : 0;
-          out.push({ type: 'loot', item: pretty(i.id), qty, value, t: at });
+          out.push({ type: 'loot', id: i.id, item: pretty(i.id), qty, value, worthChecking: !drop && !SUPPLIES.test(i.id.replace(/[~#].*$/, '')), t: at });
         }
         this.inv.set(i.id, i.qty);
       }
@@ -299,9 +342,12 @@ class BinderTownAdapter {
     const merged = new Map();
     for (const [id, qty] of this.inv) {
       const name = pretty(id);
-      merged.set(name, (merged.get(name) || 0) + (Number(qty) || 0));
+      const m = merged.get(name) || { name, qty: 0, ids: [] };
+      m.qty += Number(qty) || 0;
+      m.ids.push({ id, qty: Number(qty) || 0 });
+      merged.set(name, m);
     }
-    out.push({ type: 'bag', items: [...merged].map(([name, qty]) => ({ name, qty })), t: at });
+    out.push({ type: 'bag', items: [...merged.values()], t: at });
   }
 
   // Page snapshot (SNAPSHOT_JS result) -> events
@@ -311,6 +357,7 @@ class BinderTownAdapter {
     this.sessionId = s.sessionId || this.sessionId;
     const me = s.self || {};
     if (me.uid) this.uid = String(me.uid);
+    if (me.name) this.name = String(me.name);
     this.mobs.clear();
     const monsters = [];
     for (const [id, m] of Object.entries(s.mobs || {})) {
@@ -327,7 +374,9 @@ class BinderTownAdapter {
       xp: num(me.xp), expPct: pct(s.xpText), jobPct: pct(s.jobText),
       silver: num(me.silver), gold: num(me.gold ?? me.gems),
       str: num(me.str), agi: num(me.agi), vit: num(me.vit), int: num(me.int), dex: num(me.dex), luk: num(me.luk),
-      map: s.mapId || undefined, dead: me.state === 'dead', premium: typeof me.premium === 'boolean' ? me.premium : undefined,
+      map: s.mapId || undefined, dead: me.state === 'dead',
+      auto: s.ui ? s.ui.auto ?? undefined : undefined, sleeping: s.ui ? s.ui.sleeping : undefined,
+      weightPct: s.ui && typeof s.ui.weightPct === 'number' ? s.ui.weightPct : undefined, premium: typeof me.premium === 'boolean' ? me.premium : undefined,
     };
     for (const k of Object.keys(self)) if (self[k] === undefined) delete self[k];
     out.push(self);
@@ -353,4 +402,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

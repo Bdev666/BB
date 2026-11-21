@@ -155,3 +155,20 @@ footer { color: var(--muted); font-size: 11px; text-align: center; padding: 0 0 
 .logs.chat-min .chat .mini-btn { margin: 0; writing-mode: vertical-rl; padding: 10px 2px; }
 .chat-new { color: var(--gold); font-size: 10px; }
 .update { background: var(--gold); color: #1a1300; border-color: var(--gold); font-weight: 700; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.ctl { font-size: 12px; padding: 5px 12px; }
+.ctl.on { background: #14532d; border-color: var(--ok); color: #bbf7d0; }
+.ctl.danger { border-color: var(--bad); color: var(--bad); }
+.ctl[disabled] { opacity: .45; cursor: default; }
+.item { cursor: default; }
+.item .acts { display: flex; gap: 4px; align-items: center; }
+.tiny { padding: 1px 6px; font-size: 11px; border-radius: 6px; }
+.sub .prem { color: var(--gold); }
+.sub .heavy { color: var(--bad); }
+.chat-send { display: flex; gap: 6px; margin-top: 6px; }
+.chat-send select, .chat-send input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
+.chat-send #chat-text { flex: 1; min-width: 0; }
+.chat-send #chat-to { width: 90px; }
+.logs.chat-min .chat .chat-send { display: none; }
+.tiny[disabled] { opacity: .35; cursor: not-allowed; }
+.logs:not(.chat-min) .chat .log-head { flex-wrap: wrap; }

@@ -9,7 +9,7 @@ const path = require('path');
 const { Store } = require('./store');
 const telegram = require('./telegram');
 const icons = require('./icons');
-const { BinderTownAdapter, SNAPSHOT_JS } = require('./game-adapter');
+const { BinderTownAdapter, SNAPSHOT_JS, encodeInput } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const updater = require('./updater');
@@ -44,6 +44,7 @@ function blankRuntime() {
     lastMsgAt: null,
     data: new AccountData(),
     adapter: new BinderTownAdapter(),
+    valuableWait: new Map(), // item name -> { qty } waiting for a market price
     demo: null,
     alerts: new Set(), // active problems, e.g. 'disconnect', 'idle'
     loadedAt: null,
@@ -95,7 +96,8 @@ function pushState() {
 // ---------- notifications ----------
 function notify(id, kind, text) {
   const s = store.data.settings;
-  if (s.notify[kind] === false) return;
+  const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind;
+  if (s.notify[group] === false) return;
   const g = rt(id);
   if (g.demo) return; // demo data never notifies
   // don't interrupt the account you're looking at right now
@@ -207,8 +209,26 @@ function openGame(id, opts = {}) {
     updateSleepBlocker();
     pushState();
   });
-  win.on('show', pushState);
-  win.on('hide', pushState);
+  // hidden/minimized: tell the page it's in the background (Page Visibility), so the game
+  // drops to its own background frame rate — the same thing it does in a hidden browser
+  // tab. AUTO keeps going; timers stay unthrottled by the app's switches.
+  const background = (on) => {
+    win.webContents.executeJavaScript(`(() => {
+      if (!window.__bdVis) {
+        window.__bdVis = { h: false };
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => window.__bdVis.h });
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (window.__bdVis.h ? 'hidden' : 'visible') });
+      }
+      if (window.__bdVis.h !== ${on}) { window.__bdVis.h = ${on}; document.dispatchEvent(new Event('visibilitychange')); }
+    })()`, true).catch(() => {});
+    pushState();
+  };
+  win.webContents.on('did-finish-load', () => { if (!win.isVisible() || win.isMinimized()) background(true); });
+  win.on('show', () => background(false));
+  win.on('restore', () => background(false));
+  win.on('hide', () => background(true));
+  win.on('minimize', () => background(true));
+  if (startHidden) background(true);
 
   const wc = win.webContents;
   wc.setWindowOpenHandler(({ url }) => {
@@ -371,6 +391,10 @@ function handleEvents(id, events) {
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
         break;
       case 'self':
+        if (typeof ev.weightPct === 'number') {
+          if (ev.weightPct >= s.weightFullPct && !g.alerts.has('weight')) setAlert(id, 'weight', true, `กระเป๋าหนัก ${Math.round(ev.weightPct)}% · ใกล้เต็ม เก็บของไม่ได้`);
+          else if (ev.weightPct < s.weightFullPct - 5 && g.alerts.has('weight')) setAlert(id, 'weight', false);
+        }
         if (ev.dead && !g.alerts.has('death')) setAlert(id, 'death', true, 'ตัวละครตาย');
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
         break;
@@ -381,6 +405,32 @@ function handleEvents(id, events) {
         break;
       case 'party':
         notify(id, 'party', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`);
+        break;
+      case 'card':
+        notify(id, 'card', `🃏 ได้การ์ด ${ev.mob}${ev.level ? ` Lv ${ev.level}` : ''}`);
+        break;
+      case 'rareDrop':
+        notify(id, 'rareDrop', `✨ ดรอปหายาก: ${ev.item}`);
+        break;
+      case 'loot':
+        // something that isn't a plain monster drop: ask the market what it's worth, notify if it's worth it
+        if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.item, { qty: ev.qty, at: Date.now() }); requestPrice(id, ev.id); }
+        break;
+      case 'market': {
+        // prices are the same for every account on the server
+        for (const [, other] of games) if (other !== g) other.data.ingest(ev);
+        const wait = g.valuableWait.get(ev.item);
+        if (wait) {
+          g.valuableWait.delete(ev.item);
+          if (ev.price && ev.price * wait.qty >= s.valuableMinGold) {
+            notify(id, 'valuable', `💰 ดรอป ${ev.item}${wait.qty > 1 ? ' x' + wait.qty : ''} · ราคาตลาด ~${Math.round(ev.price).toLocaleString('en-US')} G${wait.qty > 1 ? '/ชิ้น' : ''}`);
+          }
+        }
+        break;
+      }
+      case 'info':
+        if (/^เลเวลอัป/.test(ev.text)) notify(id, 'levelUp', `🎉 ${ev.text}`);
+        g.lastNotice = { text: ev.text, at: Date.now() };
         break;
       case 'bag':
         for (const it of ev.items || []) {
@@ -394,6 +444,80 @@ function handleEvents(id, events) {
       default: break;
     }
   }
+}
+
+// ---------- commands from the Dashboard ----------
+// Only what the player presses. Each goes out the way the game's own UI sends it:
+// a click on the game's own button, the game's own window.__game helpers, or the
+// same 'input' message the game client sends.
+function sendInput(id, obj) {
+  const g = rt(id);
+  if (!g.win || g.win.isDestroyed()) return Promise.resolve(false);
+  const b64 = encodeInput(obj).toString('base64');
+  return g.win.webContents.executeJavaScript(`window.__bdSend ? window.__bdSend(${JSON.stringify(b64)}) : false`, true).catch(() => false);
+}
+
+const priceAsked = new Map(); // itemId -> time
+function requestPrice(id, itemId, force = false) {
+  const last = priceAsked.get(itemId) || 0;
+  if (!force && Date.now() - last < 10 * 60 * 1000) return Promise.resolve(true);
+  priceAsked.set(itemId, Date.now());
+  return sendInput(id, { type: 'marketGuide', itemId });
+}
+
+async function gameCommand(id, cmd, arg) {
+  const r = await runCommand(id, cmd, arg);
+  if (!r.ok || !['sell', 'sellEtc', 'chat'].includes(cmd)) return r;
+  // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
+  const g = rt(id);
+  const sentAt = Date.now();
+  await new Promise((res) => setTimeout(res, 1500));
+  if (g.lastNotice && g.lastNotice.at >= sentAt) return { ok: false, error: g.lastNotice.text };
+  return r;
+}
+
+async function runCommand(id, cmd, arg) {
+  const g = rt(id);
+  if (!g.win || g.win.isDestroyed()) return { ok: false, error: 'เปิดเกมบัญชีนี้ก่อน' };
+  if (!g.inGame) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
+  const js = (code) => g.win.webContents.executeJavaScript(code, true).catch(() => false);
+  const click = (sel) => js(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.offsetParent || x.id === 'autobig'); if (!b) return false; b.click(); return true; })()`);
+  let ok = false;
+  switch (cmd) {
+    case 'auto': ok = await click('#autobig'); break;
+    case 'sleep': ok = await click('#autoeco'); break;
+    case 'respawn': ok = await click('#deathoverlay button'); break;
+    case 'sell': {
+      const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
+      if (!/^[\w~#.:+^|-]+$/.test(arg.itemId || '')) return { ok: false, error: 'ไอเทมไม่ถูกต้อง' };
+      ok = await js(`(window.__game && window.__game.sell) ? (window.__game.sell(${JSON.stringify(arg.itemId)}, ${qty}), true) : false`);
+      break;
+    }
+    case 'sellEtc': {
+      // every monster drop in the bag (ETC), one sell per stack, like the game's sell window
+      const inv = g.adapter.inv ? [...g.adapter.inv] : [];
+      const drops = inv.filter(([itemId, qty]) => /^drop_/.test(itemId) && qty > 0);
+      if (!drops.length) return { ok: false, error: 'ไม่มีของดรอปในกระเป๋า' };
+      for (const [itemId, qty] of drops) {
+        // eslint-disable-next-line no-await-in-loop
+        await js(`window.__game.sell(${JSON.stringify(itemId)}, ${qty}), true`);
+      }
+      ok = true;
+      break;
+    }
+    case 'price': ok = await requestPrice(id, arg.itemId, true); break;
+    case 'chat': {
+      const text = String(arg.text || '').trim().slice(0, 200);
+      const channel = ['world', 'map', 'party', 'guild', 'whisper', 'trade'].includes(arg.channel) ? arg.channel : 'map';
+      if (!text) return { ok: false, error: 'ไม่มีข้อความ' };
+      const msg = { type: 'chat', text, channel };
+      if (channel === 'whisper') { if (!arg.to) return { ok: false, error: 'ใส่ชื่อคนที่จะกระซิบ' }; msg.to = String(arg.to).trim(); }
+      ok = await sendInput(id, msg);
+      break;
+    }
+    default: return { ok: false, error: 'ไม่รู้จักคำสั่ง' };
+  }
+  return ok ? { ok: true } : { ok: false, error: 'เกมยังไม่พร้อม ลองใหม่อีกครั้ง' };
 }
 
 // ---------- demo mode ----------
@@ -427,6 +551,20 @@ function tick() {
   updateMemory();
   const s = store.data.settings;
   const now = Date.now();
+  for (const [id, g] of [...openGames(), ...[...games].filter(([, x]) => x.demo)]) {
+    // supplies about to run out at the current rate (potions, arrows ...)
+    for (const row of g.data.detail(now).bag) {
+      const key = 'potion:' + row.name;
+      if (row.minutesLeft != null && row.minutesLeft < s.potionMinutes) {
+        if (!g.alerts.has(key)) setAlert(id, key, true, `${row.name} จะหมดในอีก ~${Math.max(1, Math.round(row.minutesLeft))} นาที (เหลือ ${row.qty})`);
+      } else if (g.alerts.has(key)) setAlert(id, key, false);
+    }
+    // Premium running out
+    const until = g.data.premiumUntil;
+    const left = until ? until - now : 0;
+    if (left > 0 && left < 30 * 60 * 1000) { if (!g.alerts.has('premium')) setAlert(id, 'premium', true, `Premium จะหมดในอีก ${Math.ceil(left / 60000)} นาที`); }
+    else if (g.alerts.has('premium')) setAlert(id, 'premium', false);
+  }
   for (const [id, g] of openGames()) {
     if (g.status === 'maintenance') {
       // retry every 2 minutes so the account comes back by itself after maintenance
@@ -586,6 +724,9 @@ function registerIpc() {
   handle('settings', (patch) => {
     const s = store.data.settings;
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
+    if (patch.potionMinutes !== undefined) s.potionMinutes = Math.min(240, Math.max(1, Number(patch.potionMinutes) || 30));
+    if (patch.weightFullPct !== undefined) s.weightFullPct = Math.min(100, Math.max(50, Number(patch.weightFullPct) || 90));
     if (patch.ramLimitMB !== undefined) s.ramLimitMB = Math.min(8000, Math.max(500, Number(patch.ramLimitMB) || 1500));
     if (patch.gameUrl !== undefined) {
       const u = String(patch.gameUrl).trim();
@@ -626,6 +767,7 @@ function registerIpc() {
     telegram.send(s.telegram.token, s.telegram.chatId, 'BinderDash: ทดสอบการแจ้งเตือน').catch(() => {});
     return !!first;
   });
+  handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('item-watch', (name, limit) => {
     const w = store.data.settings.itemWatch;
     const n = Number(limit);

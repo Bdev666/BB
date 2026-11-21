@@ -19,7 +19,11 @@ const DEFAULTS = {
     notify: {
       disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
       crash: true, maintenance: true, sound: true,
+      card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
     },
+    valuableMinGold: 100,    // notify drops whose market value is at least this (Gold)
+    potionMinutes: 30,       // warn when supplies run out within this many minutes
+    weightFullPct: 90,       // warn when the bag is this full
     itemWatch: {},           // item name -> warn when count drops below this
     telegram: { token: '', chatId: '' },
     debugCapture: false,     // save raw game messages to a local file (to map the game's data)

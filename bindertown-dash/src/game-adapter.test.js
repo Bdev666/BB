@@ -47,11 +47,14 @@ assert.deepStrictEqual(ev, [{ type: 'kill', target: 'Cosmic Warden', exp: 18450,
 
 // inventory: full, then a delta with a pickup and a used potion
 ev = ad.incoming(frame('server', { type: 'inv', items: [{ id: 'yellow_potion', qty: 10 }, { id: 'refine_stone', qty: 2 }] }));
-assert.deepStrictEqual(ev[0].items, [{ name: 'Yellow Potion', qty: 10 }, { name: 'Refine Stone', qty: 2 }]);
+const strip = (items) => items.map(({ name, qty }) => ({ name, qty }));
+assert.deepStrictEqual(strip(ev[0].items), [{ name: 'Yellow Potion', qty: 10 }, { name: 'Refine Stone', qty: 2 }]);
+assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10 }]);
 ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'yellow_potion', qty: 9 }, { id: 'warden_shard', qty: 1 }], gone: ['refine_stone'] }));
 assert.deepStrictEqual(ev.map((e) => e.type), ['loot', 'bag']);
 assert.strictEqual(ev[0].item, 'Warden Shard');
-assert.deepStrictEqual(ev[1].items, [{ name: 'Yellow Potion', qty: 9 }, { name: 'Warden Shard', qty: 1 }]);
+assert.deepStrictEqual(strip(ev[1].items), [{ name: 'Yellow Potion', qty: 9 }, { name: 'Warden Shard', qty: 1 }]);
+assert.strictEqual(ev[0].worthChecking, true, 'non-drop, non-supply loot gets a market check');
 
 // chat, whisper, party invite, death, ping
 ev = ad.incoming(frame('server', [
@@ -75,12 +78,21 @@ d.ingest({ type: 'self', silver: 100, xp: 0, level: 1, expPct: 10 });
 d.ingest({ type: 'hit', target: 'Slime', dmg: 50, crit: true });
 d.ingest({ type: 'kill', target: 'Slime', exp: 10, job: 1, silver: 5 });
 d.ingest({ type: 'loot', item: 'Potion', qty: 2 });
+d.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 2, ids: [{ id: 'potion', qty: 2 }] }] });
 d.ingest({ type: 'chat', channel: 'world', from: 'A', text: 'hi' });
 d.ingest({ type: 'net', ping: 69.6, online: 7211 });
 const det = d.detail();
 assert.strictEqual(det.events.length, 3);
 assert.strictEqual(det.events[0].text, 'ตี Slime 50 (คริ)');
 assert.strictEqual(det.bag[0].name, 'Potion');
+// potion clock: 60 used in an hour with 30 left -> 30 minutes
+const d4 = new AccountData(); d4.startedAt = 1;
+d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 90 }], t: 2 });
+d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 30 }], t: 3600 * 1000 });
+d4.ingest({ type: 'market', item: 'Potion', price: 7, t: 3 });
+const pot = d4.bagRows(1)[0];
+assert.strictEqual(Math.round(pot.minutesLeft), 30);
+assert.strictEqual(pot.market, 7);
 assert.deepStrictEqual(det.net, { ping: 70, online: 7211 });
 assert.strictEqual(d.kills, 1);
 // level ETA from EXP % growth: 10% -> 20% in 1h, at 20% => 8h left
@@ -120,5 +132,17 @@ const r3 = d3.rates(3600 * 1000 + 1);
 assert.strictEqual(Math.round(r3.dropValuePerHour), 12);
 assert.strictEqual(r3.cards, 1);
 assert.strictEqual(Math.round(r3.incomePerHour), 72, '60 silver + 12 drop value in an hour');
+
+// commands are encoded exactly like the client's room.send("input", ...)
+const { encodeInput, marketPrice } = require('./game-adapter');
+const real = Buffer.from('0da5696e707574d4724092a474797065a174a470696e67cb40f0b37666666666', 'hex'); // recorded ping
+assert.ok(encodeInput({ type: 'ping', t: decodeFrame(real).message.t }).equals(real));
+// market: cheapest listing wins, else median of recent sales
+assert.deepStrictEqual(marketPrice({ listed: [120, 90], sales: [] }), { price: 90, basis: 'listed', listed: 2 });
+assert.strictEqual(marketPrice({ listed: [], sales: [{ t: Date.now(), unit: 10 }, { t: Date.now(), unit: 30 }, { t: Date.now(), unit: 20 }] }).price, 20);
+assert.strictEqual(marketPrice({ listed: [], sales: [{ t: 0, unit: 10 }] }), null, 'sales older than 14 days ignored');
+ev = ad.incoming(frame('server', [{ type: 'sold', itemId: 'drop_sprout', qty: 5, silver: 20 }, { type: 'marketGuide', itemId: 'warden_shard', listed: [300], sales: [] }, { type: 'pass', premiumUntil: 123 }]));
+assert.deepStrictEqual(ev.map((e) => e.type), ['sold', 'market', 'premium']);
+assert.strictEqual(ev[1].price, 300);
 
 console.log('game-adapter tests passed');

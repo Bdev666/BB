@@ -69,7 +69,7 @@
           <label class="switch"><input type="checkbox" data-notify="disconnect"><i></i></label>
         </div>
         <div class="row">
-          <div><b>ตัวละครตาย</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <div><b>ตัวละครตาย</b></div>
           <label class="switch"><input type="checkbox" data-notify="death"><i></i></label>
         </div>
         <div class="row">
@@ -77,11 +77,11 @@
           <label class="switch"><input type="checkbox" data-notify="idle"><i></i></label>
         </div>
         <div class="row">
-          <div><b>มีคนกระซิบ</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <div><b>มีคนกระซิบ</b></div>
           <label class="switch"><input type="checkbox" data-notify="whisper"><i></i></label>
         </div>
         <div class="row">
-          <div><b>มีคนชวนหรือขอเข้าปาร์ตี้</b><p class="todo">ใช้ได้เมื่อแมปข้อมูลเกมแล้ว</p></div>
+          <div><b>มีคนชวนหรือขอเข้าปาร์ตี้</b></div>
           <label class="switch"><input type="checkbox" data-notify="party"><i></i></label>
         </div>
         <div class="row">
@@ -95,6 +95,34 @@
         <div class="row">
           <div><b>เกมปิดปรับปรุง</b><p>ระหว่างปิดปรับปรุง โปรแกรมลองโหลดใหม่เองทุก 2 นาที</p></div>
           <label class="switch"><input type="checkbox" data-notify="maintenance"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🃏 ได้การ์ด</b><p>ทุกครั้งที่การ์ดมอนดรอป</p></div>
+          <label class="switch"><input type="checkbox" data-notify="card"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>💰 ดรอปของมีราคา</b><p>ของที่ไม่ใช่ดรอปมอนทั่วไป ถามราคาตลาดให้เอง แจ้งเมื่อมูลค่าตั้งแต่ <input type="number" id="valuableMinGold" min="0" step="10"> Gold ขึ้นไป</p></div>
+          <label class="switch"><input type="checkbox" data-notify="valuable"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>✨ ดรอปหายาก (ประกาศทั้งเซิร์ฟ)</b><p>เมื่อเซิร์ฟเวอร์ประกาศว่าตัวละครของคุณได้ของระดับ Epic ขึ้นไป</p></div>
+          <label class="switch"><input type="checkbox" data-notify="rareDrop"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🧪 ยา/ของใช้จะหมด</b><p>คำนวณจากอัตราที่ใช้จริง แจ้งเมื่อจะหมดภายใน <input type="number" id="potionMinutes" min="1" max="240"> นาที</p></div>
+          <label class="switch"><input type="checkbox" data-notify="potion"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🎒 กระเป๋าใกล้เต็ม</b><p>น้ำหนักตั้งแต่ <input type="number" id="weightFullPct" min="50" max="100"> % (เต็มแล้ว AUTO เก็บของไม่ได้)</p></div>
+          <label class="switch"><input type="checkbox" data-notify="weight"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>♛ Premium ใกล้หมด</b><p>30 นาทีก่อน Premium ของบัญชีหมด</p></div>
+          <label class="switch"><input type="checkbox" data-notify="premium"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🎉 เลเวลอัป</b></div>
+          <label class="switch"><input type="checkbox" data-notify="levelUp"><i></i></label>
         </div>
         <div class="row">
           <div><b>มีเสียง</b><p>ดังตาม volume ของ BinderDash ใน Volume mixer ของ Windows</p></div>

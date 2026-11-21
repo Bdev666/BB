@@ -25,6 +25,9 @@ function render(state) {
     $('#idleMinutes').value = s.idleMinutes;
     $('#disconnectSeconds').value = s.disconnectSeconds;
     $('#ramLimitMB').value = s.ramLimitMB;
+    $('#valuableMinGold').value = s.valuableMinGold;
+    $('#potionMinutes').value = s.potionMinutes;
+    $('#weightFullPct').value = s.weightFullPct;
     if (info) $('#gameUrl').value = s.gameUrl || info.defaultGameUrl;
   }
   $('#tg-on').hidden = !s.telegram.connected;
@@ -39,7 +42,7 @@ for (const box of $$('[data-set]')) {
 for (const box of $$('[data-notify]')) {
   box.addEventListener('change', () => dash.invoke('settings', { notify: { [box.dataset.notify]: box.checked } }));
 }
-for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB']) {
+for (const id of ['idleMinutes', 'disconnectSeconds', 'ramLimitMB', 'valuableMinGold', 'potionMinutes', 'weightFullPct']) {
   $('#' + id).addEventListener('change', (e) => dash.invoke('settings', { [id]: e.target.value }));
 }
 function urlNote(saved) {

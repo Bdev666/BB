@@ -48,6 +48,9 @@ class AccountData {
     this.hits = 0;
     this.dropValue = 0;       // NPC sell value of drops picked up
     this.cards = [];          // [{ t, mob, level }]
+    this.prices = new Map();  // item name -> { price (Gold), basis, at } from the market
+    this.premiumUntil = null; // ms epoch, 0 = no Premium
+    this.soldSilver = 0;
   }
 
   log(kind, text, t = Date.now()) {
@@ -94,14 +97,31 @@ class AccountData {
         b.gained += ev.qty || 1;
         break;
       }
-      case 'bag':
+      case 'bag': {
+        const seen = new Set();
         for (const it of ev.items || []) {
           const b = this.bagItem(it.name, t);
           if (b.firstQty === null) b.firstQty = Math.max(0, it.qty - b.gained); // loot already counted
           b.qty = it.qty;
+          if (it.ids) b.ids = it.ids;
           if (it.icon) b.icon = it.icon;
+          seen.add(it.name);
         }
+        for (const [name, b] of this.bag) if (!seen.has(name)) { b.qty = 0; b.ids = []; } // all gone (used up / sold)
         break;
+      }
+      case 'sold': {
+        const b = this.bag.get(ev.item);
+        if (b) b.sold += ev.qty || 0;
+        this.soldSilver += ev.silver || 0;
+        this.log('loot', `ขาย ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
+        break;
+      }
+      case 'market':
+        if (ev.item) this.prices.set(ev.item, { price: ev.price, basis: ev.basis, at: t });
+        break;
+      case 'premium': this.premiumUntil = ev.until; break;
+      case 'rareDrop': this.log('loot', `✨ ดรอปหายาก: ${ev.item}`, t); break;
       case 'chat':
         this.chat.push({ t, channel: ev.channel || 'world', from: ev.from || '', guild: ev.guild || '', to: ev.to || '', text: ev.text || '', mine: !!ev.mine });
         if (this.chat.length > MAX_CHAT) this.chat.splice(0, this.chat.length - MAX_CHAT);
@@ -120,9 +140,22 @@ class AccountData {
     }
   }
 
+  bagRows(hours) {
+    return [...this.bag.entries()].filter(([, b]) => b.qty > 0).map(([name, b]) => {
+      const usedPerHour = b.firstQty !== null ? Math.max(0, (b.firstQty + b.gained - b.qty - b.sold) / hours) : 0;
+      const p = this.prices.get(name);
+      return {
+        name, qty: b.qty, icon: b.icon, ids: b.ids, gainedPerHour: b.gained / hours, usedPerHour,
+        // how long the stack lasts at the current rate (potions, arrows ...), needs a few minutes of data
+        minutesLeft: usedPerHour > 0 && hours > 0.08 ? (b.qty / usedPerHour) * 60 : null,
+        market: p ? p.price : undefined,
+      };
+    });
+  }
+
   bagItem(name, t) {
     let b = this.bag.get(name);
-    if (!b) { b = { qty: 0, firstQty: null, firstAt: t, gained: 0, watchBelow: null }; this.bag.set(name, b); }
+    if (!b) { b = { qty: 0, firstQty: null, firstAt: t, gained: 0, sold: 0, ids: [], watchBelow: null }; this.bag.set(name, b); }
     return b;
   }
 
@@ -183,10 +216,8 @@ class AccountData {
       events: this.events.slice(-200),
       chat: this.chat.slice(-150),
       world: this.world,
-      bag: [...this.bag.entries()].map(([name, b]) => ({
-        name, qty: b.qty, icon: b.icon, gainedPerHour: b.gained / hours,
-        usedPerHour: b.firstQty !== null ? Math.max(0, (b.firstQty + b.gained - b.qty) / hours) : 0,
-      })),
+      premiumUntil: this.premiumUntil,
+      bag: this.bagRows(hours),
     };
   }
 }

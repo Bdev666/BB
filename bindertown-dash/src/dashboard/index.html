@@ -54,6 +54,7 @@
           <div class="attrs" id="d-attrs"></div>
           <div class="buffs" id="d-buffs"></div>
         </div>
+        <div class="controls" id="d-controls"></div>
         <div class="tiles" id="d-tiles"></div>
       </section>
 
@@ -66,6 +67,15 @@
           <div class="log-head"><h3>แชท</h3><div class="chips" id="chat-chips"></div>
             <button id="chat-toggle" class="mini-btn" title="ย่อ/ขยายช่องแชท">ย่อ ▸</button></div>
           <div class="lines" id="chat-lines"></div>
+          <form class="chat-send" id="chat-form" autocomplete="off">
+            <select id="chat-ch" title="ช่องแชท">
+              <option value="map">แมพ</option><option value="world">โลก</option><option value="party">ปาร์ตี้</option>
+              <option value="guild">กิลด์</option><option value="trade">เทรด</option><option value="whisper">กระซิบ</option>
+            </select>
+            <input id="chat-to" placeholder="ถึงใคร" maxlength="20">
+            <input id="chat-text" placeholder="พิมพ์ข้อความ แล้ว Enter" maxlength="200">
+            <button type="submit">ส่ง</button>
+          </form>
         </section>
       </div>
     </main>

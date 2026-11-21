@@ -6,7 +6,9 @@ const STATUS_TEXT = {
 const ALERT_TEXT = {
   disconnect: 'หลุดจากเซิร์ฟเวอร์', idle: 'ไม่มีข้อมูลจากเกม · AUTO อาจหยุด',
   crash: 'หน้าเกมค้าง/หยุดทำงาน', maintenance: 'เกมปิดปรับปรุง',
+  death: 'ตัวละครตาย', weight: 'กระเป๋าใกล้เต็ม', premium: 'Premium ใกล้หมด',
 };
+const alertText = (k) => ALERT_TEXT[k] || (k.startsWith('potion:') ? `${k.slice(7)} ใกล้หมด` : k.startsWith('item:') ? `${k.slice(5)} เหลือน้อย` : k);
 const EV_KINDS = [
   ['hit', 'โจมตี', 'var(--c-hit)', '⚔'], ['hurt', 'โดนตี', 'var(--c-hurt)', '🛡'],
   ['loot', 'เก็บของ', 'var(--c-loot)', '✦'], ['exp', 'EXP', 'var(--c-exp)', '★'], ['other', 'อื่น ๆ', 'var(--c-other)', 'ⓘ'],
@@ -62,7 +64,7 @@ function color(node, c) { node.style.setProperty('--cc', c); return node; }
 function rebuild(container, key, build) {
   if (container.dataset.key === key) return;
   container.dataset.key = key;
-  container.replaceChildren(...build());
+  container.replaceChildren(...build().flat().filter((n) => n != null && n !== false));
 }
 
 // ---------- account list ----------
@@ -81,7 +83,7 @@ function accountCard(a) {
     el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : '', s.ping != null ? ` · ${s.ping} ms` : ''),
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
-  a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map((k) => ALERT_TEXT[k] || k).join(' · ')) : null);
+  a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map(alertText).join(' · ')) : null);
 }
 
 function startRename(a, node) {
@@ -147,6 +149,8 @@ function renderProfile(a) {
     s.silver != null ? el('span', {}, '  Silver ', el('b', {}, short(s.silver))) : null,
     s.gold != null ? el('span', {}, '  Gold ', el('b', {}, num(s.gold))) : null,
     d.net && d.net.ping != null ? el('span', { class: 'ping' }, `  ${d.net.ping} ms`) : null,
+    d.premiumUntil > Date.now() ? el('span', { class: 'prem', title: 'Premium' }, `  ♛ ${dur(d.premiumUntil - Date.now())}`) : null,
+    typeof s.weightPct === 'number' ? el('span', { class: s.weightPct >= 90 ? 'heavy' : '', title: 'น้ำหนักกระเป๋า' }, `  🎒 ${Math.round(s.weightPct)}%`) : null,
     s.name ? null : a.status === 'closed' ? 'กด "เปิดเกม" เพื่อเริ่ม' : 'ยังอ่านข้อมูลตัวละครไม่ได้',
   ].filter(Boolean));
   rebuild($('#d-buttons'), `${a.id}:${a.status}:${a.hidden}`, () => profileButtons(a));
@@ -286,42 +290,87 @@ function renderMap() {
   if (w.self) { dot(w.self, 9, '#ffb54766'); dot(w.self, 5.5, '#ffffff'); ctx.strokeStyle = '#ffb547'; ctx.lineWidth = 2.5; ctx.stroke(); }
 }
 
-let watchEditing = null; // item name whose limit is being edited
+let watchEditing = null; // item name whose limit / sell amount is being typed
 function renderBag() {
   if (watchEditing) return;
   const watch = (state && state.settings.itemWatch) || {};
-  const items = ((detail && detail.bag) || []).slice().sort((a, b) => b.qty - a.qty);
-  $('#bag').replaceChildren(...(items.length ? items.map((it) => {
-    const limit = watch[it.name];
-    const low = limit != null && it.qty < limit;
-    const row = el('div', { class: 'item' + (low ? ' low' : ''), title: 'กดเพื่อตั้งเตือนใกล้หมด' },
-      el('div', { class: 'ic' }, it.name.slice(0, 1)),
-      el('div', { class: 'nm' }, it.name, el('small', {},
-        [limit != null ? `เตือนเมื่อ < ${num(limit)}` : null,
-          it.usedPerHour > 0 ? `ใช้ ${short(it.usedPerHour)}/ชม.` : null,
-          it.gainedPerHour > 0 ? `เก็บได้ ${short(it.gainedPerHour)}/ชม.` : null]
-          .filter(Boolean).join(' · ') || ' ')),
-      el('div', { class: 'q' }, num(it.qty)));
-    row.addEventListener('click', () => editWatch(row, it.name, limit));
-    return row;
-  }) : [el('div', { class: 'empty' }, 'ยังไม่มีข้อมูลกระเป๋า')]));
+  const a = state && state.accounts.find((x) => x.id === selected);
+  const live = !!a && a.status === 'online';
+  const items = ((detail && detail.bag) || []).slice().sort((x, y) => y.qty - x.qty);
+  const key = JSON.stringify([live, canSell(), watch, items.map((it) => [it.name, it.qty, Math.round(it.usedPerHour), Math.round(it.gainedPerHour), it.minutesLeft && Math.round(it.minutesLeft), it.market])]);
+  rebuild($('#bag'), key, () => (items.length ? items.map((it) => bagRow(it, watch[it.name], live)) : [el('div', { class: 'empty' }, 'ยังไม่มีข้อมูลกระเป๋า')]));
 }
 
-function editWatch(row, name, limit) {
+function bagRow(it, limit, live) {
+  const low = (limit != null && it.qty < limit) || (it.minutesLeft != null && it.minutesLeft < ((state && state.settings.potionMinutes) || 30));
+  const id = it.ids && it.ids.length === 1 ? it.ids[0].id : null; // one stack: can sell / price it
+  const info = [
+    it.minutesLeft != null ? `หมดใน ~${dur(it.minutesLeft * 60000)}` : null,
+    it.usedPerHour > 0 ? `ใช้ ${short(it.usedPerHour)}/ชม.` : null,
+    it.gainedPerHour > 0 ? `เก็บได้ ${short(it.gainedPerHour)}/ชม.` : null,
+    it.market != null ? `ตลาด ~${short(it.market)} G` : null,
+    limit != null ? `เตือน < ${num(limit)}` : null,
+  ].filter(Boolean).join(' · ');
+  const row = el('div', { class: 'item' + (low ? ' low' : '') },
+    el('div', { class: 'ic' }, it.name.slice(0, 1)),
+    el('div', { class: 'nm' }, it.name, el('small', {}, info || ' ')),
+    el('div', { class: 'q' }, num(it.qty)),
+    el('div', { class: 'acts' },
+      el('button', { class: 'tiny', title: 'ตั้งเตือนเมื่อเหลือน้อยกว่า…', onclick: () => editAmount(row, it.name, 'watch', limit) }, '🔔'),
+      live && id ? el('button', { class: 'tiny', title: 'ดูราคาตลาด (Gold)', onclick: () => cmd('price', { itemId: id }, 'กำลังถามราคาตลาด…') }, 'G?') : null,
+      live && id ? el('button', { class: 'tiny', disabled: canSell() ? null : '', title: canSell() ? 'ขายให้ NPC' : SELL_RULE, onclick: () => editAmount(row, it.name, 'sell', it.qty, id) }, 'ขาย') : null));
+  return row;
+}
+
+// inline number box on a bag row: alert limit or how many to sell
+function editAmount(row, name, mode, value, itemId) {
   watchEditing = name;
-  const input = el('input', { type: 'number', min: '0', class: 'watch', placeholder: 'จำนวน', value: limit != null ? String(limit) : '' });
-  const done = (save) => {
+  const input = el('input', { type: 'number', min: '0', class: 'watch', value: value != null ? String(value) : '' });
+  const done = async (save) => {
     if (!watchEditing) return;
     watchEditing = null;
-    if (save) dash.invoke('item-watch', name, input.value === '' || input.value === '0' ? null : input.value);
+    if (save && mode === 'watch') dash.invoke('item-watch', name, input.value === '' || input.value === '0' ? null : input.value);
+    if (save && mode === 'sell' && Number(input.value) > 0) {
+      if (confirm(`ขาย ${name} x${input.value} ให้ NPC?`)) await cmd('sell', { itemId, qty: Number(input.value) }, `ขาย ${name}…`);
+    }
+    $('#bag').dataset.key = '';
     renderBag();
   };
-  input.addEventListener('click', (e) => e.stopPropagation());
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
-  input.addEventListener('blur', () => done(true));
-  row.lastChild.replaceWith(el('div', { class: 'q' }, el('small', { class: 'hint' }, 'เตือนเมื่อน้อยกว่า '), input));
+  input.addEventListener('blur', () => done(mode === 'watch'));
+  row.querySelector('.acts').replaceWith(el('div', { class: 'acts' }, el('small', { class: 'hint' }, mode === 'sell' ? 'ขายกี่ชิ้น ' : 'เตือนเมื่อ < '), input));
   input.focus();
   input.select();
+}
+
+// ---------- game controls ----------
+async function cmd(name, arg, pending) {
+  if (pending) showBanner(pending);
+  const r = await dash.invoke('game-cmd', selected, name, arg);
+  if (!r || !r.ok) showBanner((r && r.error) || 'ทำไม่สำเร็จ');
+  else if (pending) setTimeout(() => { $('#banner').hidden = true; }, 1200);
+  refreshDetail();
+  return r;
+}
+
+// the game's rule: selling from anywhere (HUD) is Premium only, otherwise at an NPC shop in town
+const SELL_RULE = 'ขายจากระยะไกลได้เฉพาะบัญชี Premium (กฎของเกม) · ไม่มี Premium ต้องไปขายกับร้านค้า NPC ในเมือง';
+function canSell() { return !!(detail && detail.stats && detail.stats.premium); }
+
+function renderControls(a) {
+  const s = (detail && detail.stats) || {};
+  const live = a.status === 'online';
+  const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
+  const etcQty = etc.reduce((t, it) => t + it.qty, 0);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium]);
+  rebuild($('#d-controls'), key, () => (live ? [
+    el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
+    el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
+    s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
+    el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
+      if (confirm(`ขายของดรอปทั้งหมด ${num(etcQty)} ชิ้นให้ NPC?`)) cmd('sellEtc', {}, 'กำลังขายของดรอป…');
+    } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`),
+  ] : [el('span', { class: 'hint' }, a.status === 'closed' ? 'เปิดเกมเพื่อใช้ปุ่มควบคุม' : 'ปุ่มควบคุมใช้ได้เมื่อเข้าเกมแล้ว')]));
 }
 
 // ---------- top level ----------
@@ -358,6 +407,7 @@ function renderNow() {
   $('#detail').hidden = !a;
   if (a) {
     renderProfile(a);
+    renderControls(a);
     renderLogs();
     renderMap();
     renderBag();
@@ -381,6 +431,17 @@ function showBanner(text) {
 }
 
 $('#update-btn').addEventListener('click', () => dash.invoke('update-now'));
+// send chat from the Dashboard
+function syncChatTo() { $('#chat-to').hidden = $('#chat-ch').value !== 'whisper'; }
+$('#chat-ch').addEventListener('change', syncChatTo);
+$('#chat-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = $('#chat-text').value.trim();
+  if (!text) return;
+  const r = await cmd('chat', { channel: $('#chat-ch').value, text, to: $('#chat-to').value });
+  if (r && r.ok) $('#chat-text').value = '';
+});
+syncChatTo();
 // double-click an account = go to its game (opens it if closed)
 $('#accounts').addEventListener('dblclick', (e) => {
   const card = e.target.closest('.acc');
