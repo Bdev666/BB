@@ -13,6 +13,7 @@
     <a href="#notify" data-tab="notify">แจ้งเตือน</a>
     <a href="#telegram" data-tab="telegram">Telegram</a>
     <a href="#data" data-tab="data">ข้อมูล</a>
+    <a href="#test" data-tab="test">ทดสอบระบบ</a>
     <a href="#about" data-tab="about">เกี่ยวกับ</a>
   </nav>
 
@@ -239,6 +240,34 @@
     </section>
 
     <!-- เกี่ยวกับ -->
+    <section data-page="test">
+      <div class="card">
+        <h2>🧪 ทดสอบระบบกับเกมจริง</h2>
+        <p class="lead">ไล่เช็คทุกระบบกับตัวละครที่เข้าเกมอยู่ ได้แก่ การอ่านข้อมูลเกม ของล็อค ราคาตลาด สิทธิ์ตลาด ยา เกิดที่เดิม และ DPS ที่คาดเทียบกับของจริง ไม่ย่อย ไม่ขาย และไม่ลงขายอะไร ผลเก็บเป็นไฟล์ในเครื่องเพื่อใช้พัฒนาต่อ</p>
+        <div class="row">
+          <div><b>บัญชีที่จะทดสอบ</b><p>ต้องเข้าเกมอยู่</p></div>
+          <select id="st-acc"></select>
+        </div>
+        <div class="row">
+          <div><b>อนุญาตให้ใช้เงินเล็กน้อย</b><p>ซื้อยา 1 ขวดจากร้าน เพื่อเช็คการซื้อผ่าน HUD (Premium) หรือการซื้อตอนยืนใกล้ร้าน</p></div>
+          <label class="switch"><input type="checkbox" id="st-spend"><i></i></label>
+        </div>
+        <div class="row">
+          <button id="st-run" class="primary">เริ่มทดสอบ</button>
+          <button id="st-open">เปิดโฟลเดอร์ผลทดสอบ</button>
+        </div>
+        <div id="st-out" class="st-out"></div>
+      </div>
+      <div class="card">
+        <h2>📊 เก็บสถิติไว้ใช้ปรับปรุง</h2>
+        <div class="row">
+          <div><b>บันทึกสถิติทุก 10 นาที</b><p>ฆ่า/ชม. Silver/ชม. การใช้ยา การตาย การซื้อเอง และราคาตลาดที่ถามแล้วไม่ได้คำตอบ เก็บที่ logs/stats ในเครื่องนี้เท่านั้น ไม่ส่งออกไปที่ไหน</p></div>
+          <label class="switch"><input type="checkbox" data-set="statsLog"><i></i></label>
+        </div>
+        <div id="st-stats" class="st-out"></div>
+      </div>
+    </section>
+
     <section data-page="about">
       <div class="card">
         <h2>เกี่ยวกับ</h2>

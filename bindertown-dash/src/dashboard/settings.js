@@ -124,3 +124,44 @@ const gh = document.getElementById('open-gh'); if (gh) gh.addEventListener('clic
     const save = () => dash.invoke('settings', { autoBuy: { on: on.checked, rounds: Number(rd.value) || 3, keepSilver: kp ? Number(kp.value) || 0 : 5000 } });
     on.addEventListener('change', save); rd.addEventListener('change', save); if (kp) kp.addEventListener('change', save);
   } }
+
+// ---------- system test ----------
+{ const sel = document.getElementById('st-acc'); const out = document.getElementById('st-out'); const run = document.getElementById('st-run');
+  const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const icon = (s) => (s.skipped ? '⏭' : !s.ok ? '❌' : s.warn ? '⚠️' : '✅');
+  const line = (s) => `<div class="st-row"><span>${icon(s)}</span><b>${esc(s.step)}</b><em>${esc(s.detail)}</em><small>${(s.ms / 1000).toFixed(1)} วิ</small></div>`;
+  const fill = () => dash.invoke('state').then((st) => {
+    const on = (st.accounts || []).filter((a) => a.status === 'online' && !a.demo);
+    const keep = sel.value;
+    sel.innerHTML = on.length ? on.map((a) => `<option value="${a.id}">${esc((a.stats && a.stats.name) || a.name)}</option>`).join('') : '<option value="">(ไม่มีบัญชีที่เข้าเกมอยู่)</option>';
+    if (keep && on.some((a) => String(a.id) === keep)) sel.value = keep;
+    run.disabled = !on.length;
+  }).catch(() => {});
+  if (sel && run) {
+    fill(); setInterval(fill, 10000);
+    if (dash.onSelftest) dash.onSelftest((s) => { if (run.dataset.busy) out.insertAdjacentHTML('beforeend', line(s)); });
+    run.addEventListener('click', async () => {
+      const spend = document.getElementById('st-spend').checked;
+      if (spend && !confirm('ทดสอบจะซื้อยา 1 ขวดจากร้าน (เสีย Silver เล็กน้อย) ตกลงไหม?')) return;
+      run.disabled = true; run.dataset.busy = '1'; out.innerHTML = '<p>กำลังทดสอบ… (ประมาณ 20–40 วิ)</p>';
+      try {
+        const r = await dash.invoke('selftest', Number(sel.value), { allowSpend: spend });
+        if (!r || !r.ok) { out.innerHTML = `<p>❌ ${esc(r && r.error || 'ทดสอบไม่ได้')}</p>`; return; }
+        const n = (f) => r.steps.filter(f).length;
+        out.innerHTML = `<p><b>ผ่าน ${n((s) => s.ok && !s.warn && !s.skipped)}</b> · เตือน ${n((s) => s.warn)} · ไม่ผ่าน ${n((s) => !s.ok)} · ข้าม ${n((s) => s.skipped)} · ${(r.ms / 1000).toFixed(0)} วิ</p>`
+          + r.steps.map(line).join('')
+          + (r.improve.length ? `<h3>ควรปรับปรุง</h3><ul>${r.improve.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p>ไม่พบเรื่องที่ต้องปรับปรุง</p>')
+          + `<p class="mono small">บันทึกที่ ${esc(r.file)}</p>`;
+      } catch (err) { out.innerHTML = `<p>❌ ${esc(err.message)}</p>`; }
+      finally { delete run.dataset.busy; run.disabled = false; stats(); }
+    });
+    document.getElementById('st-open').addEventListener('click', () => dash.invoke('open-selftest'));
+  }
+  const box = document.getElementById('st-stats');
+  const stats = () => box && dash.invoke('stats-summary', 7).then((s) => {
+    if (!s || !s.rows) { box.innerHTML = '<p>ยังไม่มีสถิติ (บันทึกทุก 10 นาทีที่มีตัวละครออนไลน์)</p>'; return; }
+    box.innerHTML = `<p>7 วันล่าสุด ${s.rows} บันทึก</p><table class="st-tab"><tr><th>บัญชี</th><th>อาชีพ</th><th>ฆ่า/ชม.</th><th>Silver/ชม.</th><th>รายได้/ชม.</th><th>ราคาไม่ตอบ</th><th>ซื้อยาเอง</th><th>ตาย</th></tr>`
+      + s.accounts.map((a) => `<tr><td>${a.acc}</td><td>${esc(a.job)} ${a.level || ''}</td><td>${a.killsH}</td><td>${a.silverH.toLocaleString('en-US')}</td><td>${a.incomeH.toLocaleString('en-US')}</td><td>${a.last.priceMissed || 0}/${a.last.priceAsked || 0}</td><td>${a.last.autoBuy || 0}${a.last.autoBuyFail ? ` (พลาด ${a.last.autoBuyFail})` : ''}</td><td>${a.last.deaths || 0}</td></tr>`).join('') + '</table>';
+  }).catch(() => {});
+  stats();
+}

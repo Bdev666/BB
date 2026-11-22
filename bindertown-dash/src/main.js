@@ -35,6 +35,15 @@ let tray = null;
 let quitting = false;
 let sleepBlocker = null;
 const games = new Map(); // accountId -> runtime state
+let labMeRef = null;
+const selftest = require('./selftest').create({
+  games, log, store: () => store, version: () => app.getVersion(),
+  salvageable: (...a) => salvageable(...a), tradableGear: (...a) => tradableGear(...a), priceGear: (...a) => priceGear(...a),
+  salvageOpts: (...a) => salvageOpts(...a), salvageVerdict: (...a) => salvageVerdict(...a), sendInput: (...a) => sendInput(...a),
+  runCommand: (...a) => runCommand(...a), MARKET_FILTER, labMe: (id) => (labMeRef ? labMeRef(id) : null),
+  labPredict: (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`),
+  onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
+});
 
 // ---------- runtime state ----------
 function blankRuntime() {
@@ -437,11 +446,13 @@ function handleEvents(id, events) {
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
         break;
       case 'death':
+        selftest.count(id, 'deaths');
         setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย');
         backupRespawn(id);
         break;
       case 'revive':
         setAlert(id, 'death', false); g.respawnTries = 0;
+        if (ev.here) selftest.count(id, 'autoRespawned');
         if (ev.here) { g.autoRespawns = (g.autoRespawns || 0) + 1; log.info(`acc ${id}: respawned in place by the game's Auto Respawn (-${ev.fee} G)`); }
         break;
       case 'chat':
@@ -487,7 +498,7 @@ function handleEvents(id, events) {
           const i = g.priceAsks.findIndex((a) => a.id === ev.id);
           const ask = i >= 0 ? g.priceAsks.splice(i, 1)[0] : g.priceAsks.shift();
           if (ask && ask.id !== ev.id && Date.now() - ask.at < 8000) {
-            askedId = ask.id;
+            askedId = ask.id; selftest.count(id, 'priceRemapped');
             const copy = { ...ev, id: ask.id };
             for (const [, o] of games) o.data.ingest(copy);
           }
@@ -906,6 +917,7 @@ async function priceGear(id, ids) {
     await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
     missing = missing.filter((x) => !g.data.itemPrices.has(x) || g.data.itemPrices.get(x).at < t0 - 1000);
   }
+  selftest.count(id, 'priceAsked', todo.length); selftest.count(id, 'priceMissed', missing.length);
   if (missing.length) log.info(`acc ${id}: market gave no price for ${missing.length} piece(s) after 3 tries`);
   return todo.length;
 }
@@ -1099,6 +1111,7 @@ async function autoBuyPotion(id, g, row) {
   const qty = 99 * Math.max(1, Math.min(10, Number(ab.rounds) || 3));
   const r = await runCommand(id, 'buy', { itemId: pid, qty, keepSilver: Math.max(0, Number(ab.keepSilver ?? 5000)) });
   log.info(`acc ${id}: auto-buy ${pid} x${qty} -> ${r.ok ? 'got ' + r.bought : r.error}`);
+  selftest.count(id, r.ok ? 'autoBuy' : 'autoBuyFail'); if (r.ok) selftest.count(id, 'autoBuyQty', r.bought);
   if (r.ok) { setAlert(id, 'potion:' + row.name, false); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
   else if (!g.autoBuyFailAt || Date.now() - g.autoBuyFailAt > 60 * 60 * 1000) { g.autoBuyFailAt = Date.now(); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`); } // at most once an hour
 }
@@ -1132,6 +1145,7 @@ function backupRespawn(id, delay = 4000) {
     if (!g.win || g.win.isDestroyed()) return;
     if (!(await liveDead(id))) return; // the game's own Auto Respawn already got it up
     const r = await gameCommand(id, 'respawn', { hereOnly: true });
+    selftest.count(id, 'respawnPress'); if (r.ok) selftest.count(id, 'respawnOk');
     log.info(`acc ${id}: still dead after ${delay / 1000} s -> pressed respawn here (${r.ok ? 'ok' : r.error})`);
     g.respawnTries = (g.respawnTries || 0) + 1;
     if (g.respawnTries < 4) backupRespawn(id, 3000); // check again: the button can be busy for 2 s
@@ -1587,7 +1601,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
@@ -1668,6 +1682,7 @@ function registerIpc() {
     const mobs = {}; for (const h of m.hits) if (h.mob) mobs[h.mob] = (mobs[h.mob] || 0) + 1;
     const total = mine.reduce((t, h) => t + h.dmg, 0);
     const pet = m.hits.filter((h) => h.pet).reduce((t, h) => t + h.dmg, 0);
+    if (done && m.first) g.lastMeasure = { dps: secs ? Math.round(total / secs) : 0, secs, at: Date.now() };
     return { done, started: !!m.first, secs: Math.round(secs * 10) / 10, sec: m.sec, total, pet, dps: secs ? Math.round(total / secs) : 0, hits: mine.length, crits: mine.filter((h) => h.crit).length, perSkill: per, mobs };
   });
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
@@ -1722,7 +1737,7 @@ function registerIpc() {
   handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
   handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
   handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(p)})`));
-  handle('lab-me', async (id) => {
+  const labMe = async (id) => {
     const g = games.get(id);
     if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;
     try {
@@ -1741,7 +1756,12 @@ function registerIpc() {
       if (g.adapter.inv) for (const [k, q] of g.adapter.inv) addCard(k, q || 1);
       return { ...me, c2: c2info.path, c2info, loadout: g.adapter.loadout, ownedCards: Object.values(owned), name: (account(id) || {}).name };
     } catch { return null; }
-  });
+  };
+  handle('lab-me', labMe);
+  labMeRef = labMe;
+  handle('selftest', (id, opts) => selftest.runSelfTest(id, opts || {}));
+  handle('stats-summary', (days) => selftest.statsSummary(days || 7));
+  handle('open-selftest', () => { const d = path.join(log.dir(), 'selftest'); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
   handle('salvage-preview', async (rarities, o) => {
     const opt = salvageOpts(o);
     const list = openGames().filter(([, g]) => g.inGame && !g.demo);
@@ -1835,6 +1855,7 @@ app.whenReady().then(() => {
     },
   });
   setInterval(tick, 15 * 1000);
+  setInterval(() => selftest.statsTick(), 10 * 60 * 1000);
   setInterval(demoTick, 500);
   setInterval(pollSnapshots, 1000);
   setInterval(bossTick, 15 * 1000);
