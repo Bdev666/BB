@@ -447,13 +447,15 @@ function handleEvents(id, events) {
         break;
       case 'death':
         if (g.lastDeathAt && Date.now() - g.lastDeathAt < 1500) break; // the same death, second message
-        g.lastDeathAt = Date.now();
+        g.lastDeathAt = Date.now(); g.deadSince = g.lastDeathAt;
         selftest.count(id, 'deaths');
         deathLoopCheck(id, g);
         setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย');
         backupRespawn(id);
         break;
       case 'revive':
+        if (g.respawnTries) selftest.count(id, 'respawnOk');
+        if (g.deadSince) { selftest.count(id, 'revives'); selftest.count(id, 'deadMs', Date.now() - g.deadSince); g.deadSince = 0; } // how long it lay dead
         setAlert(id, 'death', false); g.respawnTries = 0;
         if (ev.here) selftest.count(id, 'autoRespawned');
         if (ev.here) { g.autoRespawns = (g.autoRespawns || 0) + 1; log.info(`acc ${id}: respawned in place by the game's Auto Respawn (-${ev.fee} G)`); }
@@ -1149,6 +1151,8 @@ function deathLoopCheck(id, g) {
   const now = Date.now();
   g.deathTimes = (g.deathTimes || []).filter((t) => now - t < 120000); g.deathTimes.push(now);
   if (g.deathTimes.length < 4 || (g.respawnPausedUntil && now < g.respawnPausedUntil)) return;
+  // boss fights: dying often is part of it and getting up at once matters most (world boss = free)
+  if ((g.fight && now - g.fight.last < 30000) || (g.freeRespawnAt && now - g.freeRespawnAt < 5 * 60 * 1000)) return;
   g.respawnPausedUntil = now + 10 * 60 * 1000; g.deathTimes = [];
   selftest.count(id, 'deathLoops');
   if (g.win && !g.win.isDestroyed()) g.win.webContents.executeJavaScript(`(() => { const c = document.getElementById('au-respawn'); if (c && c.checked && !c.disabled) { c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true; } return false; })()`, true).catch(() => {});
@@ -1169,7 +1173,14 @@ async function ensureAutoRespawn(id) {
   if (!r.ok && r.why === 'premium' && !g.autoRespawnWarned) { g.autoRespawnWarned = true; log.info(`acc ${id}: Auto Respawn needs Premium`); }
   if (before !== r.on) pushState();
 }
-function backupRespawn(id, delay = 4000) {
+// Press the death screen's "respawn here" button right away. The game's own Auto Respawn waits about
+// 3 s and only works in field maps with AUTO on; boss maps / world bosses never get up by themselves
+// (there the button is free). Same price as the game's own (5,000 G in fields, free at world bosses).
+const RESPAWN_HERE_JS = `(() => { const o = document.getElementById('deathoverlay'); if (!o || getComputedStyle(o).display === 'none') return { dead: false };
+  const h = document.getElementById('drespawnhere'); if (!h) return { dead: true, none: true };
+  const free = /ฟรี|free/i.test(h.textContent || ''); if (h.disabled) return { dead: true, disabled: true, free, why: h.title || '' };
+  h.click(); return { dead: true, clicked: true, free }; })()`;
+function backupRespawn(id, delay = 400) {
   if (store.data.settings.autoRespawnHere === false) return;
   const g = games.get(id); if (!g || g.demo || g.respawnPending) return;
   g.respawnPending = true;
@@ -1177,12 +1188,15 @@ function backupRespawn(id, delay = 4000) {
     g.respawnPending = false;
     if (!g.win || g.win.isDestroyed()) return;
     if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
-    if (!(await liveDead(id))) return; // the game's own Auto Respawn already got it up
-    const r = await gameCommand(id, 'respawn', { hereOnly: true });
-    selftest.count(id, 'respawnPress'); if (r.ok) selftest.count(id, 'respawnOk');
-    log.info(`acc ${id}: still dead after ${delay / 1000} s -> pressed respawn here (${r.ok ? 'ok' : r.error})`);
+    let r; try { r = await g.win.webContents.executeJavaScript(RESPAWN_HERE_JS, true); } catch { r = null; }
+    if (!r || !r.dead) { g.respawnTries = 0; return; } // up already
+    if (r.free) g.freeRespawnAt = Date.now();
+    if (r.clicked && !g.respawnTries) {
+      selftest.count(id, 'respawnPress'); // once per death (it may click again while the button is busy)
+      log.info(`acc ${id}: dead -> pressed respawn here${r.free ? ' (free)' : ''} after ${((Date.now() - (g.lastDeathAt || Date.now())) / 1000).toFixed(1)} s`);
+    } else if (r.disabled && !g.respawnTries) log.info(`acc ${id}: respawn here not possible: ${r.why || 'button off'}`);
     g.respawnTries = (g.respawnTries || 0) + 1;
-    if (g.respawnTries < 4) backupRespawn(id, 3000); // check again: the button can be busy for 2 s
+    if (g.respawnTries < 10) backupRespawn(id, 700); // still on the death screen: try again (the button is busy ~2 s after a click)
     else g.respawnTries = 0;
   }, delay);
 }
@@ -1196,7 +1210,7 @@ function autoRespawnTick() {
     if (!g.inGame || g.demo) continue;
     ensureAutoRespawn(id);
     // a death the event stream missed: look at the screen too
-    liveDead(id).then((dead) => { if (dead) backupRespawn(id, 1000); else g.respawnTries = 0; });
+    liveDead(id).then((dead) => { if (dead) backupRespawn(id, 0); else if (!g.respawnPending) g.respawnTries = 0; });
   }
 }
 

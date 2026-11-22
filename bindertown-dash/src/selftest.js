@@ -171,8 +171,8 @@ function create(deps) {
       const c = counters.get(id) || {};
       let detail = s.box ? (s.disabled ? 'ตัวเลือกของเกมล็อคอยู่ (ต้อง Premium)' : s.checked ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมติ๊กอยู่ ✓' : 'ตัวเลือกของเกมยังไม่ติ๊ก') : 'ไม่พบตัวเลือกในหน้าเกม (เกมอาจเปลี่ยน)';
       detail += ` · หน้าจอตาย${s.overlay ? 'เจอ' : 'ไม่เจอ'} · ตั้งค่าโปรแกรม${on ? 'เปิด' : 'ปิด'}`;
-      if (c.deaths) detail += ` · ตายรอบนี้ ${c.deaths} · เกม respawn ให้ ${c.autoRespawned || 0} · โปรแกรมกดเอง ${c.respawnPress || 0} (สำเร็จ ${c.respawnOk || 0})${c.deathLoops ? ` · ตายวนซ้ำ ${c.deathLoops} ครั้ง (พักเกิดที่เดิม)` : ''}`;
-      return { ok: s.box && s.overlay, warn: (on && s.box && !s.disabled && !s.checked) || !!s.disabled, detail, data: { ...s, counters: { deaths: c.deaths || 0, autoRespawned: c.autoRespawned || 0, press: c.respawnPress || 0, pressOk: c.respawnOk || 0 } } };
+      if (c.deaths) detail += ` · ตายรอบนี้ ${c.deaths} · เกม respawn ให้ ${c.autoRespawned || 0} · โปรแกรมกดเอง ${c.respawnPress || 0} (สำเร็จ ${c.respawnOk || 0})${c.deathLoops ? ` · ตายวนซ้ำ ${c.deathLoops} ครั้ง (พักเกิดที่เดิม)` : ''}${c.revives ? ` · ตายแล้วลุกเฉลี่ย ${(c.deadMs / c.revives / 1000).toFixed(1)} วิ` : ''}`;
+      return { ok: s.box && s.overlay, warn: (on && s.box && !s.disabled && !s.checked) || !!s.disabled, detail, data: { ...s, counters: { deaths: c.deaths || 0, autoRespawned: c.autoRespawned || 0, press: c.respawnPress || 0, pressOk: c.respawnOk || 0, avgDeadSec: c.revives ? +(c.deadMs / c.revives / 1000).toFixed(1) : null } } };
     });
 
     await step(out, 'ยาและอัตราใช้', async () => {
