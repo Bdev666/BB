@@ -1597,7 +1597,9 @@ async function finderStep(id) {
       const c = f.list[f.i];
       const got = (farmSummary(id, 0, f.start).find((x) => x.map === c.map) || {}).minutes || 0;
       f.note = `วัดผล ${mapName(c.map)} ${got}/${f.minutes} นาที (${f.i + 1}/${f.list.length})`;
-      if (deaths - f.deaths0 >= 3) { log.info(`acc ${id}: farm finder: ${deaths - f.deaths0} deaths on ${c.map} -> not safe, next`); c.unsafe = true; f.i++; f.phase = 'go'; return; }
+      // dying already shows in the measured profit (time lost); with respawn in place it is no reason to skip a map,
+      // only a death loop is (the respawn guard's own limit). Without it every death is a walk back from town.
+      if (deaths - f.deaths0 >= (g.autoRespawn && g.autoRespawn.on ? 8 : 3)) { log.info(`acc ${id}: farm finder: ${deaths - f.deaths0} deaths on ${c.map} -> not safe, next`); c.unsafe = true; f.i++; f.phase = 'go'; return; }
       if (got >= f.minutes || Date.now() - f.at > f.minutes * 2 * 60000) { f.i++; f.phase = 'go'; return; }
       // died and woke up in town (no respawn in place): go back to the map being tried
       if (mapOf(g) !== c.map && !g.travelling && !g.alerts.has('death')) { log.info(`acc ${id}: farm finder: in ${mapOf(g)} instead of ${c.map} (died?) -> back`); f.back = true; f.leftAt = Date.now(); f.phase = 'go'; }
