@@ -88,7 +88,18 @@ class AccountData {
         this.hits++;
         this.dmgTotal += ev.dmg || 0;
         this.dmgWindow.push({ t, dmg: ev.dmg || 0 });
-        this.log('hit', `ตี ${ev.target} ${fmt(ev.dmg)}${ev.crit ? ' (คริ)' : ''}${ev.skill ? ' · ' + ev.skill : ''}`, t);
+        {
+          // like the game's own damage numbers: hits of one skill on one target close together show as one total
+          const last = this.events[this.events.length - 1];
+          const g = last && last.hit;
+          if (g && g.target === ev.target && g.skill === (ev.skill || '') && t - g.at <= 1500) {
+            g.dmg += ev.dmg; g.n++; if (ev.crit) g.crits++; g.at = t;
+            last.text = `ตี ${g.target} ${fmt(g.dmg)}${g.crits ? (g.n > 1 ? ` (คริ ${g.crits})` : ' (คริ)') : ''}${g.skill ? ' · ' + g.skill : ''}${g.n > 1 ? ` ×${g.n}` : ''}`;
+          } else {
+            this.log('hit', `ตี ${ev.target} ${fmt(ev.dmg)}${ev.crit ? ' (คริ)' : ''}${ev.skill ? ' · ' + ev.skill : ''}`, t);
+            this.events[this.events.length - 1].hit = { target: ev.target, skill: ev.skill || '', dmg: ev.dmg, n: 1, crits: ev.crit ? 1 : 0, at: t };
+          }
+        }
         break;
       case 'miss': this.log('hit', `${ev.target} หลบ`, t); break;
       case 'hurt': this.log('hurt', `โดน ${ev.from} ${fmt(ev.dmg)}`, t); break;

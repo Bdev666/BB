@@ -115,6 +115,13 @@ const det = d.detail();
 assert.strictEqual(det.events.length, 3);
 assert.strictEqual(det.events[0].text, 'ตี Sprout 50 (คริ)');
 assert.strictEqual(det.bag[0].name, 'โพชั่น');
+// several hits of one skill on one target close together = one line with the total (like the game's numbers)
+const d7 = new AccountData();
+for (let i = 0; i < 3; i++) d7.ingest({ type: 'hit', target: 'Bell Wisp', dmg: 100, crit: i === 0, skill: 'Hundred Cuts', t: 1000 + i * 100 });
+d7.ingest({ type: 'hit', target: 'Bell Wisp', dmg: 50, skill: 'Leap Slam', t: 1400 });
+const ev7 = d7.detail().events.filter((e) => e.kind === 'hit');
+assert.strictEqual(ev7.length, 2);
+assert.ok(/300 \(คริ 1\) · Hundred Cuts ×3/.test(ev7.map((e) => e.text).join('|')), ev7.map((e) => e.text).join('|'));
 // potion clock: 60 used in an hour with 30 left -> 30 minutes
 const d4 = new AccountData(); d4.startedAt = 1;
 d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 90, supply: true }], t: 2 });

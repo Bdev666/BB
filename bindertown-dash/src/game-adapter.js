@@ -466,7 +466,7 @@ class BinderTownAdapter {
       case 'mail':
         if (Array.isArray(e.list)) {
           const gifts = e.list.filter((m) => !m.claimed && ((m.items && m.items.length) || m.gold || m.crystals));
-          out.push({ type: 'mail', t: at, gifts: gifts.length, titles: gifts.slice(0, 5).map((m) => String(m.title || '').slice(0, 60)), unread: e.list.filter((m) => !m.read).length });
+          out.push({ type: 'mail', t: at, gifts: gifts.length, giftIds: gifts.map((m) => m.id), titles: gifts.slice(0, 5).map((m) => String(m.title || '').slice(0, 60)), unread: e.list.filter((m) => !m.read).length });
         }
         break;
       case 'channels':

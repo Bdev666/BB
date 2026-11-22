@@ -101,6 +101,7 @@ function publicState() {
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: bountyStatus(g),
+        deaths: deathCost(id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
@@ -509,6 +510,8 @@ function handleEvents(id, events) {
         break;
       case 'pass':
       case 'mail': {
+        if (ev.type === 'mail') g.mailSeen = { giftIds: ev.giftIds || [], at: Date.now() };
+        if (ev.type === 'pass') g.passSeen = { daily: ev.daily || [], weekly: ev.weekly || [], at: Date.now() };
         // once a day per account, when there is something new to collect. At midnight several pass / mail
         // messages come in a row (the count goes 1, 2, 3): wait 10 s and say it once with the total
         clearTimeout(g.rewardsTimer);
@@ -1350,6 +1353,39 @@ function fightTimes() {
   return { fights: out, world: store.data.worldLen || {} };
 }
 
+// deaths this session and what respawning in place cost (Gold per death in fields, the game's fee),
+// next to what the character earns: a spot where it dies a lot can earn less than it seems
+function deathCost(id, g) {
+  const c = selftest.counters.get(id) || {};
+  const hours = Math.max(1 / 60, (Date.now() - (g.data.startedAt || Date.now())) / 3600000);
+  const deaths = c.deaths || 0;
+  if (!deaths) return null;
+  const fee = (g.autoRespawns || 0) * 5000 + (c.respawnPress || 0) * 5000 * (WORLD_ARENAS.has(mapOf(g)) ? 0 : 1);
+  const rate = g.data.rates(Date.now());
+  return { perHour: +(deaths / hours).toFixed(1), feePerHour: Math.round(fee / hours), silverPerHour: Math.round(rate.silverPerHour || 0) };
+}
+
+// ---------- collect rewards: mail gifts, Pass missions (daily / weekly) and Pass tiers ----------
+// the same messages the game's own "รับ" buttons send (mail one by one, then "claim all" on the Pass page)
+async function claimRewards(id) {
+  const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
+  const waitFor = async (key, since) => { for (let i = 0; i < 20; i++) { if (g[key] && g[key].at >= since) return g[key]; await new Promise((r) => setTimeout(r, 250)); } return null; }; // eslint-disable-line no-await-in-loop
+  const out = { mail: 0, daily: 0, weekly: 0, tiers: false };
+  let t0 = Date.now(); await sendInput(id, { type: 'mailQuery' });
+  const mail = await waitFor('mailSeen', t0);
+  for (const mid of (mail && mail.giftIds) || []) { await sendInput(id, { type: 'mailClaim', id: mid }); out.mail++; await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
+  t0 = Date.now(); await sendInput(id, { type: 'passQuery' });
+  const pass = await waitFor('passSeen', t0);
+  for (const m of ((pass && pass.daily) || []).filter((x) => x.ready)) { await sendInput(id, { type: 'dailyClaim', id: m.id }); out.daily++; await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
+  for (const m of ((pass && pass.weekly) || []).filter((x) => x.ready)) { await sendInput(id, { type: 'weeklyClaim', id: m.id }); out.weekly++; await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
+  await sendInput(id, { type: 'passClaimAll' }); out.tiers = true; // Pass tiers that are unlocked (the game skips when none)
+  await new Promise((r) => setTimeout(r, 800));
+  await sendInput(id, { type: 'mailQuery' }); await sendInput(id, { type: 'passQuery' }); // fresh numbers for the dashboard
+  log.info(`acc ${id}: rewards collected: ${out.mail} mail, ${out.daily} daily, ${out.weekly} weekly mission(s), pass tiers`);
+  if (!mail && !pass) return { ok: false, error: 'เกมไม่ตอบ (ลองใหม่อีกครั้ง)' };
+  return { ok: true, ...out };
+}
+
 // ---------- crowded spot: move to the quietest channel of the same map, back to the same spot, AUTO on ----------
 // Off by default. Counts other players inside the AUTO circle; N or more for M minutes while AUTO farms =
 // ask the game for the players per channel (its own channel list), switch to the quietest normal one
@@ -2101,6 +2137,8 @@ function registerIpc() {
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   handle('world-boss-go', (kind) => worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => bountyStart(id, on !== false));
+  handle('claim-rewards', (id) => claimRewards(id));
+  handle('claim-rewards-all', async () => { const r = []; for (const [id, g] of openGames()) if (g.inGame && !g.demo) r.push({ id, ...(await claimRewards(id)) }); return r; }); // eslint-disable-line no-await-in-loop
   handle('bounty-all', async (on) => { const r = []; for (const [id, g] of openGames()) if (g.inGame && !g.demo) r.push({ id, ...(await bountyStart(id, on !== false)) }); return r; }); // eslint-disable-line no-await-in-loop
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
