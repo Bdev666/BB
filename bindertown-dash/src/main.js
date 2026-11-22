@@ -2006,6 +2006,7 @@ app.whenReady().then(() => {
   log.init(app.getPath('userData'));
   log.info(`BinderDash ${app.getVersion()} start · Electron ${process.versions.electron} · ${process.platform} ${require('os').release()}`);
   store = new Store(app.getPath('userData'));
+  if (store.loadError) log.warn(`settings: ${store.loadError}${store.loadedFrom ? ' -> loaded the backup ' + path.basename(store.loadedFrom) : ' -> started with defaults'}`);
   gameUrl = store.data.settings.gameUrl || DEFAULT_GAME_URL;
   registerIpc();
   if (process.platform === 'darwin') {

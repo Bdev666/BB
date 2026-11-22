@@ -35,6 +35,7 @@ function el(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null) continue;
     if (k === 'class') e.className = v;
+    else if (k === 'style') e.style.cssText = v; // CSSOM: allowed by the page's CSP (a style attribute is not)
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
     else e.setAttribute(k, v);
   }

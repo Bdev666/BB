@@ -66,3 +66,5 @@ button.primary { background: linear-gradient(180deg, #8a6dff, #6a48f5); border-c
 .st-tab { width: 100%; border-collapse: collapse; font-size: 13px; }
 .st-tab th, .st-tab td { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: left; }
 @media (max-width: 640px) { .st-row { grid-template-columns: 24px 1fr; } .st-row em, .st-row small { grid-column: 2; text-align: left; } }
+
+.w60 { width: 60px; } .w70 { width: 70px; } .w100 { width: 100px; }

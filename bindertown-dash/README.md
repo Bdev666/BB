@@ -2,7 +2,9 @@
 
 <h1 align="center">BinderDash</h1>
 <p align="center"><b>Multi-account dashboard, game remote and build optimizer for the browser MMORPG <a href="https://play.bindertowngame.com">Binder Town</a></b><br>
-Windows desktop app · Electron · in-app updates · fan-made, not affiliated with the game's developer</p>
+Windows + macOS desktop app · Electron · in-app updates · fan-made, not affiliated with the game's developer</p>
+
+<p align="center">🇹🇭 <b><a href="docs/INSTALL-TH.md">คู่มือติดตั้งและใช้งานภาษาไทย</a></b> · <a href="https://github.com/Bdev666/BB/releases/latest">ดาวน์โหลด (Windows / Mac)</a></p>
 
 <p align="center"><img src="docs/dashboard.png" alt="Dashboard" width="900"></p>
 

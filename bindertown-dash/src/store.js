@@ -27,7 +27,7 @@ const DEFAULTS = {
     },
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
-    autoRespawnHere: true,
+    autoRespawnHere: false, // spends Gold in fields (5,000 G a death): new users switch it on themselves
     worldBossAuto: false, // send every online account to the world boss when it starts
     worldBossReturn: true, // and take them back when it ends
     deathLoopGuard: true, // 4 deaths in 2 minutes = respawn in place off for 10 minutes    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
@@ -53,8 +53,16 @@ class Store {
   constructor(dir) {
     this.file = path.join(dir, 'config.json');
     this.data = structuredClone(DEFAULTS);
-    try {
-      const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+    // the saved settings, or the backup kept by the last good save (a power cut mid-save must not lose the accounts)
+    let saved = null;
+    for (const f of [this.file, this.file + '.bak']) {
+      let text = null; try { text = fs.readFileSync(f, 'utf8'); } catch { continue; }
+      try { saved = JSON.parse(text); this.loadedFrom = f; break; } catch {
+        try { fs.copyFileSync(f, f + '.broken-' + Date.now()); } catch { /* keep going */ }
+        this.loadError = (this.loadError ? this.loadError + '; ' : '') + path.basename(f) + ' อ่านไม่ได้';
+      }
+    }
+    if (saved && typeof saved === 'object') try {
       this.data = {
         ...this.data,
         ...saved,
@@ -71,13 +79,17 @@ class Store {
         if (this.data.settings.valuableMinGold < 1000000) this.data.settings.valuableMinGold = 1000000;
         this.data.settings.valuable1m = true;
       }
-    } catch { /* first run */ }
+    } catch { /* keep defaults */ }
+    if (!Array.isArray(this.data.accounts)) this.data.accounts = structuredClone(DEFAULTS.accounts);
   }
   save() {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = this.file + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+      try { fs.copyFileSync(this.file, this.file + '.bak'); } catch { /* first save */ }
+      fs.renameSync(tmp, this.file);
+    } catch (err) { console.error('settings save failed:', err.message); } // disk full / no rights: keep running
   }
 }
 
