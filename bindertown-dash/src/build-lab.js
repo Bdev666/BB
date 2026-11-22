@@ -539,13 +539,13 @@ async function optimize(p, onStep) {
 const hotbarSize = (b) => (b && b.c2 ? 8 : 6);
 // the game rotates skills in hotbar order: try every order of the slots (6 slots = 720), or pair swaps until
 // nothing improves (8 slots), and swapping in left-out damaging skills
-function bestHotbar(b, p) {
+function bestHotbar(b, p, noExtra = false) {
   const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => y.dpsAlone - x.dpsAlone).map((s) => s.sid);
   let best = { v: score(b, p).v, hb: b.hotbar.slice() };
   // a hotbar holds each skill once (an earlier version could put one skill in two or three slots)
   const tryHb = (hb) => { if (new Set(hb).size !== hb.length) return; b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
-  for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { if (best.hb.includes(extra)) break; const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
+  if (!noExtra) for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { if (best.hb.includes(extra)) break; const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
   const a = best.hb.slice(); const n = a.length; const c = new Array(n).fill(0);
   if (n > 1 && n <= 6) { let i = 0; while (i < n) { if (c[i] < i) { const k = i % 2 ? c[i] : 0; [a[k], a[i]] = [a[i], a[k]]; tryHb(a.slice()); c[i]++; i = 0; } else { c[i] = 0; i++; } } }
   else if (n > 6) {
@@ -720,7 +720,7 @@ function describe(b, p) {
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
-    hotbar: b.hotbar.map(name),
+    hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(), reorder,
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
     problems,
@@ -925,7 +925,12 @@ L.predict = async (p) => {
   const b = { ...baseBuild(q), skills: { ...(cur.skills || {}) }, evo: { ...(cur.evo || {}) }, traits: { ...(cur.traits || {}) }, c2tr: { ...(cur.c2tr || {}) } };
   // the hotbar the character really fights with (when known), else the best one the lab finds
   const realHb = cur.hotbar && Array.isArray(cur.hotbar) ? [...new Set(cur.hotbar)].filter((sid) => (b.skills[sid] || 0) > 0 && !isPassive(sid)).slice(0, hotbarSize(b)) : [];
-  if (realHb.length) b.hotbar = realHb; else { setHotbar(b); bestHotbar(b, q); }
+  let reorder = null;
+  if (realHb.length) {
+    b.hotbar = realHb;
+    // p.reorder: the best order of the same skills (nothing added or dropped)
+    if (p.reorder) { const before = score(b, q).v; bestHotbar(b, q, true); const after = score(b, q).v; reorder = { gainPct: Math.round((after / Math.max(1e-9, before) - 1) * 1000) / 10 }; }
+  } else { setHotbar(b); bestHotbar(b, q); }
   const r = calc(b);
   const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
   const adj = dummyAdj(b, r);
