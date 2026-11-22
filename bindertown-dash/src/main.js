@@ -1377,6 +1377,38 @@ async function answerWarpBox(id, g) {
   }
   return null;
 }
+// the game's own AUTO settings "targets on this map" (one switch per monster kind, off = AUTO never hits it):
+// keep only the bounty monster on, or put back the ones BinderDash switched off. Bosses are left alone.
+const MOB_FILTER_JS = (mode, names) => `(async () => { const win = document.getElementById('autoopts'); const open = document.getElementById('autoopt'); if (!win || !open) return { ok: false, why: 'no auto settings' };
+  const was = win.style.display === 'block'; if (!was) open.click();
+  await new Promise((r) => setTimeout(r, 400));
+  const mode = ${JSON.stringify(mode)}; const names = ${JSON.stringify(names)}; const changed = []; let found = false;
+  for (let guard = 0; guard < 40; guard++) {
+    const btns = [...document.querySelectorAll('#au-targets .autg')];
+    const pick = btns.find((b) => { const nm = ((b.querySelector('.autgn b') || {}).textContent || '').trim(); if (b.querySelector('em.r-boss')) return false;
+      const on = b.classList.contains('on');
+      if (mode === 'only') { if (nm === names[0]) { found = true; return !on; } return on && !changed.includes(nm); }
+      return names.includes(nm) && !on; });
+    if (!pick) break;
+    const nm = ((pick.querySelector('.autgn b') || {}).textContent || '').trim();
+    pick.click(); if (!(mode === 'only' && nm === names[0])) changed.push(nm);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  if (!was) win.style.display = 'none';
+  return { ok: true, changed, found: mode === 'only' ? found || [...document.querySelectorAll('#au-targets .autg .autgn b')].some((b) => b.textContent.trim() === names[0]) : true }; })()`;
+async function bountyFilterOn(id, g, map, name) {
+  let r; try { r = await g.win.webContents.executeJavaScript(MOB_FILTER_JS('only', [name]), true); } catch (e) { r = { ok: false, why: e.message }; }
+  if (r && r.ok && r.changed.length) { g.mobFilter = { map, names: [...new Set([...((g.mobFilter && g.mobFilter.map === map && g.mobFilter.names) || []), ...r.changed])] }; store.data.mobFilter = { ...(store.data.mobFilter || {}), [id]: g.mobFilter }; store.save(); }
+  log.info(`acc ${id}: bounty -> AUTO only on ${name}${r && r.ok ? ` (${r.changed.length} other kind(s) switched off)` : ` (could not set: ${(r && r.why) || '?'})`}`);
+  return r;
+}
+async function bountyFilterOff(id, g) {
+  const f = g.mobFilter || (store.data.mobFilter || {})[id];
+  if (!f || !f.names || !f.names.length || mapOf(g) !== f.map || !g.win || g.win.isDestroyed()) return false;
+  let r; try { r = await g.win.webContents.executeJavaScript(MOB_FILTER_JS('restore', f.names), true); } catch { r = null; }
+  if (r && r.ok) { g.mobFilter = null; const all = store.data.mobFilter || {}; delete all[id]; store.save(); log.info(`acc ${id}: AUTO targets back as they were (${r.changed.length} kind(s) on again)`); return true; }
+  return false;
+}
 const MOB_SPOT_JS = (type) => `(() => { try { const g = window.__game; const me = g.me(); const all = []; g.state().mobs.forEach((m) => all.push(m));
   const want = all.filter((m) => (m.mobType || m.type) === ${JSON.stringify(type)} && m.hp > 0).map((m) => ({ x: m.x, y: m.y, d: Math.hypot(m.x - me.x, m.y - me.y) })).sort((a, b) => a.d - b.d);
   return want.length ? { x: Math.round(want[0].x), y: Math.round(want[0].y), d: want[0].d, n: want.length } : { n: 0 }; } catch (e) { return null; } })()`;
@@ -1384,7 +1416,8 @@ const MOB_SPOT_JS = (type) => `(() => { try { const g = window.__game; const me 
 const FARM_R_JS = (v) => `(() => { const box = document.getElementById('au-farm'); if (!box) return null; const on = box.querySelector('[data-farm].on'); const prev = on ? Number(on.dataset.farm) : null;
   const b = box.querySelector('[data-farm="' + ${JSON.stringify(String(v))} + '"]'); if (b && prev !== ${Number(v)}) b.click(); return prev; })()`;
 async function setFarmRange(g, v) { try { return await g.win.webContents.executeJavaScript(FARM_R_JS(v), true); } catch { return null; } }
-async function bountyRestore(g) { const B = g.bounty; if (B && B.prevFarm != null && g.win && !g.win.isDestroyed()) { await setFarmRange(g, B.prevFarm); B.prevFarm = null; } }
+async function bountyRestore(g, id) {
+  if (id != null) await bountyFilterOff(id, g); const B = g.bounty; if (B && B.prevFarm != null && g.win && !g.win.isDestroyed()) { await setFarmRange(g, B.prevFarm); B.prevFarm = null; } }
 async function bountyList(id) {
   const g = games.get(id); if (!g || !g.win || g.win.isDestroyed()) return null;
   try { return await g.win.webContents.executeJavaScript(BOUNTY_LIST_JS, true); } catch { return null; }
@@ -1392,7 +1425,7 @@ async function bountyList(id) {
 function bountyStatus(g) { const b = g.bounty; return b ? { on: !!b.on, phase: b.phase, target: b.cur ? `${b.cur.name} @ ${b.cur.map}` : '', done: b.claimedN || 0, note: b.note || '' } : null; }
 async function bountyStart(id, on = true) {
   const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
-  if (!on) { if (g.bounty) { g.bounty.on = false; g.bounty.phase = 'off'; await bountyRestore(g); } log.info(`acc ${id}: bounties off`); pushState(); return { ok: true }; }
+  if (!on) { if (g.bounty) { g.bounty.on = false; g.bounty.phase = 'off'; await bountyRestore(g, id); } log.info(`acc ${id}: bounties off`); pushState(); return { ok: true }; }
   g.bounty = { on: true, phase: 'start', claimedN: 0, skip: [], at: Date.now(), note: '' };
   await sendInput(id, { type: 'huntQuery' });
   log.info(`acc ${id}: bounties on`);
@@ -1427,13 +1460,13 @@ async function bountyStep(id) {
     // set aside for 30 min: no progress for 8 min (e.g. a monster that only comes out at night)
     const fresh = doable.filter((b) => !B.later[b.id] || Date.now() - B.later[b.id] > 30 * 60 * 1000);
     const open = fresh.length ? fresh : [];
-    if (!fresh.length && doable.length) { B.phase = 'wait'; B.note = `รอมอนเกิด ${doable.length} ใบ (เช่นมอนกลางคืน) · ลองใหม่ทุก 30 นาที · AUTO ต่อ`; if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return; }
+    if (!fresh.length && doable.length) { await bountyFilterOff(id, g); B.phase = 'wait'; B.note = `รอมอนเกิด ${doable.length} ใบ (เช่นมอนกลางคืน) · ลองใหม่ทุก 30 นาที · AUTO ต่อ`; if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return; }
     if (!open.length) {
       const hard = list.filter((b) => b.map && !b.claimed && b.prog < b.need && b.hi > lv + 2).length;
       B.on = false; B.phase = 'done';
       B.note = hard ? `ทำครบที่ทำได้แล้ว · เหลือ ${hard} ใบที่มอนเลเวลสูงเกิน` : 'ทำค่าหัวครบทุกใบแล้ว';
       log.info(`acc ${id}: bounties finished (${B.claimedN || 0} claimed${hard ? `, ${hard} too hard` : ''})`);
-      await bountyRestore(g);
+      await bountyRestore(g, id);
       notify(id, 'bounty', `📜 ${B.note} · อยู่ที่ ${mapName(here)} AUTO ต่อ`);
       if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
       return;
@@ -1445,7 +1478,8 @@ async function bountyStep(id) {
     if (B.cur.prog !== cur.prog || !B.progAt) B.progAt = Date.now();
     B.cur.prog = cur.prog;
     if (B.phase === 'hunt' && here === cur.map && Date.now() - B.progAt > 8 * 60 * 1000) {
-      B.later[cur.id] = Date.now(); B.cur = null; B.progAt = 0;
+      B.later[cur.id] = Date.now(); B.cur = null; B.progAt = 0; B.phase = 'pick';
+      await bountyFilterOff(id, g); // its monster is not around: AUTO may hit everything again meanwhile
       B.note = `${cur.name} ไม่ขึ้นเลย 8 นาที (อาจเกิดเฉพาะกลางคืน) · ไปใบอื่นก่อน`;
       log.info(`acc ${id}: bounty ${cur.id} no progress for 8 min -> later`);
       return;
@@ -1453,6 +1487,7 @@ async function bountyStep(id) {
     if (here !== cur.map) {
       if (B.phase === 'travel' && Date.now() - B.travelAt < 6 * 60 * 1000) { B.note = `กำลังเดินทางไป ${mapName(cur.map)}`; await answerWarpBox(id, g); return; }
       if (B.phase === 'travel') { B.skip.push(cur.id); B.cur = null; B.note = `ไป ${mapName(cur.map)} ไม่ถึงใน 6 นาที · ข้ามใบนี้`; log.info(`acc ${id}: bounty travel timed out -> skip ${cur.id}`); return; }
+      await bountyFilterOff(id, g); // the targets switched off on this map come back before leaving it
       if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off: the game's travel walks
       let r; try { r = await g.win.webContents.executeJavaScript(BOUNTY_GO_JS(cur.map), true); } catch (e) { r = { ok: false, why: e.message }; }
       if (!r || !r.ok) { B.skip.push(cur.id); B.cur = null; B.note = `เดินทางไม่ได้ (${(r && r.why) || '?'}) · ข้ามใบนี้`; return; }
@@ -1474,6 +1509,7 @@ async function bountyStep(id) {
       }
       // the monster is not in sight: let AUTO walk the whole map to find it (the player's range comes back afterwards)
       { const prev = await setFarmRange(g, 0); if (prev != null && prev !== 0 && B.prevFarm == null) B.prevFarm = prev; } // whole map while on a bounty
+      if (store.data.settings.bountyOnlyTarget !== false) await bountyFilterOn(id, g, cur.map, cur.name); // AUTO hits only the bounty monster
       if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
       B.phase = 'hunt';
       log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}`);
@@ -1485,6 +1521,8 @@ function bountyTick() {
   for (const [id, g] of games) {
     if (!g.inGame || g.demo) continue;
     if (g.bounty && g.bounty.on) { sendInput(id, { type: 'huntQuery' }); setTimeout(() => bountyStep(id), 1500); continue; }
+    if (!g.mobFilter && (store.data.mobFilter || {})[id]) g.mobFilter = store.data.mobFilter[id];
+    if (g.mobFilter && mapOf(g) === g.mobFilter.map) bountyFilterOff(id, g).catch(() => {});
     // claim finished bounties by themselves (free, setting on by default): ask for fresh numbers every 5 min
     if (store.data.settings.bountyAutoClaim !== false && (!g.huntAskAt || Date.now() - g.huntAskAt > 5 * 60 * 1000)) { g.huntAskAt = Date.now(); sendInput(id, { type: 'huntQuery' }); }
     if (store.data.settings.bountyAutoClaim !== false && g.hunt && g.hunt.at > (g.huntClaimAt || 0)) {
@@ -1940,7 +1978,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;

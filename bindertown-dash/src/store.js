@@ -28,6 +28,7 @@ const DEFAULTS = {
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
     autoRespawnHere: false, // spends Gold in fields (5,000 G a death): new users switch it on themselves
+    bountyOnlyTarget: true, // while on a bounty, AUTO hits only that monster (the game's own target switches)
     bountyAutoClaim: true, // claim finished daily bounties by themselves (free)
     worldBossAuto: false, // send every online account to the world boss when it starts
     worldBossReturn: true, // and take them back when it ends
