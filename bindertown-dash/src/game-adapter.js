@@ -471,7 +471,8 @@ class BinderTownAdapter {
         break;
       case 'hunt': {
         const b = (e.view && e.view.bounty) || {};
-        out.push({ type: 'hunt', t: at, claimed: (b.claimed || []).length, active: Object.keys(b.prog || {}).length });
+        out.push({ type: 'hunt', t: at, claimed: (b.claimed || []).length, active: Object.keys(b.prog || {}).length,
+          day: b.day || (e.view && e.view.date) || '', progById: b.prog || {}, claimedIds: Array.isArray(b.claimed) ? b.claimed : [] });
         break;
       }
       case 'hotWeek': {

@@ -28,6 +28,7 @@ const DEFAULTS = {
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
     autoRespawnHere: false, // spends Gold in fields (5,000 G a death): new users switch it on themselves
+    bountyAutoClaim: true, // claim finished daily bounties by themselves (free)
     worldBossAuto: false, // send every online account to the world boss when it starts
     worldBossReturn: true, // and take them back when it ends
     deathLoopGuard: true, // 4 deaths in 2 minutes = respawn in place off for 10 minutes    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters

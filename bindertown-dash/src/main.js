@@ -97,6 +97,7 @@ function publicState() {
         summary: g.data.summary(now),
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
+        bounty: bountyStatus(g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
@@ -515,6 +516,7 @@ function handleEvents(id, events) {
         break;
       }
       case 'worldBoss': onWorldBoss(ev); break;
+      case 'hunt': g.hunt = { day: ev.day, prog: ev.progById || {}, claimed: ev.claimedIds || [], at: Date.now() }; break;
       case 'market': {
         let askedId = ev.id;
         if (ev.fromBoard && g.priceAsks && g.priceAsks.length) {
@@ -1334,6 +1336,144 @@ function fightTimes() {
   return { fights: out, world: store.data.worldLen || {} };
 }
 
+// ---------- daily bounties (ค่าหัว): claim what is done, then go and hunt the next one ----------
+// Everything goes through the game's own hunt window: its list (map, monster, progress), its
+// "go to map" button and the world map's "travel" button (the game walks there by itself),
+// then the monster is looked up on the map, AUTO goes on next to it, and the reward is claimed at 40/40.
+const MOB_BY_NAME = (() => { const m = require('./game-names').mobs || {}; const o = {}; for (const [id, nm] of Object.entries(m)) if (!o[nm]) o[nm] = id; return o; })();
+const BOUNTY_LIST_JS = `(() => { const win = document.getElementById('huntwin'); if (!win) return null;
+  const wasOpen = win.style.display === 'block'; if (!wasOpen) { const b = document.getElementById('openhunt'); if (!b) return null; b.click(); }
+  const tab = win.querySelector('[data-htab="bounty"]'); if (tab && !tab.classList.contains('on')) tab.click();
+  const out = [...document.querySelectorAll('#huntbody .hu1b')].map((x) => { const go = x.querySelector('[data-goto]'); const cl = x.querySelector('[data-claim]'); const sm = [...x.querySelectorAll('.hu1tx small')].map((e) => e.textContent);
+    const band = /Lv\\s*(\\d+)\\D+(\\d+)/.exec(sm[0] || ''); const pr = /(\\d+)\\s*\\/\\s*(\\d+)/.exec(sm[1] || '');
+    return { id: cl ? cl.dataset.claim : '', map: go ? go.dataset.goto : '', name: ((x.querySelector('.hu1tx b') || {}).textContent || '').replace(/\\s*×\\s*\\d+\\s*$/, '').trim(),
+      lo: band ? +band[1] : 0, hi: band ? +band[2] : 0, prog: pr ? +pr[1] : 0, need: pr ? +pr[2] : 40, claimed: x.classList.contains('claimed'), done: x.classList.contains('done') }; });
+  if (!wasOpen) win.style.display = 'none';
+  return out; })()`;
+const BOUNTY_GO_JS = (map) => `(async () => { const win = document.getElementById('huntwin'); if (win.style.display !== 'block') document.getElementById('openhunt').click();
+  await new Promise((r) => setTimeout(r, 600));
+  const b = document.querySelector('#huntbody [data-goto="' + ${JSON.stringify(map)} + '"]'); if (!b) return { ok: false, why: 'no button' }; b.click();
+  await new Promise((r) => setTimeout(r, 900));
+  const go = document.querySelector('.wdgo'); if (!go) return { ok: false, why: 'no travel button' }; go.click(); return { ok: true }; })()`;
+const MOB_SPOT_JS = (type) => `(() => { try { const g = window.__game; const me = g.me(); const all = []; g.state().mobs.forEach((m) => all.push(m));
+  const want = all.filter((m) => (m.mobType || m.type) === ${JSON.stringify(type)} && m.hp > 0).map((m) => ({ x: m.x, y: m.y, d: Math.hypot(m.x - me.x, m.y - me.y) })).sort((a, b) => a.d - b.d);
+  return want.length ? { x: Math.round(want[0].x), y: Math.round(want[0].y), d: want[0].d, n: want.length } : { n: 0 }; } catch (e) { return null; } })()`;
+// the game's AUTO range (AUTO settings: N tiles around the start point, or 0 = whole map); returns the old one
+const FARM_R_JS = (v) => `(() => { const box = document.getElementById('au-farm'); if (!box) return null; const on = box.querySelector('[data-farm].on'); const prev = on ? Number(on.dataset.farm) : null;
+  const b = box.querySelector('[data-farm="' + ${JSON.stringify(String(v))} + '"]'); if (b && prev !== ${Number(v)}) b.click(); return prev; })()`;
+async function setFarmRange(g, v) { try { return await g.win.webContents.executeJavaScript(FARM_R_JS(v), true); } catch { return null; } }
+async function bountyRestore(g) { const B = g.bounty; if (B && B.prevFarm != null && g.win && !g.win.isDestroyed()) { await setFarmRange(g, B.prevFarm); B.prevFarm = null; } }
+async function bountyList(id) {
+  const g = games.get(id); if (!g || !g.win || g.win.isDestroyed()) return null;
+  try { return await g.win.webContents.executeJavaScript(BOUNTY_LIST_JS, true); } catch { return null; }
+}
+function bountyStatus(g) { const b = g.bounty; return b ? { on: !!b.on, phase: b.phase, target: b.cur ? `${b.cur.name} @ ${b.cur.map}` : '', done: b.claimedN || 0, note: b.note || '' } : null; }
+async function bountyStart(id, on = true) {
+  const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
+  if (!on) { if (g.bounty) { g.bounty.on = false; g.bounty.phase = 'off'; await bountyRestore(g); } log.info(`acc ${id}: bounties off`); pushState(); return { ok: true }; }
+  g.bounty = { on: true, phase: 'start', claimedN: 0, skip: [], at: Date.now(), note: '' };
+  await sendInput(id, { type: 'huntQuery' });
+  log.info(`acc ${id}: bounties on`);
+  pushState();
+  setTimeout(() => bountyStep(id), 1500);
+  return { ok: true };
+}
+async function bountyClaimDone(id, list) {
+  const g = games.get(id); let n = 0;
+  for (const b of list || []) {
+    if (!b.id || b.claimed || b.prog < b.need) continue;
+    await sendInput(id, { type: 'bountyClaim', id: b.id }); // eslint-disable-line no-await-in-loop
+    n++; log.info(`acc ${id}: bounty claimed ${b.id} (${b.name || b.map || ''})`);
+    await new Promise((r) => setTimeout(r, 500)); // eslint-disable-line no-await-in-loop
+  }
+  if (n) { if (g.bounty) g.bounty.claimedN = (g.bounty.claimedN || 0) + n; selftest.count(id, 'bountyClaims', n); await sendInput(id, { type: 'huntQuery' }); }
+  return n;
+}
+async function bountyStep(id) {
+  const g = games.get(id); const B = g && g.bounty;
+  if (!B || !B.on || !g.inGame || g.demo || !g.win || g.win.isDestroyed() || B.busy) return;
+  B.busy = true;
+  try {
+    const list = await bountyList(id);
+    if (!list || !list.length) { B.note = 'อ่านหน้าค่าหัวไม่ได้'; return; }
+    // the hunt window shows the last progress it got: merge the server's numbers in
+    if (g.hunt) for (const b of list) { if (g.hunt.prog[b.id] != null) b.prog = Math.min(b.need, g.hunt.prog[b.id]); if (g.hunt.claimed.includes(b.id)) b.claimed = true; }
+    await bountyClaimDone(id, list);
+    const lv = Number(g.data.stats.level) || 0; const here = mapOf(g);
+    B.later = B.later || {};
+    const doable = list.filter((b) => b.map && !b.claimed && b.prog < b.need && !B.skip.includes(b.id) && (!b.hi || b.hi <= lv + 2));
+    // set aside for 30 min: no progress for 8 min (e.g. a monster that only comes out at night)
+    const fresh = doable.filter((b) => !B.later[b.id] || Date.now() - B.later[b.id] > 30 * 60 * 1000);
+    const open = fresh.length ? fresh : [];
+    if (!fresh.length && doable.length) { B.phase = 'wait'; B.note = `รอมอนเกิด ${doable.length} ใบ (เช่นมอนกลางคืน) · ลองใหม่ทุก 30 นาที · AUTO ต่อ`; if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return; }
+    if (!open.length) {
+      const hard = list.filter((b) => b.map && !b.claimed && b.prog < b.need && b.hi > lv + 2).length;
+      B.on = false; B.phase = 'done';
+      B.note = hard ? `ทำครบที่ทำได้แล้ว · เหลือ ${hard} ใบที่มอนเลเวลสูงเกิน` : 'ทำค่าหัวครบทุกใบแล้ว';
+      log.info(`acc ${id}: bounties finished (${B.claimedN || 0} claimed${hard ? `, ${hard} too hard` : ''})`);
+      await bountyRestore(g);
+      notify(id, 'bounty', `📜 ${B.note} · อยู่ที่ ${mapName(here)} AUTO ต่อ`);
+      if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+      return;
+    }
+    // stay on the current one while it is not finished; else the one on this map; else the easiest
+    let cur = B.cur && open.find((b) => b.id === B.cur.id);
+    if (!cur) cur = open.find((b) => b.map === here) || open.slice().sort((a, b) => a.hi - b.hi)[0];
+    if (!B.cur || B.cur.id !== cur.id) { B.cur = cur; B.phase = 'pick'; B.travelAt = 0; B.progAt = Date.now(); log.info(`acc ${id}: bounty -> ${cur.name} x${cur.need} at ${cur.map} (${cur.prog}/${cur.need})`); }
+    if (B.cur.prog !== cur.prog || !B.progAt) B.progAt = Date.now();
+    B.cur.prog = cur.prog;
+    if (B.phase === 'hunt' && here === cur.map && Date.now() - B.progAt > 8 * 60 * 1000) {
+      B.later[cur.id] = Date.now(); B.cur = null; B.progAt = 0;
+      B.note = `${cur.name} ไม่ขึ้นเลย 8 นาที (อาจเกิดเฉพาะกลางคืน) · ไปใบอื่นก่อน`;
+      log.info(`acc ${id}: bounty ${cur.id} no progress for 8 min -> later`);
+      return;
+    }
+    if (here !== cur.map) {
+      if (B.phase === 'travel' && Date.now() - B.travelAt < 6 * 60 * 1000) { B.note = `กำลังเดินทางไป ${mapName(cur.map)}`; return; }
+      if (B.phase === 'travel') { B.skip.push(cur.id); B.cur = null; B.note = `ไป ${mapName(cur.map)} ไม่ถึงใน 6 นาที · ข้ามใบนี้`; log.info(`acc ${id}: bounty travel timed out -> skip ${cur.id}`); return; }
+      if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off: the game's travel walks
+      let r; try { r = await g.win.webContents.executeJavaScript(BOUNTY_GO_JS(cur.map), true); } catch (e) { r = { ok: false, why: e.message }; }
+      if (!r || !r.ok) { B.skip.push(cur.id); B.cur = null; B.note = `เดินทางไม่ได้ (${(r && r.why) || '?'}) · ข้ามใบนี้`; return; }
+      B.phase = 'travel'; B.travelAt = Date.now(); B.note = `กำลังเดินทางไป ${mapName(cur.map)}`;
+      log.info(`acc ${id}: bounty travel ${here} -> ${cur.map}`);
+      return;
+    }
+    // on the map: stand next to the bounty monster and fight there
+    const type = MOB_BY_NAME[cur.name] || '';
+    if (B.phase !== 'hunt' || !(await liveUi(id)).auto) {
+      let spot = null;
+      for (let i = 0; i < 10; i++) {
+        try { spot = await g.win.webContents.executeJavaScript(MOB_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
+        if (!spot || !spot.n || spot.d <= 4) break;
+        if (i === 0 && (await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // eslint-disable-line no-await-in-loop
+        await sendInput(id, { type: 'moveTo', x: spot.x + 1, y: spot.y }); // eslint-disable-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+      }
+      // the monster is not in sight: let AUTO walk the whole map to find it (the player's range comes back afterwards)
+      { const prev = await setFarmRange(g, 0); if (prev != null && prev !== 0 && B.prevFarm == null) B.prevFarm = prev; } // whole map while on a bounty
+      if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+      B.phase = 'hunt';
+      log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}`);
+    }
+    B.note = `ล่า ${cur.name} ${cur.prog}/${cur.need} ที่ ${mapName(cur.map)}`;
+  } catch (err) { log.warn(`acc ${id}: bounty step: ${err.message}`); } finally { if (g.bounty) g.bounty.busy = false; pushState(); }
+}
+function bountyTick() {
+  for (const [id, g] of games) {
+    if (!g.inGame || g.demo) continue;
+    if (g.bounty && g.bounty.on) { sendInput(id, { type: 'huntQuery' }); setTimeout(() => bountyStep(id), 1500); continue; }
+    // claim finished bounties by themselves (free, setting on by default): ask for fresh numbers every 5 min
+    if (store.data.settings.bountyAutoClaim !== false && (!g.huntAskAt || Date.now() - g.huntAskAt > 5 * 60 * 1000)) { g.huntAskAt = Date.now(); sendInput(id, { type: 'huntQuery' }); }
+    if (store.data.settings.bountyAutoClaim !== false && g.hunt && g.hunt.at > (g.huntClaimAt || 0)) {
+      g.huntClaimAt = Date.now();
+      // straight from the server's numbers (no game window opened: it would close what the player has open)
+      const NEED = { logging: 60, mining: 60, herbalism: 60, fishing: 30, spirit: 40 };
+      const list = Object.entries(g.hunt.prog || {}).map(([bid, prog]) => { const line = /#g:(\w+)$/.exec(bid); return { id: bid, prog, need: line ? NEED[line[1]] || 999 : 40, claimed: g.hunt.claimed.includes(bid) }; });
+      bountyClaimDone(id, list).catch(() => {});
+    }
+  }
+}
+
 // ---------- world boss mode: every online account into the arena (the game's own "join (free)") ----------
 // joins with the game's worldBossWarp, turns AUTO on in the arena, and when the event ends takes the
 // accounts that BinderDash sent back to where they were (the game's "leave") with AUTO on again
@@ -1764,7 +1904,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
@@ -1823,6 +1963,8 @@ function registerIpc() {
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   handle('world-boss-go', (kind) => worldBossGo(String(kind || ''), 'ปุ่ม'));
+  handle('bounty', (id, on) => bountyStart(id, on !== false));
+  handle('bounty-all', async (on) => { const r = []; for (const [id, g] of openGames()) if (g.inGame && !g.demo) r.push({ id, ...(await bountyStart(id, on !== false)) }); return r; }); // eslint-disable-line no-await-in-loop
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
   // real DPS: sum this character's own hits for N seconds (count from the first hit)
@@ -2054,6 +2196,7 @@ app.whenReady().then(() => {
   setInterval(fightTick, 5000);
   setInterval(marketWatchTick, 1000);
   setInterval(autoRespawnTick, 15000);
+  setInterval(bountyTick, 20000);
   applyStartWithWindows();
   syncRemote();
 });
