@@ -177,6 +177,74 @@ function targetsOf(sid, lv, evo, pack) {
   return 1;
 }
 let evals = 0;
+// ---------- combo conditions the game's calculator leaves out (or only has as an on/off switch) ----------
+// Numbers are the game's own (its in-game guide text): Chill 1 stack per hit of a chilling skill, 3 stacks =
+// frozen 1.6 s, a skill hit on a frozen target = Shatter x2.2 + 30% splash, Field Boss / Mini-boss never freeze
+// and are not stunned. Hunter's Mark: +pct per stack for every hit on the marked target, 3 stacks (Markbow 6,
+// at 6 = Apex +30%). "Target under status" bonuses (gear affix, cards, class 2) come from the calculator itself,
+// weighted by how much of the fight this build keeps the target slowed / rooted / chilled.
+const CHILL_FREEZE = 3; const FREEZE_MS = 1600; const SHATTER = 2.2; const SHATTER_SPLASH = 0.3; const CHILL_MS = 3000; const APEX = 1.3;
+function isBossTarget(b) { const t = String((b.calc || {}).target || ''); const m = G.mobs && G.mobs[t]; return !!WORLD[t] || /^training_dummy:/.test(t) || (m && (m.role === 'boss' || m.role === 'mini-boss')); }
+function defOf(b, sid) { let d = G.skills[sid] || {}; if (G.def) { try { d = G.def(sid, b.skills[sid] || 1, b.evo[sid] || undefined) || d; } catch { /* keep */ } } return d; }
+function comboOf(b, p, r) {
+  const rot = rotationOf(r, b.hotbar, SUSTAIN.DL, SUSTAIN.FROM);
+  const secs = rot.secs || 120;
+  const boss = isBossTarget(b);
+  const parts = []; let mult = 1;
+  const rate = (sid) => ((rot.per[sid] || {}).n || 0) / secs; // casts per second over the long fight
+  // 1) target under status: how much of the time, and what the calculator's "debuffed" switch is worth
+  let up = 0; const ccSk = [];
+  for (const sid of b.hotbar) {
+    const d = defOf(b, sid); const n = rate(sid); if (!n) continue;
+    let ms = 0;
+    if (!boss) ms = Math.max(ms, d.stunMs || 0, d.rootMs || 0, d.anchorRootMs || 0, d.freezeMs || 0);
+    ms = Math.max(ms, d.slowPct ? (d.slowMs || 2000) : 0, d.chill ? CHILL_MS : 0);
+    if (ms) { up += n * ms / 1000; ccSk.push(d.name || sid); }
+  }
+  up = Math.min(1, up);
+  if (up > 0) {
+    let on = null; try { on = calc({ ...b, calc: { ...b.calc, debuffed: true } }); } catch { on = null; }
+    const off = (r.rotation || {}).dps || 0; const onD = on ? (on.rotation || {}).dps || 0 : off;
+    let gain = off ? (onD / off - 1) : 0;
+    // skills that hit harder on a target under status (not in the calculator)
+    for (const x of rot.ae) { const d = defOf(b, x.sid); if (d.bonusVsStatusMult && rot.total) gain += ((rot.per[x.sid] || {}).dmg || 0) / rot.total * (d.bonusVsStatusMult - 1); }
+    if (gain > 0.0005) { mult *= 1 + gain * up; parts.push({ k: 'status', name: 'เป้าติดสถานะ', up: Math.round(up * 100), full: Math.round(gain * 1000) / 10, gain: Math.round(gain * up * 1000) / 10, skills: ccSk }); }
+    else parts.push({ k: 'status', name: 'เป้าติดสถานะ', up: Math.round(up * 100), full: 0, gain: 0, skills: ccSk });
+  }
+  // 2) Hunter's Mark (scout): stacks kept up by the marking skills
+  if (b.job === 'scout') {
+    let apps = 0; let pct = 0;
+    for (const sid of b.hotbar) { const d = defOf(b, sid); if (d.huntMark && rate(sid)) { apps += rate(sid) * (d.huntMark.ms || 8000) / 1000; pct = Math.max(pct, d.huntMark.pct || 0); } }
+    if (apps > 0 && pct > 0) {
+      const cap = b.c2 === 'markbow' ? 6 : 3;
+      const stacks = Math.min(cap, apps);
+      let m = 1 + stacks * pct; if (cap === 6 && stacks >= 6) m *= APEX;
+      mult *= m;
+      parts.push({ k: 'mark', name: "Hunter's Mark", stacks: Math.round(stacks * 10) / 10, cap, gain: Math.round((m - 1) * 1000) / 10, apex: cap === 6 && stacks >= 6 });
+    }
+  }
+  // 3) Chill -> freeze -> Shatter (mage): only monsters that can freeze
+  if (b.job === 'mage') {
+    let stacks = 0; const chillers = [];
+    for (const sid of b.hotbar) { const d = defOf(b, sid); if (d.chill && rate(sid)) { stacks += rate(sid) * d.chill * Math.min(p.pack || 1, d.maxTargets || 1, 1); chillers.push(d.name || sid); } }
+    stacks += rate('basic'); // a mage's basic attack chills too (game guide)
+    if (boss) { if (chillers.length) parts.push({ k: 'shatter', name: 'Chill → Shatter', boss: true, skills: chillers, gain: 0 }); }
+    else if (stacks > 0 && rot.total) {
+      // Shatter breaks on ONE skill hit, so use damage per hit (a zone cast lands several hits)
+      const hitsPerSec = rot.ae.reduce((t, x) => t + rate(x.sid) * Math.max(1, x.perCast || 1), 0);
+      const skillDmg = rot.ae.reduce((t, x) => t + ((rot.per[x.sid] || {}).dmg || 0), 0) / secs;
+      const freezes = Math.min(stacks / CHILL_FREEZE, 1000 / FREEZE_MS, rot.ae.reduce((t, x) => t + rate(x.sid), 0));
+      const avgHit = hitsPerSec ? skillDmg / hitsPerSec : 0;
+      // extra from the shattering hit itself, per target (the 30% splash around it is left out: conservative)
+      const add = freezes * avgHit * (SHATTER - 1);
+      const m = 1 + add / (rot.total / secs);
+      mult *= m;
+      parts.push({ k: 'shatter', name: 'Chill → Shatter', perMin: Math.round(freezes * 60), skills: chillers, gain: Math.round((m - 1) * 1000) / 10 });
+    }
+  }
+  return { mult, parts };
+}
+
 function score(b, p) {
   evals++;
   let r; try { r = calc(b); } catch (e) { return { v: 0, err: String(e && e.message || e) }; }
@@ -190,6 +258,7 @@ function score(b, p) {
     for (const s of rot.share) v += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack));
     v = v / (rot.seconds || 60);
   }
+  if (p.combos !== false) { try { v *= comboOf(b, p, r).mult; } catch { /* leave as is */ } }
   return { v, r };
 }
 // hotbar = damaging skills by damage per second of cast time, best 6 (the game rotates in hotbar order)
@@ -459,6 +528,7 @@ function describe(b, p) {
     problems,
     build: { skills: b.skills, evo: b.evo, traits: b.traits, c2tr: b.c2tr, hotbar: b.hotbar, c2: b.c2 },
     order: (() => { try { return skillOrder(b, p, r); } catch (e) { return null; } })(),
+    combos: (() => { try { return comboOf(b, p, r).parts; } catch { return []; } })(),
   };
 }
 
@@ -492,6 +562,7 @@ function cardScore(b, p) {
   if (p.goal !== 'boss') { dps = 0; for (const s of rot.share) dps += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack)); dps /= rot.seconds || 60; }
   const al = r.album || {};
   const gold = al.gold || 0; const drop = al.drop || 0;
+  if (p.combos !== false) { try { dps *= comboOf(b, { ...p, mode: p.goal === 'boss' ? 'boss' : 'farm' }, r).mult; } catch { /* leave */ } }
   const v = p.goal === 'gold' ? dps * (1 + gold / 100) * (1 + drop / 200) : dps;
   return { v, dps, gold, drop, r };
 }

@@ -658,6 +658,7 @@ async function openLab(opt = {}) {
     el('option', { value: 'auto' }, 'อัตโนมัติ (ตามบอส)'), el('option', { value: 'real' }, 'จากการตีจริง'),
     el('option', { value: '30' }, '30 วิ'), el('option', { value: '60' }, '1 นาที'), el('option', { value: '180' }, '3 นาที'), el('option', { value: 'sustain' }, 'ยาวมาก (นาทีที่ 2–3)'));
   const party = num_(1, 1, 30);
+  const useCombos = el('input', { type: 'checkbox', checked: '' });
   const realOf = () => { const t = boss.value || ''; const f = ft.fights[t]; return f ? f : null; };
   const ftNote = el('small', { class: 'hint' });
   const updFt = () => { const f = realOf(); const wl = ft.world[boss.value]; ftNote.textContent = f ? ` · ตีจริง ${f.n} ครั้ง ค่ากลาง ${f.sec} วิ` : wl ? ` · กิจกรรมยาว ${Math.round(wl / 60)} นาที` : ''; };
@@ -681,7 +682,7 @@ async function openLab(opt = {}) {
   };
   const labParams = () => {
     const rf = realOf();
-    const p = { fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+    const p = { combos: useCombos.checked, fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
@@ -733,6 +734,7 @@ async function openLab(opt = {}) {
       el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
       el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
       el('label', {}, 'โหมด ', mode), bossRow, packRow,
+      el('label', { title: 'นับคอมโบตามกลไกเกม: เป้าติดสถานะ (สโลว์/ตรึง/หนาว กับเกียร์-การ์ด-สกิลที่แรงขึ้น), Hunter\'s Mark ของ Scout, Chill → Shatter ของ Mage' }, useCombos, ' นับคอมโบ (สถานะ · Mark · Shatter)'),
       me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null,
       el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
         hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)'),
@@ -846,17 +848,26 @@ function cardBox(x) {
     out);
 }
 
-// skill order: ranking, the opening sequence as the game casts it, and the crowd-control combo
+// combo conditions counted in the score: target under status, Hunter's Mark, Chill -> Shatter
+function comboBox(parts) {
+  if (!parts || !parts.length) return null;
+  const line = (c) => {
+    if (c.k === 'status') return c.full > 0
+      ? `🧊 เป้าติดสถานะ ${c.up}% ของเวลา (จาก ${c.skills.join(', ')}) · ถ้าติดตลอด +${c.full}% → ได้จริง +${c.gain}%`
+      : `🧊 เป้าติดสถานะ ${c.up}% ของเวลา (จาก ${c.skills.join(', ')}) · ยังไม่มีเกียร์/การ์ด/สกิลที่แรงขึ้นใส่เป้าติดสถานะ (เช่น affix "ดาเมจใส่เป้าติดดีบัฟ", การ์ด Bramble Pact)`;
+    if (c.k === 'mark') return `🎯 Hunter's Mark ค้างได้ ${c.stacks}/${c.cap} สแตก${c.apex ? ' · Apex ทั้งปาร์ตี้ +30%' : ''} → ดาเมจ +${c.gain}%`;
+    if (c.k === 'shatter') return c.boss ? `❄️ Chill → Shatter: บอส/มินิบอสไม่แข็ง จึงไม่มี Shatter (ได้แค่สโลว์จาก ${c.skills.join(', ')})` : `❄️ Chill → Shatter ~${c.perMin} ครั้ง/นาที ต่อมอน 1 ตัว (จาก ${c.skills.join(', ')}) → ดาเมจ +${c.gain}% (ไม่นับระเบิดรอบตัว 30%)`;
+    return c.name;
+  };
+  return el('div', { class: 'lab-crit' }, el('b', {}, '🔗 คอมโบที่นับในคะแนน'), ...parts.map((c) => el('div', {}, line(c))));
+}
+
+// skill order: ranking, the opening sequence as the game casts it
 function orderBox(o) {
   if (!o || !o.rank) return null;
   const sec = (ms) => (ms ? (ms / 1000).toFixed(ms % 1000 ? 1 : 0) + ' วิ' : '-');
   return el('details', { class: 'lab-order' },
     el('summary', {}, `⚔️ อันดับสกิลและลำดับการปล่อย · ${o.rank.filter((r) => r.sid !== 'basic').map((r) => r.name).slice(0, 3).join(' > ')}`),
-    o.combo ? el('div', { class: 'lab-crit' },
-      o.combo.fullGain > 0
-        ? el('div', {}, `🔗 คอมโบติดสถานะ: เปิดด้วย ${o.combo.opener} ก่อน แล้วค่อยปล่อยสกิลแรง · ถ้าเป้าติดสถานะตลอด ดาเมจ +${o.combo.fullGain}% · สกิลในบิลด์ทำให้ติดได้ราว ${o.combo.uptime}% ของเวลา → คาดได้จริง ~+${o.combo.realGain}%`)
-        : el('div', {}, '🔗 สกิลติดสถานะในบิลด์นี้ช่วยคุมมอน/เอาตัวรอด แต่ไม่เพิ่มดาเมจ (ไม่มีการ์ด เกียร์ หรือสกิลที่แรงขึ้นใส่เป้าติดสถานะ) จึงไม่ต้องเปิดด้วยสกิลเหล่านี้'),
-      el('div', { class: 'hint' }, o.combo.skills.map((x) => `${x.name}: ${x.what}`).join(' · '))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, [
       o.naive ? `ลำดับช่องลัดนี้แรงกว่าเรียงตามดาเมจต่อครั้ง (${o.naive.order.join(' > ')}) ${o.naive.gain >= 0 ? '+' : ''}${o.naive.gain}%` : 'ลำดับนี้ตรงกับการเรียงตามดาเมจต่อครั้ง',
       o.filler ? ` · ${o.filler} เป็นสกิลตีถี่ เติมช่องว่างระหว่างคูลดาวน์ของสกิลแรง` : '',
@@ -912,6 +923,7 @@ function renderLab(box, r) {
       el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
+    comboBox(x.combos),
     orderBox(x.order),
     cardBox(x),
     mapBox(x),
