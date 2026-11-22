@@ -639,7 +639,9 @@ async function openLab(opt = {}) {
   const hasLo = !!lo && (Object.keys(lo.equip || {}).length > 0 || Object.keys(lo.album || {}).length > 0);
   const useGear = el('input', { type: 'checkbox', checked: hasLo ? '' : null, disabled: hasLo ? null : '' });
   const packRow = el('label', { hidden: '' }, 'มอนต่อกลุ่ม ', pack, el('small', { class: 'hint' }, ' ตัว (สกิลวง/ทะลุ/กวาด ตีได้หลายตัว)'));
-  const bossRow = el('label', {}, 'เป้า ', boss);
+  const win = el('select', { title: 'ตีบอสนานเกิน 1 นาที: ใช้ดาเมจยาว (นาทีที่ 2–3) ไม่นับช่วงเปิดที่ทุกสกิลพร้อมพร้อมกัน' },
+    el('option', { value: 'sustain' }, 'ดาเมจยาว (นาทีที่ 2–3)'), el('option', { value: 'burst' }, '60 วิแรก (รวมช่วงเปิด)'));
+  const bossRow = el('label', {}, 'เป้า ', boss, ' · คิดจาก ', win);
   mode.addEventListener('change', () => { packRow.hidden = mode.value !== 'farm'; bossRow.hidden = mode.value !== 'boss'; });
   const go = el('button', { class: 'primary' }, me && me.job === myJob ? `🧪 วิเคราะห์ ${me.name || 'ตัวละคร'} (สกิล + การ์ด)` : 'คำนวณหาบิลด์ที่ดีที่สุด');
   const res = el('div', { class: 'lab-res' });
@@ -655,7 +657,7 @@ async function openLab(opt = {}) {
     go.disabled = false;
   };
   const labParams = () => {
-    const p = { job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+    const p = { window: win.value, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
@@ -840,7 +842,7 @@ function orderBox(o) {
       el('tr', {}, ...['#', 'สกิล', 'ช่อง', '% ดาเมจ', 'ดาเมจ/ครั้ง', 'ครั้ง/นาที', 'คูลดาวน์', 'ร่าย', 'ชาร์จ'].map((h) => el('th', {}, h))),
       ...o.rank.map((r, i) => el('tr', {}, el('td', {}, String(i + 1)), el('td', {}, r.name), el('td', {}, r.slot > 0 ? String(r.slot) : '-'),
         el('td', { class: 'gold' }, r.share + '%'), el('td', {}, num(r.perCast)), el('td', {}, String(r.casts)), el('td', {}, sec(r.cdMs)), el('td', {}, sec(r.castMs)), el('td', {}, String(r.charges))))),
-    el('p', { class: 'hint' }, 'จำลองแบบเดียวกับเครื่องคิดเลขของเกม: ทุก 50 ms ถ้าไม่ได้ร่ายอยู่ กดสกิลแรกในช่องลัดที่พร้อม ไม่งั้นตีปกติ · ชาร์จที่ 2 ขึ้นไปแรง 50% · ลำดับช่องลัดที่แสดงคือแบบที่ดีที่สุดจากการลองทุกลำดับ'));
+    el('p', { class: 'hint' }, 'อันดับและครั้ง/นาทีคิดจากนาทีที่ 2–3 (ตีบอสยาว) · ลำดับช่วงเปิดคือ 15 วิแรก · จำลองแบบเดียวกับเครื่องคิดเลขของเกม: ทุก 50 ms ถ้าไม่ได้ร่ายอยู่ กดสกิลแรกในช่องลัดที่พร้อม ไม่งั้นตีปกติ · ชาร์จที่ 2 ขึ้นไปแรง 50% · ลำดับช่องลัดที่แสดงคือแบบที่ดีที่สุดจากการลองทุกลำดับ'));
 }
 
 // which map earns the most silver per hour with this build (+ the cards picked for gold farming, if any)
@@ -873,7 +875,9 @@ function renderLab(box, r) {
   const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
-      el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
+      el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? (x.window === 'burst' ? 'DPS 60 วิแรก' : 'DPS ยาว') : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
+      r.mode === 'boss' ? el('small', { class: 'hint', title: 'ดาเมจยาว = นาทีที่ 2–3 ของการตีต่อเนื่อง (ไม่มีช่วงเปิดที่ทุกสกิลพร้อมพร้อมกัน) · 60 วิแรก = รวมช่วงเปิด' },
+        x.window === 'burst' ? ` · ดาเมจยาว ${num(x.sustained)}` : ` · 60 วิแรก ${num(x.dps)} (ช่วงเปิด +${x.sustained ? Math.round((x.dps / x.sustained - 1) * 100) : 0}%)`) : null,
       i ? el('small', { class: 'hint' }, ` (${Math.round((x.score / best.score - 1) * 100)}%)`) : null,
       cur ? el('small', { class: x.score >= cur.score ? 'pos' : 'neg' }, ` · ${x.score >= cur.score ? '+' : ''}${Math.round((x.score / Math.max(1, cur.score) - 1) * 100)}% จากบิลด์ปัจจุบัน`) : null),
     el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, `แต้มคลาส 1 ${x.points.c1}/${x.points.c1Max}${x.c2 ? ` · แต้มคลาส 2 ${x.points.c2}/${x.points.c2Max}` : ''}`)),

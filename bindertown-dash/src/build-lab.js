@@ -182,6 +182,7 @@ function score(b, p) {
   const rot = r.rotation || { dps: 0, share: [] };
   const adj = dummyAdj(b, r);
   let v = rot.dps * adj;
+  if (p.mode === 'boss' && p.window !== 'burst') v = sustainedDps(b, r);
   if (p.mode === 'farm') {
     // damage spread over the pack: each skill's share times how many monsters it hits
     v = 0;
@@ -348,12 +349,12 @@ function stillValid(b, p, c2map) {
 // ---------- skill order: replay the game's own rotation (same loop as its calculator) ----------
 // every 50 ms over 60 s: if not busy casting, cast the first hotbar skill that is ready (charges, cooldown),
 // otherwise swing a basic attack when its timer allows. Repeat charges hit for 50%.
-function rotationOf(r, hotbar) {
+function rotationOf(r, hotbar, DL = 60000, FROM = 0) {
   const V = (r && r.skills) || [];
   const ae = hotbar.map((sid) => V.find((x) => x.sid === sid && x.damages && x.hit)).filter(Boolean);
   const st = new Map(ae.map((x) => [x.sid, { left: x.charges || 1, refill: 0, first: true }]));
   const basic = (r && r.basic) || { cdMs: 1000, vsTarget: 0 };
-  const STEP = 50; const DL = 60000; const REPEAT = 0.5;
+  const STEP = 50; const REPEAT = 0.5;
   let busy = 0; let nextBasic = 0; const casts = []; const per = {}; let total = 0;
   for (let t = 0; t < DL; t += STEP) {
     if (t < busy) continue;
@@ -362,29 +363,33 @@ function rotationOf(r, hotbar) {
       const s = st.get(we.sid);
       const dmg = (we.hit.vsTarget * we.perCast + (we.dot || 0)) * (s.first ? 1 : REPEAT);
       s.first = false; s.left--; s.refill = t + we.cdMs;
-      casts.push({ t, sid: we.sid, dmg }); total += dmg;
-      const q = per[we.sid] || (per[we.sid] = { n: 0, dmg: 0 }); q.n++; q.dmg += dmg;
+      casts.push({ t, sid: we.sid, dmg });
+      if (t >= FROM) { total += dmg; const q = per[we.sid] || (per[we.sid] = { n: 0, dmg: 0 }); q.n++; q.dmg += dmg; }
       busy = t + Math.max(STEP, we.castMs || 0);
       if (we.castMs > 0) continue;
     }
-    if (t >= nextBasic && basic.cdMs) { total += basic.vsTarget || 0; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += basic.vsTarget || 0; nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
+    if (t >= nextBasic && basic.cdMs) { if (t >= FROM) { total += basic.vsTarget || 0; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += basic.vsTarget || 0; } nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
   }
-  return { casts, per, total, ae };
+  return { casts, per, total, ae, secs: (DL - FROM) / 1000 };
 }
+// long-fight damage: minutes 2-3 of a 3-minute rotation (no opening burst where every skill is ready at once)
+const SUSTAIN = { DL: 180000, FROM: 60000 };
+function sustainedDps(b, r) { const x = rotationOf(r, b.hotbar, SUSTAIN.DL, SUSTAIN.FROM); return x.total / x.secs * dummyAdj(b, r); }
 // skills that put the target under crowd control (root / stun / slow / freeze / chill)
 const ccOf = (d) => [d.rootMs && 'ตรึง ' + d.rootMs / 1000 + ' วิ', d.stunMs && 'สตัน ' + d.stunMs / 1000 + ' วิ', d.freezeMs && 'แช่แข็ง ' + d.freezeMs / 1000 + ' วิ', d.slowPct && 'สโลว์ ' + Math.round(d.slowPct * 100) + '%', d.chill && 'หนาว'].filter(Boolean);
 function skillOrder(b, p, r) {
   const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
-  const rot = rotationOf(r, b.hotbar);
+  const rot = rotationOf(r, b.hotbar, SUSTAIN.DL, SUSTAIN.FROM); // rank over the long fight (minutes 2-3)
+  const open = rotationOf(r, b.hotbar);                            // first 15 s for the opening sequence
   const adj = dummyAdj(b, r);
   const V = (r && r.skills) || [];
   const rank = Object.entries(rot.per).map(([sid, q]) => {
     const v = V.find((x) => x.sid === sid) || {};
-    return { sid, name: name(sid), casts: q.n, perCast: Math.round(q.dmg / Math.max(1, q.n) * adj), share: rot.total ? Math.round(q.dmg / rot.total * 1000) / 10 : 0,
+    return { sid, name: name(sid), casts: Math.round(q.n / rot.secs * 60), perCast: Math.round(q.dmg / Math.max(1, q.n) * adj), share: rot.total ? Math.round(q.dmg / rot.total * 1000) / 10 : 0,
       cdMs: sid === 'basic' ? Math.round(((r.basic || {}).cdMs || 0)) : Math.round(v.cdMs || 0), castMs: Math.round(v.castMs || 0), charges: v.charges || 1,
       slot: b.hotbar.indexOf(sid) + 1 };
   }).sort((a, c) => c.share - a.share);
-  const opener = rot.casts.filter((c) => c.t < 15000).map((c) => ({ t: Math.round(c.t / 100) / 10, name: name(c.sid) }));
+  const opener = open.casts.filter((c) => c.t < 15000).map((c) => ({ t: Math.round(c.t / 100) / 10, name: name(c.sid) }));
   // crowd-control combo: what the "target is debuffed / under CC" bonuses are worth for this build
   let combo = null;
   const cc = b.hotbar.map((sid) => { let d = G.skills[sid] || {}; if (G.def) { try { d = G.def(sid, b.skills[sid] || 1, b.evo[sid] || undefined) || d; } catch { /* keep */ } } return { sid, name: name(sid), what: ccOf(d), ms: d.rootMs || d.stunMs || d.freezeMs || d.slowMs || (d.chill ? 2000 : 0), cd: d.cdMs || 0 }; }).filter((x) => x.what.length);
@@ -402,7 +407,7 @@ function skillOrder(b, p, r) {
     const byHit = rank.filter((x) => x.sid !== 'basic').sort((a, c) => c.perCast - a.perCast).map((x) => x.sid);
     if (byHit.join() !== b.hotbar.join()) {
       const rn = calc({ ...b, hotbar: byHit });
-      const d0 = (r.rotation || {}).dps || 0; const d1 = (rn.rotation || {}).dps || 0;
+      const d0 = sustainedDps(b, r); const d1 = sustainedDps({ ...b, hotbar: byHit }, rn);
       naive = { order: byHit.map(name), gain: d1 ? Math.round((d0 / d1 - 1) * 1000) / 10 : 0 };
     }
   } catch { /* skip */ }
@@ -439,7 +444,8 @@ function describe(b, p) {
   const used = (c2) => Object.entries(b.skills).filter(([sid]) => isC2(sid) === c2).reduce((t, [, l]) => t + l, 0);
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
-    score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)), ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
+    score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)),
+    sustained: (() => { try { return Math.round(sustainedDps(b, r)); } catch { return 0; } })(), window: p.window === 'burst' ? 'burst' : 'sustain', ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
@@ -478,6 +484,7 @@ function cardScore(b, p) {
   let r; try { r = calc(b); } catch { return { v: 0 }; }
   const rot = r.rotation || { dps: 0, share: [] };
   let dps = rot.dps * dummyAdj(b, r);
+  if (p.goal === 'boss' && p.window !== 'burst') dps = sustainedDps(b, r);
   if (p.goal !== 'boss') { dps = 0; for (const s of rot.share) dps += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack)); dps /= rot.seconds || 60; }
   const al = r.album || {};
   const gold = al.gold || 0; const drop = al.drop || 0;
@@ -786,7 +793,14 @@ L.run = async (p) => {
   const results = [];
   for (const c2 of paths) {
     const q = { ...base, c2 };
-    const b = await optimize(q, yieldNow);
+    let b = await optimize(q, yieldNow);
+    // long boss fights: the search is greedy, so also search by the first 60 s and keep whichever
+    // build is stronger over the long fight (its hotbar re-ordered for the long fight first)
+    if (q.mode === 'boss' && q.window !== 'burst') {
+      const alt = await optimize({ ...q, window: 'burst' }, yieldNow);
+      curP = q; bestHotbar(alt, q);
+      if (score(alt, q).v > score(b, q).v) b = alt;
+    }
     results.push(describe(b, q));
   }
   let current = null;
