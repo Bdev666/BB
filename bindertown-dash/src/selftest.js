@@ -22,6 +22,62 @@ function create(deps) {
     const c = counters.get(id) || {}; c[key] = (c[key] || 0) + n; counters.set(id, c);
   }
 
+  // the Build Lab's own query for the character as it is (same as the "this character" button)
+  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target,
+    loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } });
+
+  // ---------- real combat, per skill, kept with the build and the simulator's answer ----------
+  // own hits are summed per skill; "active" time = gaps between own hits of 3 s or less (walking to
+  // the next monster does not count), so active DPS compares with the simulator's steady DPS
+  const combat = new Map();
+  function combatHit(id, ev) {
+    if (!ev || !(ev.dmg > 0)) return;
+    const now = Date.now();
+    let c = combat.get(id);
+    if (!c) { c = { start: now, last: 0, active: 0, skills: {}, mobs: {}, pet: 0, hits: 0 }; combat.set(id, c); }
+    if (ev.pet) { c.pet += ev.dmg; return; }
+    if (c.last && now - c.last <= 3000) c.active += now - c.last;
+    c.last = now; c.hits++;
+    const k = ev.sid || 'basic';
+    const x = c.skills[k] || (c.skills[k] = { dmg: 0, hits: 0, crits: 0, max: 0, critDmg: 0 });
+    x.dmg += ev.dmg; x.hits++; if (ev.crit) { x.crits++; x.critDmg += ev.dmg; } if (ev.dmg > x.max) x.max = ev.dmg;
+    if (ev.mob) c.mobs[ev.mob] = (c.mobs[ev.mob] || 0) + 1;
+  }
+  async function combatFlush(id, force = false) {
+    const c = combat.get(id);
+    if (!c || (!force && (c.hits < 30 || c.active < 20000))) return null;
+    combat.delete(id);
+    const sec = Math.max(1, c.active / 1000);
+    const total = Object.values(c.skills).reduce((t, x) => t + x.dmg, 0);
+    const mob = Object.entries(c.mobs).sort((a, b) => b[1] - a[1])[0];
+    const rec = { t: new Date().toISOString(), app: version(), acc: id, minutes: Math.round((Date.now() - c.start) / 60000), activeSec: Math.round(sec), hits: c.hits, realDps: Math.round(total / sec), petDmg: c.pet, mobs: c.mobs, mainMob: mob ? mob[0] : null,
+      skills: Object.fromEntries(Object.entries(c.skills).map(([k, x]) => [k, { dmg: x.dmg, hits: x.hits, avg: Math.round(x.dmg / x.hits), max: x.max, critRate: +(x.crits / x.hits).toFixed(3), avgCrit: x.crits ? Math.round(x.critDmg / x.crits) : null, avgNonCrit: x.hits > x.crits ? Math.round((x.dmg - x.critDmg) / (x.hits - x.crits)) : null, share: +(x.dmg / (total || 1)).toFixed(3), dps: Math.round(x.dmg / sec) }])) };
+    try {
+      const me = deps.labMe ? await deps.labMe(id) : null;
+      if (me) {
+        rec.build = { job: me.job, c2: me.c2, level: me.level, jobLevel: me.jobLevel, stats: me.stats, skills: me.skills, evo: me.evo, traits: me.traits, c2tr: me.c2tr, equip: (me.loadout || {}).equip, album: (me.loadout || {}).album, refine: (me.loadout || {}).refineStacks, wRefine: me.wRefine, sRefine: me.sRefine };
+        if (rec.mainMob) {
+          const p = await predictFor(me, rec.mainMob);
+          if (p) {
+            rec.sim = { target: p.target, dps: p.dps, withCombos: p.withCombos, hotbar: p.hotbar, perSkill: p.perSkill, sheet: p.sheet, factors: p.debug && p.debug.factors, basic: p.debug && p.debug.basic };
+            // split the gap: damage per hit (formula) vs hits per second (rotation, walking, overkill)
+            const rb = rec.skills.basic; const sb = rec.sim.basic || {};
+            if (rb && sb.vsTarget) rec.basicCheck = { realAvgNonCrit: rb.avgNonCrit, simPerHit: Math.round(sb.vsTarget), perHitRatio: rb.avgNonCrit ? +(rb.avgNonCrit / sb.vsTarget).toFixed(3) : null, realPerSec: +(rb.hits / sec).toFixed(2), simPerSec: sb.perSec != null ? +Number(sb.perSec).toFixed(2) : null, realCritRate: rb.critRate, simCrit: sb.critChance };
+            const pred = p.withCombos || p.dps;
+            rec.ratio = pred ? +(rec.realDps / pred).toFixed(3) : null;
+            const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
+            rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));
+          }
+        }
+      }
+    } catch (err) { rec.simError = String(err && err.message || err); }
+    const d = new Date();
+    try { fs.appendFileSync(path.join(dirOf('combat'), `combat-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}.jsonl`), JSON.stringify(rec) + '\n'); } catch (err) { log.once('combat-write', 600000, 'warn', 'combat write:', err.message); }
+    log.info(`combat acc ${id}: ${rec.hits} hits, ${rec.activeSec}s active, real ${rec.realDps} DPS vs sim ${rec.sim ? (rec.sim.withCombos || rec.sim.dps) : '-'} on ${rec.mainMob}`);
+    return rec;
+  }
+  const lastCombat = new Map();
+
   async function step(out, name, fn) {
     const t0 = Date.now();
     try {
@@ -131,7 +187,15 @@ function create(deps) {
     await step(out, 'Build Lab เทียบดาเมจจริง', async () => {
       const me = deps.labMe ? await deps.labMe(id) : null;
       if (!me) return { skipped: true, detail: 'อ่านข้อมูลตัวละครไม่ได้' };
-      const p = await deps.labPredict({ ...me, target: 'training_dummy' });
+      const live = await combatFlush(id, (combat.get(id) || {}).hits >= 10);
+      if (live) lastCombat.set(id, live);
+      const lc = lastCombat.get(id);
+      if (lc && lc.sim) {
+        const ratio = lc.ratio;
+        const bc = lc.basicCheck;
+        return { warn: ratio != null && Math.abs(ratio - 1) > 0.15, detail: `ตีจริง ${lc.mainMob}: ${lc.realDps.toLocaleString('en-US')} DPS (ช่วงที่ตีอยู่ ${lc.activeSec} วิ, ${lc.hits} ครั้ง) · Simulator คาด ${(lc.sim.withCombos || lc.sim.dps).toLocaleString('en-US')} · จริง/คาด ${ratio != null ? Math.round(ratio * 100) + '%' : '-'}${bc ? ` · ตีปกติต่อครั้ง จริง ${bc.realAvgNonCrit} / คาด ${bc.simPerHit} · ครั้ง/วิ จริง ${bc.realPerSec} / คาด ${bc.simPerSec}` : ''}`, data: { job: me.job, level: me.level, predicted: lc.sim.withCombos || lc.sim.dps, measured: lc.realDps, ratio, mob: lc.mainMob } };
+      }
+      const p = await predictFor(me, 'training_dummy');
       const pred = p && (p.withCombos || p.dps);
       const r = g.data.rates(Date.now());
       const m = g.lastMeasure;
@@ -139,7 +203,7 @@ function create(deps) {
       let ratio = null;
       if (m && m.dps) { ratio = pred ? m.dps / pred : null; detail += ` · วัดจริงล่าสุด ${Math.round(m.dps)} DPS${ratio ? ` (จริง/คาด ${(ratio * 100).toFixed(0)}%)` : ''}`; }
       else if (r.dpsNow > 0) detail += ` · ตีอยู่ตอนนี้ ${Math.round(r.dpsNow)} DPS (มอนจริง ไม่ใช่หุ่น เทียบตรงไม่ได้)`;
-      else detail += ' · ยังไม่มีผลวัดจริง (ไปตีหุ่นฝึกแล้วกด "วัด DPS จริง" ใน Build Lab)';
+      else detail += ' · ยังไม่มีดาเมจจริงพอเทียบ (ตีมอนสักพักแล้วทดสอบใหม่ หรือวัดกับหุ่นฝึกใน Build Lab)';
       return { warn: ratio != null && Math.abs(ratio - 1) > 0.15, detail, data: { job: me.job, level: me.level, predicted: pred || null, measured: m ? m.dps : null, ratio, dpsNow: r.dpsNow } };
     });
 
@@ -208,6 +272,7 @@ function create(deps) {
   // ---------- stats log: one line per online account every 10 minutes ----------
   function statsTick() {
     if (S().statsLog === false) return;
+    for (const [id, g] of games) if (g.inGame && !g.demo) combatFlush(id).then((r) => { if (r) lastCombat.set(id, r); }).catch(() => {});
     const lines = [];
     for (const [id, g] of games) {
       if (!g.inGame || g.demo || g.status !== 'online') continue;
@@ -269,6 +334,9 @@ function create(deps) {
     const since = Date.now() - 30 * 24 * 3600 * 1000;
     const statLines = statFiles.flatMap((f) => read(path.join(dirOf('stats'), f)).split('\n').filter((l) => { try { return l && Date.parse(JSON.parse(l).t) >= since; } catch { return false; } }));
     out += part(`stats (30 days, ${statLines.length} lines)`, clean(statLines.join('\n')));
+    let combatFiles = []; try { combatFiles = fs.readdirSync(dirOf('combat')).filter((f) => f.endsWith('.jsonl')).sort().slice(-2); } catch { /* none */ }
+    const combatLines = combatFiles.flatMap((f) => read(path.join(dirOf('combat'), f)).split('\n').filter((l) => { try { return l && Date.parse(JSON.parse(l).t) >= since; } catch { return false; } }));
+    out += part(`combat: real damage per skill + build + simulator (30 days, ${combatLines.length} records)`, clean(combatLines.join('\n')));
     out += part('binderdash.log', clean(read(path.join(log.dir(), 'binderdash.log.1')) + read(path.join(log.dir(), 'binderdash.log'))).slice(-6 * 1024 * 1024));
     const d = new Date(); const p2 = (x) => String(x).padStart(2, '0');
     const file = path.join(outDir, `BinderDash-log-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.txt`);
@@ -277,7 +345,7 @@ function create(deps) {
     return { ok: true, file, kb: Math.round(out.length / 1024) };
   }
 
-  return { runSelfTest, statsTick, statsSummary, count, counters, logProblems, bundle };
+  return { runSelfTest, statsTick, statsSummary, count, counters, logProblems, bundle, combatHit, combatFlush };
 }
 
 module.exports = { create };

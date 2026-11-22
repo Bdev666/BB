@@ -418,7 +418,7 @@ function handleEvents(id, events) {
       case 'kill':
         g.lastHitAt = Date.now();
         // a real-DPS measurement is running: keep this character's own hits
-        if (ev.type === 'hit') fightHit(g, ev);
+        if (ev.type === 'hit') { fightHit(g, ev); selftest.combatHit(id, ev); }
         if (ev.type === 'kill' && g.fight && ev.target === pretty(g.fight.mob)) fightEnd(g, true);
         if (ev.type === 'hit' && g.measure && Date.now() < g.measure.until) { const m = g.measure; if (!m.first) m.first = Date.now(); m.last = Date.now(); m.hits.push({ dmg: ev.dmg, sid: ev.sid, mob: ev.mob, pet: ev.pet, crit: ev.crit }); }
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
@@ -1795,7 +1795,8 @@ function registerIpc() {
   labMeRef = labMe;
   handle('selftest', (id, opts) => selftest.runSelfTest(id, opts || {}));
   handle('stats-summary', (days) => selftest.statsSummary(days || 7));
-  handle('log-bundle', () => {
+  handle('log-bundle', async () => {
+    for (const [id, g] of games) if (g.inGame && !g.demo) await selftest.combatFlush(id).catch(() => null); // eslint-disable-line no-await-in-loop
     let dir; try { dir = app.getPath('desktop'); fs.accessSync(dir, fs.constants.W_OK); } catch { dir = app.getPath('downloads'); try { fs.mkdirSync(dir, { recursive: true }); } catch { dir = log.dir(); } }
     try {
       const r = selftest.bundle(dir, { platform: process.platform, os: require('os').release(), electron: process.versions.electron });
