@@ -205,6 +205,7 @@ function renderProfile(a) {
     ['Silver/ชม.', short(r.silverPerHour), 'pos', 'Silver ที่ได้จากการล้มมอน'],
     ['ขายดรอป/ชม.', short(r.dropValuePerHour), 'pos', `มูลค่าของดรอปถ้าขาย NPC (คำนวณแบบเดียวกับเกม) · รวม ${num(r.dropValue)}`],
     ['รายได้รวม/ชม.', short(r.incomePerHour), 'gold', 'Silver/ชม. + ขายดรอป/ชม.'],
+    ['กำไรฟาร์ม/ชม.', a.farmNow ? short(a.farmNow.netHr) : '-', 'gold', a.farmNow ? `แมพนี้ ${a.farmNow.minutes} นาทีที่ฟาร์มจริงใน 1 ชม.ล่าสุด · Silver จากมอน (รวมคอมโบ/การ์ด Gold แล้ว) + ขาย/หลอมอัตโนมัติ Normal/Magic + ETC ราคา NPC − ยาที่ซื้อ · ไม่นับราคาตลาด` : 'ต้องฟาร์มด้วย AUTO สักพักก่อน (นับเฉพาะนาทีที่ล้มมอน)'],
     ['การ์ด', r.cards ? `${num(r.cards)} · ${r.cardsPerHour.toFixed(1)}/ชม.` : '0', 'card', (d.cards || []).slice(-5).map((c) => c.mob).join(', ') || 'ยังไม่ได้การ์ด'],
   ];
   // update text in place (no DOM rebuild every second)
@@ -521,6 +522,20 @@ function closeModal() { $('#modal').hidden = true; $('#modal').classList.remove(
 $('#modal-x').addEventListener('click', closeModal);
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+async function openFarmMaps(accId) {
+  const r = await dash.invoke('farm-maps', accId);
+  const rows = (r && r.rows) || [];
+  const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${m} นาที` : m < 1440 ? `${Math.round(m / 60)} ชม.` : `${Math.round(m / 1440)} วัน`; };
+  openModal('📊 แมพที่เคยฟาร์ม', [
+    el('p', { class: 'hint' }, `เลเวล ${r.level} (นับนาทีที่ฟาร์มตอนเลเวลห่างไม่เกิน 5) · กำไร = Silver จากมอน (รวมคอมโบ/การ์ด Gold) + ขาย/หลอมอัตโนมัติ Normal/Magic + ETC ราคา NPC − ยาที่ซื้อ · ไม่นับราคาตลาด · ตัวเลขแม่นขึ้นเมื่อเปิดขาย/หลอมอัตโนมัติในเกม`),
+    rows.length ? el('table', { class: 'lab-table' },
+      el('tr', {}, ...['แมพ', 'กำไร/ชม.', 'จากมอน/ชม.', 'ฆ่า/ชม.', 'วัดแล้ว', 'ล่าสุด', ''].map((h) => el('th', {}, h))),
+      ...rows.map((x) => el('tr', { class: x.map === r.here ? 'on' : '' },
+        el('td', {}, x.name + (x.map === r.here ? ' (อยู่ตอนนี้)' : '')), el('td', {}, el('b', {}, num(x.netHr))), el('td', {}, num(x.killSilverHr)), el('td', {}, num(x.killsHr)), el('td', {}, `${x.minutes} นาที`), el('td', {}, ago(x.last)),
+        el('td', {}, x.map === r.here ? '' : el('button', { class: 'tiny', onclick: async () => { const g = await dash.invoke('farm-go', accId, x.map); showBanner(g && g.ok ? `🚶 กำลังไป ${x.name} · ถึงแล้วเปิด AUTO ทั้งแมพ` : (g && g.error) || 'ไปไม่ได้'); closeModal(); } }, 'ไปฟาร์ม'))))) : el('p', {}, 'ยังไม่มีข้อมูล · เปิด AUTO ฟาร์มสักพัก หรือกด "🔎 หาที่ฟาร์มคุ้มสุด"'),
+  ]);
+}
 
 let potionList = null;
 async function openBuy() {
@@ -1198,7 +1213,7 @@ function renderControls(a) {
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '▶ การเล่น'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
@@ -1206,6 +1221,8 @@ function renderControls(a) {
       s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
       a.autoRespawn ? el('span', { class: 'ctl-chip' + (a.autoRespawn.on ? ' on' : ''), title: a.autoRespawn.on ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมเปิดอยู่ · ตายตอน AUTO ในแมพฟิลด์ = ลุกที่เดิม' : 'เปิดตัวเลือกของเกมไม่ได้' }, a.autoRespawn.on ? `↺ เกิดที่เดิม: เปิด${a.autoRespawn.count ? ` (${a.autoRespawn.count} ครั้ง)` : ''}` : (a.autoRespawn.why === 'premium' ? '↺ เกิดที่เดิม: ต้อง Premium' : '↺ เกิดที่เดิม: -')) : null,
       el('button', { class: 'ctl' + (a.bounty && a.bounty.on ? ' on' : ''), title: 'ทำค่าหัวรายวันเอง: เดินทางไปแมพของแต่ละใบ (ปุ่มเดินทางของเกม) ยืนข้างมอนแล้วเปิด AUTO ครบ 40 ตัวรับรางวัลแล้วไปใบต่อไป · ข้ามใบที่มอนเลเวลสูงกว่าตัวละคร', onclick: () => dash.invoke('bounty', a.id, !(a.bounty && a.bounty.on)) }, a.bounty && a.bounty.on ? '■ หยุดทำค่าหัว' : '📜 ทำค่าหัวอัตโนมัติ'),
+      el('button', { class: 'ctl' + (a.finder && a.finder.on ? ' on' : ''), title: 'ลองฟาร์มจริงแมพที่น่าจะคุ้มสุด 3–4 แมพ (เลือกจาก Build Lab ตามเลเวลและความปลอดภัย) แมพละ 10 นาที แล้วพาไปฟาร์มแมพที่ได้ Silver สุทธิมากสุด · นับ Silver จากมอน + ขาย/หลอม Normal/Magic + ETC ราคา NPC − ยา · ไม่นับราคาตลาด · เดินทางฟรีเท่านั้น · แมพที่เคยวัดแล้วใน 3 วันไม่ต้องลองซ้ำ', onclick: async () => { const on = !(a.finder && a.finder.on); const r = await dash.invoke('farm-find', a.id, on); if (r && !r.ok) showBanner(r.error); else if (on && r) showBanner(`🔎 จะลอง: ${r.trying.join(', ') || '-'}${r.known.length ? ` · ใช้ผลเดิม: ${r.known.join(', ')}` : ''}`); } }, a.finder && a.finder.on ? '■ หยุดหาที่ฟาร์ม' : '🔎 หาที่ฟาร์มคุ้มสุด'),
+      el('button', { class: 'ctl', title: 'กำไรต่อชั่วโมงของทุกแมพที่ตัวละครนี้เคยฟาร์ม (ใกล้เลเวลตอนนี้) · กดไปฟาร์มแมพไหนก็ได้', onclick: () => openFarmMaps(a.id) }, '📊 แมพที่เคยฟาร์ม'),
       el('button', { class: 'ctl', title: 'รับของในจดหมาย ภารกิจรายวัน/รายสัปดาห์ของ Pass และรางวัล Tier ของ Pass ที่พร้อมรับ (เหมือนกดปุ่มรับในเกม)', onclick: async (e) => { e.target.disabled = true; const r = await dash.invoke('claim-rewards', a.id); showBanner(r && r.ok ? `🎁 รับแล้ว: จดหมาย ${r.mail} · ภารกิจ ${r.daily + r.weekly} · Tier ของ Pass` : (r && r.error) || 'รับของไม่สำเร็จ'); setTimeout(() => { $('#banner').hidden = true; }, 3000); e.target.disabled = false; } }, '🎁 รับของทั้งหมด'))),
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '💰 ของและเงิน'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
@@ -1216,7 +1233,7 @@ function renderControls(a) {
     } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`))),
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '🧪 บิลด์'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl', title: 'วิเคราะห์บิลด์ของตัวละครนี้: ดาเมจตอนนี้จากเกียร์+การ์ดที่ใส่ แล้วหาชุดสกิลและการ์ดที่แรงที่สุด', onclick: () => openLab({ id: a.id, auto: true }) }, '🧪 วิเคราะห์บิลด์'))),
-    (a.deaths && a.deaths.perHour >= 5) || (a.bounty && (a.bounty.on || a.bounty.note)) ? el('div', { class: 'ctl-status' }, a.deaths && a.deaths.perHour >= 5 ? el('span', { class: 'ctl-chip' + (a.deaths.feePerHour > a.deaths.silverPerHour * 0.1 ? ' warn' : ''), title: 'ตายบ่อยในแมพนี้: ทุกครั้งที่ตายเสียเวลาตี และเกิดที่เดิมในแมพฟิลด์เสีย 5,000 G ต่อครั้ง · ถ้าค่าเกิดเกิน 10% ของรายได้ ลองเพิ่ม HP/VIT หรือย้ายไปแมพที่มอนเบาลง' }, `☠ ตาย ${a.deaths.perHour}/ชม. · ค่าเกิด ~${num(a.deaths.feePerHour)} G/ชม.${a.deaths.silverPerHour ? ` (${Math.round(a.deaths.feePerHour / a.deaths.silverPerHour * 100)}% ของรายได้)` : ''}`) : null, a.bounty && (a.bounty.on || a.bounty.note) ? el('span', { class: 'ctl-chip' + (a.bounty.on ? ' on' : ''), title: 'ค่าหัวรายวัน' }, `📜 ${a.bounty.note || a.bounty.phase}${a.bounty.done ? ` · รับแล้ว ${a.bounty.done}` : ''}`) : null) : null,
+    (a.deaths && a.deaths.perHour >= 5) || (a.bounty && (a.bounty.on || a.bounty.note)) || (a.finder && a.finder.note) ? el('div', { class: 'ctl-status' }, a.finder && a.finder.note ? el('span', { class: 'ctl-chip' + (a.finder.on ? ' on' : ''), title: 'หาที่ฟาร์มคุ้มสุด' }, `🔎 ${a.finder.note}`) : null, a.deaths && a.deaths.perHour >= 5 ? el('span', { class: 'ctl-chip' + (a.deaths.feePerHour > a.deaths.silverPerHour * 0.1 ? ' warn' : ''), title: 'ตายบ่อยในแมพนี้: ทุกครั้งที่ตายเสียเวลาตี และเกิดที่เดิมในแมพฟิลด์เสีย 5,000 G ต่อครั้ง · ถ้าค่าเกิดเกิน 10% ของรายได้ ลองเพิ่ม HP/VIT หรือย้ายไปแมพที่มอนเบาลง' }, `☠ ตาย ${a.deaths.perHour}/ชม. · ค่าเกิด ~${num(a.deaths.feePerHour)} G/ชม.${a.deaths.silverPerHour ? ` (${Math.round(a.deaths.feePerHour / a.deaths.silverPerHour * 100)}% ของรายได้)` : ''}`) : null, a.bounty && (a.bounty.on || a.bounty.note) ? el('span', { class: 'ctl-chip' + (a.bounty.on ? ' on' : ''), title: 'ค่าหัวรายวัน' }, `📜 ${a.bounty.note || a.bounty.phase}${a.bounty.done ? ` · รับแล้ว ${a.bounty.done}` : ''}`) : null) : null,
   ] : [el('span', { class: 'hint' }, a.status === 'closed' ? 'เปิดเกมเพื่อใช้ปุ่มควบคุม' : 'ปุ่มควบคุมใช้ได้เมื่อเข้าเกมแล้ว')]));
 }
 

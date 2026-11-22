@@ -411,10 +411,10 @@ class BinderTownAdapter {
       case 'inv': this.inventory(e, at, out); break;
       case 'autoSold':
         // gone from the bag because it was sold, not used up
-        out.push({ type: 'sold', item: pretty(e.itemId), qty: e.qty || 1, auto: true, t: at });
+        out.push({ type: 'sold', id: String(e.itemId || ''), item: pretty(e.itemId), qty: e.qty || 1, auto: true, t: at });
         break;
       case 'autoForged':
-        out.push({ type: 'sold', item: pretty(e.itemId), qty: e.qty || 1, auto: true, forged: true, t: at });
+        out.push({ type: 'sold', id: String(e.itemId || ''), item: pretty(e.itemId), qty: e.qty || 1, auto: true, forged: true, t: at });
         break;
       case 'sold':
         out.push({ type: 'sold', id: e.itemId === '*' ? '' : String(e.itemId || ''), item: e.itemId === '*' ? 'ของหลายชิ้น' : pretty(e.itemId), qty: e.qty, silver: e.silver, t: at });

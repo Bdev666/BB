@@ -28,6 +28,8 @@ const DEFAULTS = {
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
     autoRespawnHere: false, // spends Gold in fields (5,000 G a death): new users switch it on themselves
+    stuckFix: true, // AUTO on but no hit for 3 minutes: AUTO off and on again (free)
+    farmTrialMinutes: 10, // "find the best farm": minutes on each map tried
     crowdSwitch: false, crowdPlayers: 3, crowdMinutes: 2, // crowded spot: quietest channel of the same map
     bountyOnlyTarget: true, // while on a bounty, AUTO hits only that monster (the game's own target switches)
     bountyAutoClaim: true, // claim finished daily bounties by themselves (free)

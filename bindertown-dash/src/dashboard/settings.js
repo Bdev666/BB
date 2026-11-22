@@ -185,3 +185,10 @@ if (dash.platform === 'darwin') {
     cp.addEventListener('change', () => dash.invoke('settings', { crowdPlayers: Number(cp.value) || 3 }));
     cm.addEventListener('change', () => dash.invoke('settings', { crowdMinutes: Number(cm.value) || 2 }));
   } }
+
+{ const ft = document.getElementById('farmTrialMinutes');
+  if (ft) {
+    dash.invoke('state').then((st) => { ft.value = st.settings.farmTrialMinutes || 10; }).catch(() => {});
+    ft.addEventListener('change', () => dash.invoke('settings', { farmTrialMinutes: Number(ft.value) || 10 }));
+  }
+}

@@ -77,7 +77,7 @@ function blankRuntime() {
   };
 }
 function rt(id) {
-  if (!games.has(id)) games.set(id, blankRuntime());
+  if (!games.has(id)) games.set(id, { ...blankRuntime(), accId: id });
   return games.get(id);
 }
 function account(id) { return store.data.accounts.find((a) => a.id === id); }
@@ -101,6 +101,8 @@ function publicState() {
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: bountyStatus(g),
+        finder: finderStatus(g),
+        farmNow: g.inGame && !g.demo ? (farmSummary(a.id, g.data.stats.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === mapOf(g)) || null) : null,
         deaths: deathCost(a.id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
@@ -369,6 +371,7 @@ async function pollSnapshots() {
       if (!g.win || g.win.isDestroyed()) continue;
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
+      if (g.inGame && !g.demo) farmBalance(g);
       if (snap && snap.ready) { if (!g.inGame) g.inGameAt = Date.now(); g.inGame = true; }
       else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
       watchScreen(id, snap);
@@ -427,6 +430,7 @@ function handleEvents(id, events) {
   const s = store.data.settings;
   for (const ev of events) {
     g.data.ingest(ev);
+    farmEvent(id, g, ev);
     switch (ev.type) {
       case 'hit':
       case 'kill':
@@ -1415,12 +1419,228 @@ async function abStart(id, phase, minutes, label) {
   return { ok: true };
 }
 
+
+// ---------- farm ledger: what one minute of farming is really worth, per map ----------
+// Counted: the Silver balance going up while AUTO farms = Silver from kills (the game's own number, so combo and
+// Gold cards are already in it) + the game's auto-sell / Soulforge of Normal/Magic gear, minus potions bought and
+// respawn fees, + ETC picked up at the NPC price. Never counted: market prices, mail, Pass, bounty rewards (a minute
+// with one of those in it is left out), minutes on the road, at a world boss or without a kill.
+const FARM_KEEP = 300; // rows (= farming minutes) kept per account + map
+const FARM_DAYS = 10;
+let farmDirtyStore = false;
+function farmBucket(g) {
+  const m = Math.floor(Date.now() / 60000);
+  if (!g.ledger || g.ledger.m !== m) {
+    if (g.ledger) farmClose(g.ledger);
+    g.ledger = { m, id: g.accId, map: mapOf(g), lv: g.data.stats.level || 0, bal: 0, kill: 0, etc: 0, kills: 0, dirty: !!(g.bossTrip || g.travelling) };
+  }
+  return g.ledger;
+}
+function farmDirty(g) { if (g) farmBucket(g).dirty = true; }
+function farmEvent(id, g, ev) {
+  if (!g.inGame || g.demo) return;
+  const L = farmBucket(g);
+  if (ev.type === 'kill') { L.kills++; L.kill += Number(ev.silver) || 0; }
+  else if (ev.type === 'loot' && ev.value > 0 && /^drop_/.test(ev.id || '')) { L.etc += ev.value; (g.etcPrice || (g.etcPrice = {}))[baseOf(ev.id)] = ev.value / (ev.qty || 1); }
+  else if (ev.type === 'sold' && ev.auto) { const p = g.etcPrice && g.etcPrice[baseOf(ev.id || '')]; if (p) L.etc -= p * (ev.qty || 1); } // ETC sold by the game: the balance has it now
+  else if (ev.type === 'sold' && !ev.auto) L.dirty = true; // a sale from the sell window (old loot) is not this minute's farming
+}
+function farmBalance(g) {
+  const s = Number(g.data.stats.silver);
+  if (!Number.isFinite(s)) return;
+  const L = farmBucket(g);
+  if (g.lastBal != null) L.bal += s - g.lastBal;
+  if (L.map !== mapOf(g) || (g.claimUntil && Date.now() < g.claimUntil)) L.dirty = true; // changed map inside the minute / rewards coming in
+  g.lastBal = s;
+}
+function farmClose(L) {
+  if (L.dirty || !L.kills || !L.map || WORLD_ARENAS.has(L.map) || !L.id) return;
+  if (L.bal - L.kill > 50000) return; // something else paid in (a claim the dashboard did not see)
+  const all = store.data.farm || (store.data.farm = {});
+  const key = `${L.id}:${L.map}`;
+  const rows = all[key] || (all[key] = []);
+  rows.push([L.m, L.lv, Math.round(L.bal + L.etc), Math.round(L.kill), L.kills]);
+  const old = Math.floor(Date.now() / 60000) - FARM_DAYS * 1440;
+  while (rows.length && (rows.length > FARM_KEEP || rows[0][0] < old)) rows.shift();
+  farmDirtyStore = true;
+}
+// per map for one account, near its level: Silver per hour (median of the minutes, one bad minute does not swing it)
+function farmSummary(accId, level, sinceMin = 0) {
+  const out = [];
+  for (const [key, rows] of Object.entries(store.data.farm || {})) {
+    const [a, map] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
+    if (Number(a) !== accId) continue;
+    const r = rows.filter((x) => x[0] >= sinceMin && (!level || !x[1] || Math.abs(x[1] - level) <= 5));
+    if (!r.length) continue;
+    const net = r.map((x) => x[2]).sort((p, q) => p - q);
+    const mid = net.length % 2 ? net[net.length >> 1] : (net[net.length / 2 - 1] + net[net.length / 2]) / 2;
+    const mean = net.reduce((t, x) => t + x, 0) / net.length;
+    out.push({ map, name: mapName(map), minutes: r.length, netHr: Math.round((mid * 0.5 + mean * 0.5) * 60), killSilverHr: Math.round(r.reduce((t, x) => t + x[3], 0) / r.length * 60), killsHr: Math.round(r.reduce((t, x) => t + x[4], 0) / r.length * 60), last: r[r.length - 1][0] * 60000 });
+  }
+  return out.sort((p, q) => q.netHr - p.netHr);
+}
+function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; store.save(); } }
+
+// ---------- AUTO on but nothing hit for 3 minutes: switch AUTO off and on again (at most 4 times an hour) ----------
+async function stuckCheck(id, g) {
+  if (!store.data.settings.stuckFix || !g.inGame || g.demo || g.status !== 'online' || g.alerts.has('death') || g.humanCheck) return;
+  if (g.bossTrip || g.travelling || g.crowdBusy || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || WORLD_ARENAS.has(mapOf(g))) return;
+  const now = Date.now(); const last = Math.max(g.lastHitAt || 0, g.inGameAt || 0, g.autoSeenOffAt || 0);
+  if (now - last < 3 * 60000) return;
+  const ui = await liveUi(id);
+  if (!ui.auto || ui.sleeping) { g.autoSeenOffAt = now; return; } // the player switched AUTO off: leave it
+  g.kicks = (g.kicks || []).filter((t) => now - t < 3600000);
+  if (g.kicks.length >= 4 || (g.kicks.length && now - g.kicks[g.kicks.length - 1] < 4 * 60000)) return;
+  g.kicks.push(now);
+  log.info(`acc ${id}: AUTO on but no hit for ${Math.round((now - last) / 60000)} min on ${mapOf(g)} -> AUTO off/on (${g.kicks.length} this hour)`);
+  g.data.log('other', '🔧 AUTO เปิดอยู่แต่ไม่ได้ตี 3 นาที · ปิดแล้วเปิด AUTO ใหม่');
+  selftest.count(id, 'stuckFix');
+  await gameCommand(id, 'auto', {}); await new Promise((r) => setTimeout(r, 1500));
+  if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+  g.autoSeenOffAt = now; // give it 3 more minutes
+}
+
+// ---------- travel to any map with the game's own world-map "travel" button ----------
+// The game opens its world map on a map from the hunt window's "ไปที่แมพ" buttons; the button reads the map when
+// clicked, so any of them can open the world map on another map. Then the game's "เดินทางไป …" (warp when free).
+const TRAVEL_JS = (map) => `(async () => { const win = document.getElementById('huntwin'); const open = document.getElementById('openhunt'); if (!win || !open) return { ok: false, why: 'no hunt window' };
+  if (win.style.display !== 'block') open.click();
+  await new Promise((r) => setTimeout(r, 600));
+  let b = document.querySelector('#huntwin [data-goto]');
+  if (!b) { for (const t of win.querySelectorAll('[data-htab]')) { t.click(); await new Promise((r) => setTimeout(r, 400)); b = document.querySelector('#huntwin [data-goto]'); if (b) break; } }
+  if (!b) { win.style.display = 'none'; return { ok: false, why: 'no map button' }; }
+  b.dataset.goto = ${JSON.stringify(map)}; b.click();
+  await new Promise((r) => setTimeout(r, 900));
+  const go = document.querySelector('.wdgo'); if (!go) return { ok: false, why: 'no travel button' }; go.click(); return { ok: true }; })()`;
+async function travelTo(id, g, map) {
+  if (mapOf(g) === map) return { ok: true, here: true };
+  if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // the game's travel walks; AUTO would fight on the way
+  let r; try { r = await g.win.webContents.executeJavaScript(TRAVEL_JS(map), true); } catch (e) { r = { ok: false, why: e.message }; }
+  if (!r || !r.ok) return { ok: false, error: `เดินทางไม่ได้ (${(r && r.why) || '?'})` };
+  g.travelling = { map, at: Date.now() }; farmDirty(g);
+  await answerWarpBox(id, g);
+  return { ok: true };
+}
+// wait until the character is on the map (6 minutes at most), then AUTO on over the whole map
+async function arrive(id, g, map, maxMs = 6 * 60000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    if (!g.win || g.win.isDestroyed()) return false;
+    if (mapOf(g) === map) {
+      await new Promise((r) => setTimeout(r, 2500));
+      g.travelling = null;
+      await setFarmRange(g, 0);
+      if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+      g.autoSeenOffAt = Date.now();
+      return true;
+    }
+    if ((Date.now() - t0) % 20000 < 2100) await answerWarpBox(id, g);
+    await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+  }
+  g.travelling = null;
+  return false;
+}
+
+// ---------- find the farm that pays most: try the best few maps for real, then stay on the winner ----------
+// Candidates: Build Lab's map list for this character (its level, safe enough: 5+ hits to die) + maps it already
+// farmed. Each new one is farmed N minutes and judged by the ledger above; maps with enough recent minutes are not
+// tried again. Free travel only (walks when a warp would cost Gold). Stops for world bosses and bounties.
+function finderStatus(g) { const f = g.finder; return f ? { on: !!f.on, note: f.note || '', i: f.i, n: (f.list || []).length, best: f.best || null } : null; }
+async function finderStart(id, on) {
+  const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
+  if (!on) { if (g.finder) { g.finder.on = false; g.finder.note = 'หยุดแล้ว'; } g.travelling = null; log.info(`acc ${id}: farm finder stopped`); pushState(); return { ok: true }; }
+  if (g.bounty && g.bounty.on) return { ok: false, error: 'กำลังทำค่าหัวอยู่ · หยุดค่าหัวก่อน' };
+  const me = labMeRef && await labMeRef(id);
+  if (!me) return { ok: false, error: 'อ่านข้อมูลตัวละครไม่ได้' };
+  let sim = null;
+  try {
+    sim = await labCall(`window.__bdLab.maps(${JSON.stringify({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50,
+      loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, build: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr }, pack: 3, top: 40 })})`);
+  } catch (e) { log.warn(`acc ${id}: farm finder maps: ${e.message}`); }
+  const lv = me.level;
+  const minutes = Math.max(5, Math.min(30, Number(store.data.settings.farmTrialMinutes) || 10));
+  const known = new Map(farmSummary(id, lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= minutes).map((x) => [x.map, x]));
+  const rows = ((sim && sim.rows) || []).filter((r) => (r.hitsToDie == null || r.hitsToDie >= 5) && r.band && r.band[0] <= lv + 3 && !WORLD_ARENAS.has(r.id));
+  const list = [];
+  const here = mapOf(g);
+  if (!known.has(here) && !WORLD_ARENAS.has(here)) list.push({ map: here, sim: (rows.find((r) => r.id === here) || {}).silverHr || 0 });
+  for (const r of rows) { if (list.length >= 4) break; if (!known.has(r.id) && !list.some((x) => x.map === r.id)) list.push({ map: r.id, sim: r.silverHr }); }
+  g.finder = { on: true, list, i: 0, phase: 'go', minutes, lv, note: 'เริ่ม', start: 0, deaths0: 0, tries: {} };
+  log.info(`acc ${id}: farm finder start (Lv ${lv}, ${minutes} min each): try ${list.map((x) => x.map).join(', ') || '-'}; known ${[...known.keys()].join(', ') || '-'}`);
+  finderStep(id).catch((e) => log.warn(`acc ${id}: farm finder: ${e.message}`));
+  pushState();
+  return { ok: true, trying: list.map((x) => mapName(x.map)), known: [...known.values()].map((x) => x.name) };
+}
+async function finderStep(id) {
+  const g = games.get(id); const f = g && g.finder;
+  if (!f || !f.on || f.busy || !g.inGame || g.demo || g.status !== 'online') return;
+  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { f.note = 'พักไว้ระหว่างตีบอสโลก'; return; }
+  if (g.bounty && g.bounty.on) { f.on = false; f.note = 'หยุด: เริ่มทำค่าหัว'; return; }
+  f.busy = true;
+  try {
+    const deaths = (selftest.counters.get(id) || {}).deaths || 0;
+    if (f.phase === 'go') {
+      const c = f.list[f.i];
+      if (!c) { f.phase = 'pick'; return; }
+      f.note = `ไปลองฟาร์ม ${mapName(c.map)} (${f.i + 1}/${f.list.length})`;
+      const r = await travelTo(id, g, c.map);
+      if (!r.ok) { log.info(`acc ${id}: farm finder: ${r.error} -> skip ${c.map}`); f.i++; return; }
+      if (!r.here && !(await arrive(id, g, c.map))) { log.info(`acc ${id}: farm finder: did not reach ${c.map} -> skip`); f.i++; return; }
+      if (r.here) { await setFarmRange(g, 0); if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); }
+      f.phase = 'measure'; f.start = Math.floor(Date.now() / 60000) + 1; f.deaths0 = deaths; f.at = Date.now();
+      log.info(`acc ${id}: farm finder measuring ${c.map} for ${f.minutes} min`);
+      return;
+    }
+    if (f.phase === 'measure') {
+      const c = f.list[f.i];
+      const got = (farmSummary(id, 0, f.start).find((x) => x.map === c.map) || {}).minutes || 0;
+      f.note = `วัดผล ${mapName(c.map)} ${got}/${f.minutes} นาที (${f.i + 1}/${f.list.length})`;
+      if (deaths - f.deaths0 >= 3) { log.info(`acc ${id}: farm finder: ${deaths - f.deaths0} deaths on ${c.map} -> not safe, next`); c.unsafe = true; f.i++; f.phase = 'go'; return; }
+      if (got >= f.minutes || Date.now() - f.at > f.minutes * 2 * 60000) { f.i++; f.phase = 'go'; }
+      return;
+    }
+    if (f.phase === 'pick') {
+      const unsafe = new Set(f.list.filter((x) => x.unsafe).map((x) => x.map));
+      const all = farmSummary(id, f.lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= 3 && !unsafe.has(x.map) && !WORLD_ARENAS.has(x.map));
+      const best = all[0];
+      if (!best) { f.on = false; f.note = 'ยังไม่มีข้อมูลพอ (ไม่ได้ฟาร์มครบนาทีในแมพไหนเลย)'; return; }
+      f.best = { map: best.map, name: best.name, netHr: best.netHr };
+      f.note = `ไปฟาร์มที่ดีสุด ${best.name}`;
+      const r = await travelTo(id, g, best.map);
+      if (r.ok && !r.here) await arrive(id, g, best.map);
+      else if (r.here) { if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); }
+      f.on = false;
+      f.note = `ดีสุด: ${best.name} ~${Math.round(best.netHr).toLocaleString('en-US')} Silver/ชม.`;
+      const top = all.slice(0, 4).map((x, k) => `${k + 1}. ${x.name} ${Math.round(x.netHr / 1000)}k/ชม.`).join(' · ');
+      log.info(`acc ${id}: farm finder done -> ${best.map} (${best.netHr}/h); ${all.map((x) => `${x.map} ${x.netHr} (${x.minutes} min)`).join(', ')}`);
+      notify(id, 'farm', `🔎 หาที่ฟาร์มเสร็จ · ${top}${unsafe.size ? ` · ตายบ่อย ข้าม: ${[...unsafe].map(mapName).join(', ')}` : ''}`);
+    }
+  } finally { f.busy = false; pushState(); }
+}
+async function farmGo(id, map) {
+  const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
+  if (g.bounty && g.bounty.on) return { ok: false, error: 'กำลังทำค่าหัวอยู่' };
+  const r = await travelTo(id, g, map);
+  if (!r.ok) return r;
+  if (r.here) { if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return { ok: true }; }
+  arrive(id, g, map).then((ok) => log.info(`acc ${id}: go farm ${map}: ${ok ? 'arrived, AUTO on' : 'did not arrive'}`)).catch(() => {});
+  return { ok: true };
+}
+function farmTick() {
+  for (const [id, g] of games) {
+    if (!g.inGame || g.demo) continue;
+    farmBucket(g); // closes the minute that just ended
+    stuckCheck(id, g).catch(() => {});
+    finderStep(id).catch((e) => log.warn(`acc ${id}: farm finder: ${e.message}`));
+  }
+}
 // ---------- collect rewards: mail gifts, Pass missions (daily / weekly) and Pass tiers ----------
 // the same messages the game's own "รับ" buttons send (mail one by one, then "claim all" on the Pass page)
 async function claimRewards(id) {
   const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
   const waitFor = async (key, since) => { for (let i = 0; i < 20; i++) { if (g[key] && g[key].at >= since) return g[key]; await new Promise((r) => setTimeout(r, 250)); } return null; }; // eslint-disable-line no-await-in-loop
   const out = { mail: 0, daily: 0, weekly: 0, tiers: false };
+  farmDirty(g); g.claimUntil = Date.now() + 90000;
   let t0 = Date.now(); await sendInput(id, { type: 'mailQuery' });
   const mail = await waitFor('mailSeen', t0);
   for (const mid of (mail && mail.giftIds) || []) { await sendInput(id, { type: 'mailClaim', id: mid }); out.mail++; await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
@@ -1584,7 +1804,7 @@ async function bountyClaimDone(id, list) {
   const g = games.get(id); let n = 0;
   for (const b of list || []) {
     if (!b.id || b.claimed || b.prog < b.need) continue;
-    await sendInput(id, { type: 'bountyClaim', id: b.id }); // eslint-disable-line no-await-in-loop
+    farmDirty(g); await sendInput(id, { type: 'bountyClaim', id: b.id }); // eslint-disable-line no-await-in-loop
     n++; log.info(`acc ${id}: bounty claimed ${b.id} (${b.name || b.map || ''})`);
     await new Promise((r) => setTimeout(r, 500)); // eslint-disable-line no-await-in-loop
   }
@@ -2127,7 +2347,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget', 'crowdSwitch']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget', 'crowdSwitch', 'stuckFix']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.crowdPlayers !== undefined) s.crowdPlayers = Math.max(1, Math.min(30, Number(patch.crowdPlayers) || 3));
     if (patch.crowdMinutes !== undefined) s.crowdMinutes = Math.max(1, Math.min(30, Number(patch.crowdMinutes) || 2));
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
@@ -2147,6 +2367,7 @@ function registerIpc() {
       const u = String(patch.gameUrl).trim();
       s.gameUrl = /^https:\/\/[^\s]+$/.test(u) && u !== DEFAULT_GAME_URL ? u : '';
     }
+    if (patch.farmTrialMinutes !== undefined) s.farmTrialMinutes = Math.min(30, Math.max(5, Number(patch.farmTrialMinutes) || 10));
     if (patch.idleMinutes !== undefined) s.idleMinutes = Math.min(120, Math.max(1, Number(patch.idleMinutes) || 5));
     if (patch.disconnectSeconds !== undefined) s.disconnectSeconds = Math.min(600, Math.max(15, Number(patch.disconnectSeconds) || 60));
     if (patch.notify) for (const k of Object.keys(s.notify)) if (k in patch.notify) s.notify[k] = !!patch.notify[k];
@@ -2190,6 +2411,9 @@ function registerIpc() {
   handle('world-boss-go', (kind) => worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => bountyStart(id, on !== false));
   handle('claim-rewards', (id) => claimRewards(id));
+  handle('farm-find', (id, on) => finderStart(id, !!on));
+  handle('farm-go', (id, map) => farmGo(id, String(map || '')));
+  handle('farm-maps', (id) => { const g = games.get(id); return { rows: farmSummary(id, (g && g.data.stats.level) || 0), level: (g && g.data.stats.level) || 0, here: g ? mapOf(g) : '', finder: g ? finderStatus(g) : null }; });
   handle('ab-start', (id, phase, minutes, label) => abStart(id, phase, minutes, label));
   handle('ab-get', (id) => { const g = games.get(id); return g ? abResult(g) : null; });
   handle('ab-stop', (id) => { const g = games.get(id); if (g && g.ab) g.ab.phase = null; return { ok: true }; });
@@ -2382,7 +2606,7 @@ function registerIpc() {
 // ---------- app lifecycle ----------
 app.on('second-instance', () => createDashboard());
 app.on('window-all-closed', () => { /* stay in the tray */ });
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; try { farmSaveTick(); } catch { /* closing */ } });
 
 // Google refuses sign-in in browsers that announce Electron: every window (game pages and
 // their sign-in popups) presents itself as plain Chrome
@@ -2437,6 +2661,8 @@ app.whenReady().then(() => {
   setInterval(autoRespawnTick, 15000);
   setInterval(bountyTick, 20000);
   setInterval(crowdTick, 20000);
+  setInterval(farmTick, 15000);
+  setInterval(farmSaveTick, 5 * 60000);
   applyStartWithWindows();
   syncRemote();
 });

@@ -31,6 +31,13 @@
           <label class="switch"><input type="checkbox" data-set="bountyAutoClaim"><i></i></label>
         </div>
         <div class="row">
+          <div><b>🔧 AUTO ค้าง: เปิดใหม่ให้เอง</b><p>AUTO เปิดอยู่แต่ไม่ได้ตีอะไรเลย 3 นาที (ติดกำแพง, AUTO หลุด) ปิดแล้วเปิด AUTO ใหม่ให้ · ไม่เกิน 4 ครั้งต่อชั่วโมง · ไม่ทำถ้าคุณปิด AUTO เอง หรือตอนเดินทาง/ตีบอสโลก · ฟรี</p></div>
+          <label class="switch"><input type="checkbox" data-set="stuckFix"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>🔎 หาที่ฟาร์มคุ้มสุด: ลองแมพละ</b><p>ปุ่ม "🔎 หาที่ฟาร์มคุ้มสุด" ในแต่ละบัญชี ลองฟาร์มจริงแมพละ <input type="number" id="farmTrialMinutes" min="5" max="30" value="10" class="w60"> นาที (นานขึ้น = แม่นขึ้น) · ตายเกิน 3 ครั้งในแมพไหนข้ามแมพนั้น</p></div>
+        </div>
+        <div class="row">
           <div><b>👥 คนเยอะ ย้าย Channel กลับจุดเดิม</b><p>ตอน AUTO ฟาร์ม ถ้ามีผู้เล่นอื่นในวง AUTO ตั้งแต่ <input type="number" id="crowdPlayers" min="1" max="30" value="3" class="w60"> คน นาน <input type="number" id="crowdMinutes" min="1" max="30" value="2" class="w60"> นาที ย้ายไป Channel ที่คนน้อยสุดของแมพเดียวกัน (ไม่เข้า PvP) เดินกลับจุดเดิมแล้วเปิด AUTO วงเดิม · ห่างกันอย่างน้อย 10 นาที · ไม่ทำตอนทำค่าหัว/ตีบอสโลก</p></div>
           <label class="switch"><input type="checkbox" data-set="crowdSwitch"><i></i></label>
         </div>
