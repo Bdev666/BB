@@ -249,7 +249,35 @@ function create(deps) {
     return { rows: rows.length, accounts: Object.values(by).map((a) => ({ ...a, killsH: Math.round(a.killsH / a.n), silverH: Math.round(a.silverH / a.n), incomeH: Math.round(a.incomeH / a.n) })) };
   }
 
-  return { runSelfTest, statsTick, statsSummary, count, counters, logProblems };
+  // one text file for the developer: app info, recent system tests, 30 days of stats and the log.
+  // Account and character names are replaced by "acc N"; tokens / chat ids are never in it.
+  function bundle(outDir, extra = {}) {
+    const st = deps.store().data;
+    const names = [];
+    for (const a of st.accounts || []) if (a.name) names.push([a.name, `acc ${a.id}`]);
+    for (const [id, g] of games) { const n = g.data && g.data.stats && g.data.stats.name; if (n) names.push([n, `acc ${id}`]); }
+    names.sort((a, b) => b[0].length - a[0].length);
+    const clean = (t) => { let x = String(t); for (const [n, r] of names) if (n.length >= 2) x = x.split(n).join(r); return x.replace(/(token|chatId|password|secret)("?\s*[:=]\s*"?)[^",\s}]+/gi, '$1$2***'); };
+    const part = (title, body) => `\n===== ${title} =====\n${body}\n`;
+    let out = `BinderDash log for the developer · ${new Date().toISOString()}\n`;
+    const settings = { ...st.settings }; delete settings.telegram; delete settings.gameUrl;
+    out += part('app', JSON.stringify({ app: version(), ...extra, accounts: (st.accounts || []).map((a) => { const g = games.get(a.id); const x = g && g.data && g.data.stats; return { acc: a.id, status: g ? g.status : 'closed', job: x && x.job, level: x && x.level, map: x && x.map, belt: g && g.belt }; }), settings }, null, 1));
+    const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+    let tests = []; try { tests = fs.readdirSync(dirOf('selftest')).filter((f) => f.endsWith('.json')).sort().slice(-5); } catch { /* none */ }
+    for (const f of tests) out += part('selftest ' + f.replace(/acc\d+/, ''), clean(read(path.join(dirOf('selftest'), f))));
+    let statFiles = []; try { statFiles = fs.readdirSync(dirOf('stats')).filter((f) => f.endsWith('.jsonl')).sort().slice(-2); } catch { /* none */ }
+    const since = Date.now() - 30 * 24 * 3600 * 1000;
+    const statLines = statFiles.flatMap((f) => read(path.join(dirOf('stats'), f)).split('\n').filter((l) => { try { return l && Date.parse(JSON.parse(l).t) >= since; } catch { return false; } }));
+    out += part(`stats (30 days, ${statLines.length} lines)`, clean(statLines.join('\n')));
+    out += part('binderdash.log', clean(read(path.join(log.dir(), 'binderdash.log.1')) + read(path.join(log.dir(), 'binderdash.log'))).slice(-6 * 1024 * 1024));
+    const d = new Date(); const p2 = (x) => String(x).padStart(2, '0');
+    const file = path.join(outDir, `BinderDash-log-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.txt`);
+    fs.writeFileSync(file, out);
+    log.info(`log bundle written (${Math.round(out.length / 1024)} KB)`);
+    return { ok: true, file, kb: Math.round(out.length / 1024) };
+  }
+
+  return { runSelfTest, statsTick, statsSummary, count, counters, logProblems, bundle };
 }
 
 module.exports = { create };

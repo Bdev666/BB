@@ -118,11 +118,11 @@ const gh = document.getElementById('open-gh'); if (gh) gh.addEventListener('clic
 { const ar = document.getElementById('autoRespawnHere');
   if (ar) { dash.invoke('state').then((st) => { ar.checked = st.settings.autoRespawnHere !== false; }).catch(() => {}); ar.addEventListener('change', () => dash.invoke('settings', { autoRespawnHere: ar.checked })); } }
 
-{ const on = document.getElementById('autoBuyOn'); const rd = document.getElementById('autoBuyRounds'); const kp = document.getElementById('autoBuyKeep');
+{ const on = document.getElementById('autoBuyOn'); const rd = document.getElementById('autoBuyRounds'); const kp = document.getElementById('autoBuyKeep'); const bl = document.getElementById('autoBuyBelow');
   if (on && rd) {
-    dash.invoke('state').then((st) => { const ab = st.settings.autoBuy || {}; on.checked = !!ab.on; rd.value = ab.rounds || 3; if (kp) kp.value = ab.keepSilver ?? 5000; }).catch(() => {});
-    const save = () => dash.invoke('settings', { autoBuy: { on: on.checked, rounds: Number(rd.value) || 3, keepSilver: kp ? Number(kp.value) || 0 : 5000 } });
-    on.addEventListener('change', save); rd.addEventListener('change', save); if (kp) kp.addEventListener('change', save);
+    dash.invoke('state').then((st) => { const ab = st.settings.autoBuy || {}; on.checked = !!ab.on; rd.value = ab.rounds || 3; if (kp) kp.value = ab.keepSilver ?? 5000; if (bl) bl.value = ab.below || 50; }).catch(() => {});
+    const save = () => dash.invoke('settings', { autoBuy: { on: on.checked, rounds: Number(rd.value) || 3, keepSilver: kp ? Number(kp.value) || 0 : 5000, below: bl ? Number(bl.value) || 50 : 50 } });
+    on.addEventListener('change', save); rd.addEventListener('change', save); if (kp) kp.addEventListener('change', save); if (bl) bl.addEventListener('change', save);
   } }
 
 // ---------- system test ----------
@@ -171,3 +171,10 @@ if (dash.platform === 'darwin') {
   const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) if (/Ctrl|พร้อม Windows|มุมขวาล่าง/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Ctrl\+/g, 'Cmd+').replace(/พร้อม Windows/g, 'ตอนเปิด Mac').replace(/มุมขวาล่าง/g, 'บนแถบเมนูด้านบน');
 }
+
+{ const b = document.getElementById('st-bundle'); const o = document.getElementById('st-bundle-out');
+  if (b) b.addEventListener('click', async () => {
+    b.disabled = true; o.textContent = 'กำลังรวม log…';
+    try { const r = await dash.invoke('log-bundle'); o.textContent = r && r.ok ? `✓ บันทึกแล้ว (${r.kb} KB): ${r.file}` : `❌ ${(r && r.error) || 'รวม log ไม่ได้'}`; }
+    catch (err) { o.textContent = '❌ ' + err.message; } finally { b.disabled = false; }
+  }); }

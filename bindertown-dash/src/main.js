@@ -1419,14 +1419,16 @@ function tick() {
     const potionIds = new Set(POTIONS.map((p) => p.id));
     const belt = (g.belt || []).filter((b) => potionIds.has(b));
     const watch = belt.length ? belt : [...new Set([...(g.adapter.inv ? g.adapter.inv.keys() : [])].map(baseOf).filter((b) => potionIds.has(b)))];
+    // a fixed count, not a forecast: steady whatever the pace (every quality grade counted, like the hotbar)
+    const below = Math.max(1, Number((s.autoBuy || {}).below) || 50);
     for (const pid of watch) {
-      const c = g.data.supplyClock(pid, now);
+      let qty = 0; if (g.adapter.inv) for (const [k, q] of g.adapter.inv) if (baseOf(k) === pid) qty += q || 0;
       const p = POTIONS.find((x) => x.id === pid);
       const key = 'potion:' + pid;
-      if (c && c.minutesLeft != null && c.minutesLeft < s.potionMinutes) {
+      if (qty <= below) {
         low.add(key);
-        if (!g.alerts.has(key)) setAlert(id, key, true, `${p.name}${belt.includes(pid) ? ' (ช่องลัด)' : ''} จะหมดในอีก ~${Math.max(1, Math.round(c.minutesLeft))} นาที (เหลือ ${c.qty})`);
-        autoBuyPotion(id, g, p);
+        if (!g.alerts.has(key)) setAlert(id, key, true, `${p.name}${belt.includes(pid) ? ' (ช่องลัด)' : ''} เหลือ ${qty} ขวด (ตั้งไว้ซื้อเมื่อเหลือ ${below})`);
+        if (belt.includes(pid)) autoBuyPotion(id, g, p); // buy only what the hotbar really uses
       }
     }
     for (const row of g.data.detail(now).bag) {
@@ -1634,7 +1636,7 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog']) if (patch[k] !== undefined) s[k] = !!patch[k];
-    if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
+    if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
     if (patch.salvageMaxPrice !== undefined) s.salvageMaxPrice = Math.max(0, Number(patch.salvageMaxPrice) || 0);
@@ -1793,6 +1795,14 @@ function registerIpc() {
   labMeRef = labMe;
   handle('selftest', (id, opts) => selftest.runSelfTest(id, opts || {}));
   handle('stats-summary', (days) => selftest.statsSummary(days || 7));
+  handle('log-bundle', () => {
+    let dir; try { dir = app.getPath('desktop'); fs.accessSync(dir, fs.constants.W_OK); } catch { dir = app.getPath('downloads'); try { fs.mkdirSync(dir, { recursive: true }); } catch { dir = log.dir(); } }
+    try {
+      const r = selftest.bundle(dir, { platform: process.platform, os: require('os').release(), electron: process.versions.electron });
+      shell.showItemInFolder(r.file);
+      return r;
+    } catch (err) { log.warn('log bundle:', err.message); return { ok: false, error: err.message }; }
+  });
   handle('open-selftest', () => { const d = path.join(log.dir(), 'selftest'); fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
   handle('salvage-preview', async (rarities, o) => {
     const opt = salvageOpts(o);

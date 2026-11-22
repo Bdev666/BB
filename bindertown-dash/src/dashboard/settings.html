@@ -27,8 +27,8 @@
           <label class="switch"><input type="checkbox" id="autoRespawnHere"><i></i></label>
         </div>
         <div class="row">
-          <div><b>🧪 ยาใกล้หมด ซื้อให้เอง (Premium หรือยืนใกล้ร้าน)</b><p>เมื่อยาเหลือน้อยกว่าเวลาเตือน กดซื้อทีละ 99 ขวด ตามจำนวนรอบที่ตั้ง (เช่น 3 รอบ = 297 ขวด) ซื้อซ้ำได้อีกหลัง 10 นาที</p>
-            <p>รอบ: <input type="number" id="autoBuyRounds" min="1" max="10" value="3" style="width:60px"> × 99 ขวด · เก็บ Silver ไว้อย่างน้อย <input type="number" id="autoBuyKeep" min="0" step="1000" value="5000" style="width:100px"> (ไม่ซื้อจนเงินหมด)</p></div>
+          <div><b>🧪 ยาในช่องลัดเหลือน้อย ซื้อให้เอง (Premium หรือยืนใกล้ร้าน)</b><p>ยาในช่องลัด (Q/E/R) เหลือไม่เกินจำนวนที่ตั้ง (นับทุกเกรดรวมกัน) จะกดซื้อทีละ 99 ขวดตามจำนวนรอบ ซื้อซ้ำได้อีกหลัง 10 นาที</p>
+            <p>ซื้อเมื่อเหลือ <input type="number" id="autoBuyBelow" min="1" max="9999" value="50" style="width:70px"> ขวด · รอบ: <input type="number" id="autoBuyRounds" min="1" max="10" value="3" style="width:60px"> × 99 ขวด · เก็บ Silver ไว้อย่างน้อย <input type="number" id="autoBuyKeep" min="0" step="1000" value="5000" style="width:100px"></p></div>
           <label class="switch"><input type="checkbox" id="autoBuyOn"><i></i></label>
         </div>
         <div class="row">
@@ -256,6 +256,11 @@
           <button id="st-run" class="primary">เริ่มทดสอบ</button>
           <button id="st-open">เปิดโฟลเดอร์ผลทดสอบ</button>
         </div>
+        <div class="row">
+          <div><b>📦 รวม log ส่งผู้พัฒนา</b><p>รวมผลทดสอบ 5 ครั้งล่าสุด สถิติ 30 วัน และ log ของโปรแกรมเป็นไฟล์ .txt ไฟล์เดียวบน Desktop · ชื่อบัญชีและชื่อตัวละครถูกแทนด้วย "acc 1, acc 2…" ไม่มี token หรือรหัสผ่าน · ส่งไฟล์นี้ให้ผู้พัฒนาได้เลย</p></div>
+          <button id="st-bundle" class="primary">รวม log</button>
+        </div>
+        <p id="st-bundle-out" class="mono small"></p>
         <div id="st-out" class="st-out"></div>
       </div>
       <div class="card">

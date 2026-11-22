@@ -26,7 +26,7 @@ const DEFAULTS = {
       fieldBoss: true, worldBoss: true, event: true, daily: true, marketWatch: true,
     },
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
-    autoBuy: { on: false, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
+    autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
     autoRespawnHere: true,    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
     marketWatchMin: 2,        // refresh each watched market item every N minutes
     salvageByPrice: true,     // salvage only gear the central market says is worth little
