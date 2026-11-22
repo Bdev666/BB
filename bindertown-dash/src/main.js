@@ -49,7 +49,10 @@ const selftest = require('./selftest').create({
     if (c.k < 0.2 || c.k > 8) { log.info(`calib acc ${id} ${c.kind}: x${c.k} ignored (out of range)`); return; }
     const ease = (a, b) => (a && b ? +(a * 0.6 + b * 0.4).toFixed(3) : b || a || null);
     if (c.d != null && (c.d < 0.2 || c.d > 20)) c.d = null; // whole-DPS ratio: real / formula (hits per second, focus, splash included)
-    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
+    const relOf = (a, b) => { const out = { ...(a || {}) }; for (const [sid, x] of Object.entries(b || {})) out[sid] = out[sid] ? +(out[sid] * 0.6 + x * 0.4).toFixed(3) : x; return out; };
+    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
+    // field monsters differ a lot (weak ones die in one hit, and overkill is not reported): also per monster
+    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
     store.save();
   },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
@@ -1172,8 +1175,11 @@ function deathLoopCheck(id, g) {
   const now = Date.now();
   g.deathTimes = (g.deathTimes || []).filter((t) => now - t < 120000); g.deathTimes.push(now);
   if (g.deathTimes.length < 4 || (g.respawnPausedUntil && now < g.respawnPausedUntil)) return;
-  // boss fights: dying often is part of it and getting up at once matters most (world boss = free)
-  if ((g.fight && now - g.fight.last < 30000) || (g.freeRespawnAt && now - g.freeRespawnAt < 5 * 60 * 1000)) return;
+  // boss fights: dying often is part of it and getting up at once matters most (world boss = free).
+  // A world boss arena while the event is on counts too (respawn is sent before the death screen, so
+  // the "free" button is often never seen; seen in a real log: the guard paused respawn mid-fight)
+  const arena = WORLD_ARENAS.has(mapOf(g)) && [...bosses.world.values()].some((w) => w.state === 'live' || (w.endsAt && now - w.endsAt < 5 * 60 * 1000));
+  if (arena || g.bossTrip || (g.fight && now - g.fight.last < 30000) || (g.freeRespawnAt && now - g.freeRespawnAt < 5 * 60 * 1000)) return;
   g.respawnPausedUntil = now + 10 * 60 * 1000; g.deathTimes = [];
   selftest.count(id, 'deathLoops');
   if (g.win && !g.win.isDestroyed()) g.win.webContents.executeJavaScript(`(() => { const c = document.getElementById('au-respawn'); if (c && c.checked && !c.disabled) { c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true; } return false; })()`, true).catch(() => {});
@@ -1306,6 +1312,7 @@ function mwSearch(q) {
 // ---------- real boss fights: how long they take (Build Lab scores builds over that time) ----------
 const { MOBS: MOB_ROLES } = require('./mob-table');
 const WORLD_TYPES = { vale: 'wraithroot_colossus', nacreon: 'pearlheart_titan' };
+const WORLD_ARENAS = new Set(['rootfall_barrow', 'nacre_lagoon']); // the world bosses' maps (client table)
 const isBossType = (t) => !!t && (Object.values(WORLD_TYPES).includes(t) || /^true_/.test(t) || ['boss', 'mini-boss'].includes((MOB_ROLES[t] || [])[0]));
 function fightHit(g, ev) {
   if (!isBossType(ev.mob) || ev.pet) return;
@@ -2004,11 +2011,20 @@ function registerIpc() {
     if (done && m.first) g.lastMeasure = { dps: secs ? Math.round(total / secs) : 0, secs, at: Date.now() };
     return { done, started: !!m.first, secs: Math.round(secs * 10) / 10, sec: m.sec, total, pet, dps: secs ? Math.round(total / secs) : 0, hits: mine.length, crits: mine.filter((h) => h.crit).length, perSkill: per, mobs };
   });
-  handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
+  // a character's own learned factors (when the lab is about one account): per-skill for its rankings
+  const calibFor = (p) => {
+    if (!p || p.acc == null) return null;
+    const all = store.data.calib || {};
+    const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test(p.target || '') ? 'world' : 'field';
+    const c = all[`${p.acc}:mob:${p.target}`] || all[`${p.acc}:${kind}`];
+    return c && c.job === p.job ? { ...c, kind } : null;
+  };
+  const withAdj = (p) => { const c = calibFor(p); return c && c.rel && c.runs >= 1 ? { ...p, skillAdj: c.rel } : p; };
+  handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(withAdj(p))})`));
   handle('lab-predict', async (p) => {
-    const r = await labCall(`window.__bdLab.predict(${JSON.stringify(p)})`);
+    const r = await labCall(`window.__bdLab.predict(${JSON.stringify(withAdj(p))})`);
     const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test((p && p.target) || '') ? 'world' : 'field';
-    const c = p && p.acc != null && (store.data.calib || {})[`${p.acc}:${kind}`];
+    const c = calibFor(p);
     if (r && c && c.job === p.job) { const m = c.d || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
     return r;
   });
@@ -2059,9 +2075,9 @@ function registerIpc() {
     return { ok: false, error: 'ตลาดไม่ตอบ' };
   });
   handle('lab-combos', () => labCall('window.__bdLab.combos()'));
-  handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
-  handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
-  handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(p)})`));
+  handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(withAdj(p))})`));
+  handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(withAdj(p))})`));
+  handle('lab-cards', (p) => labCall(`window.__bdLab.cards(${JSON.stringify(withAdj(p))})`));
   const labMe = async (id) => {
     const g = games.get(id);
     if (!g || !g.win || g.win.isDestroyed() || !g.inGame) return null;

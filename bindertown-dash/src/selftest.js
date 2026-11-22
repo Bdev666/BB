@@ -80,7 +80,8 @@ function create(deps) {
             rec.targetKind = /^(wraithroot_colossus|pearlheart_titan)$/.test(rec.mainMob || '') ? 'world' : 'field';
             if (xs.length >= 3) {
               rec.calib = +xs[Math.floor(xs.length / 2)].toFixed(3);
-              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, at: Date.now() });
+              const rel = Object.fromEntries(Object.entries(rec.hitCheck).map(([sid, v]) => [sid, +(v.x / rec.calib).toFixed(3)]));
+              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));

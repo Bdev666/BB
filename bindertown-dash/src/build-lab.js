@@ -346,12 +346,12 @@ function score(b, p) {
   let r; try { r = calc(b); } catch (e) { return { v: 0, err: String(e && e.message || e) }; }
   const rot = r.rotation || { dps: 0, share: [] };
   const adj = dummyAdj(b, r);
-  let v = rot.dps * adj;
+  let v = (Object.keys(SKILL_ADJ).length ? (rot.share || []).reduce((t, s) => t + s.dmg * sAdj(s.key), 0) / (rot.seconds || 60) : rot.dps) * adj;
   if (p.mode === 'boss') v = p.fightSec ? windowDps(b, r, p.fightSec) : p.window === 'burst' ? v : sustainedDps(b, r);
   if (p.mode === 'farm') {
     // damage spread over the pack: each skill's share times how many monsters it hits
     v = 0;
-    for (const s of rot.share) v += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack));
+    for (const s of rot.share) v += s.dmg * sAdj(s.key) * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack));
     v = v / (rot.seconds || 60);
   }
   if (p.combos !== false) { try { v *= comboOf(b, p, r).mult; } catch { /* leave as is */ } }
@@ -361,7 +361,7 @@ function score(b, p) {
 let curP = null; // the run's settings (farm mode orders the hotbar by damage x monsters hit)
 function setHotbar(b) {
   const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
-  const w = (s) => s.dpsAlone * (curP && curP.mode === 'farm' ? targetsOf(s.sid, s.lv, b.evo[s.sid], curP.pack) : 1);
+  const w = (s) => s.dpsAlone * sAdj(s.sid) * (curP && curP.mode === 'farm' ? targetsOf(s.sid, s.lv, b.evo[s.sid], curP.pack) : 1);
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => w(y) - w(x));
   b.hotbar = dmg.slice(0, hotbarSize(b)).map((s) => s.sid);
   return b;
@@ -566,6 +566,11 @@ function sheetOf(r) {
 // ---------- skill order: replay the game's own rotation (same loop as its calculator) ----------
 // every 50 ms over 60 s: if not busy casting, cast the first hotbar skill that is ready (charges, cooldown),
 // otherwise swing a basic attack when its timer allows. Repeat charges hit for 50%.
+// per-skill factors learned from this character's real hits (relative to its median skill): skills the
+// game's planner formula under- or over-rates (e.g. at world bosses). Empty = the game's formula as is.
+let SKILL_ADJ = {};
+const sAdj = (k) => SKILL_ADJ[k] || 1;
+function useSkillAdj(p) { SKILL_ADJ = (p && p.skillAdj && typeof p.skillAdj === 'object') ? p.skillAdj : {}; }
 function rotationOf(r, hotbar, DL = 60000, FROM = 0) {
   const V = (r && r.skills) || [];
   const ae = hotbar.map((sid) => V.find((x) => x.sid === sid && x.damages && x.hit)).filter(Boolean);
@@ -578,14 +583,14 @@ function rotationOf(r, hotbar, DL = 60000, FROM = 0) {
     const we = ae.find((x) => { const s = st.get(x.sid); if (s.left <= 0 && t >= s.refill) { s.left = x.charges || 1; s.first = true; } return s.left > 0; });
     if (we) {
       const s = st.get(we.sid);
-      const dmg = (we.hit.vsTarget * we.perCast + (we.dot || 0)) * (s.first ? 1 : REPEAT);
+      const dmg = (we.hit.vsTarget * we.perCast + (we.dot || 0)) * (s.first ? 1 : REPEAT) * sAdj(we.sid);
       s.first = false; s.left--; s.refill = t + we.cdMs;
       casts.push({ t, sid: we.sid, dmg });
       if (t >= FROM) { total += dmg; const q = per[we.sid] || (per[we.sid] = { n: 0, dmg: 0 }); q.n++; q.dmg += dmg; }
       busy = t + Math.max(STEP, we.castMs || 0);
       if (we.castMs > 0) continue;
     }
-    if (t >= nextBasic && basic.cdMs) { if (t >= FROM) { total += basic.vsTarget || 0; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += basic.vsTarget || 0; } nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
+    if (t >= nextBasic && basic.cdMs) { if (t >= FROM) { const bd = (basic.vsTarget || 0) * sAdj('basic'); total += bd; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += bd; } nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
   }
   return { casts, per, total, ae, secs: (DL - FROM) / 1000 };
 }
@@ -716,7 +721,7 @@ function cardScore(b, p) {
   return { v, dps, gold, drop, r };
 }
 L.cards = async (p) => {
-  await load();
+  await load(); useSkillAdj(p);
   if (!G.cardDefs || !G.mobs) throw new Error('หาข้อมูลการ์ดของเกมไม่เจอ');
   evals = 0; const t0 = performance.now();
   const goal = p.goal || 'boss';
@@ -865,7 +870,7 @@ L.cards = async (p) => {
 
 // ---------- prediction for the character as it is now (to compare with a real measurement) ----------
 L.predict = async (p) => {
-  await load();
+  await load(); useSkillAdj(p);
   if (!G.jobs[p.job]) throw new Error('ไม่รู้จักอาชีพ ' + p.job);
   const target = pickTarget('boss', p.level, p.target);
   const q = { ...p, mode: 'boss', target, targetLevel: targetLevelFor(target, 'boss', p.level), c2: (p.current && p.current.c2) || '' };
@@ -876,7 +881,8 @@ L.predict = async (p) => {
   const r = calc(b);
   const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
   const adj = dummyAdj(b, r);
-  const rot = { ...rot0, dps: rot0.dps * adj, share: (rot0.share || []).map((x) => ({ ...x, dmg: x.dmg * adj })) };
+  const rot = { ...rot0, share: (rot0.share || []).map((x) => ({ ...x, dmg: x.dmg * adj * sAdj(x.key) })) };
+  rot.dps = Object.keys(SKILL_ADJ).length ? rot.share.reduce((t, x) => t + x.dmg, 0) / (rot0.seconds || 60) : rot0.dps * adj;
   const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
   const bs = r.basic || {}; const sh = r.sheet || {};
   let cmb = { mult: 1, parts: [] }; try { cmb = comboOf(b, { ...q, pack: 1 }, r); } catch { /* none */ }
@@ -933,6 +939,7 @@ L.combos = async () => {
 // skills -> best cards -> skills again with those cards -> cards again, for the strongest paths
 const toAlbum = (cards, stars) => Object.fromEntries(cards.map((m, i) => ['s' + (i + 1), 'spirit_card' + ((stars[i] || 1) > 1 ? '+' + ((stars[i] || 1) - 1) : '') + '|' + m]));
 L.full = async (p) => {
+  useSkillAdj(p);
   await load();
   const t0 = performance.now();
   const goal = p.goal || (p.mode === 'boss' ? 'boss' : 'farm');
@@ -960,6 +967,7 @@ L.full = async (p) => {
 // per map: for each monster camp, time to kill (the game's calculator vs that monster, spread over
 // the pack for area skills) + walking, silver per kill x card/gear Gold%, capped by respawns
 L.maps = async (p) => {
+  useSkillAdj(p);
   await load();
   if (!G.maps) throw new Error('หาข้อมูลแมพของเกมไม่เจอ');
   evals = 0; const t0 = performance.now();
@@ -1017,6 +1025,7 @@ L.info = async () => {
 
 // p: { job, level, jobLevel, stats, c2Job, c2Points, mode: 'boss'|'farm', pack, target?, paths?: [''|'path'...], current?: build }
 L.run = async (p) => {
+  useSkillAdj(p);
   await load();
   if (!G.jobs[p.job]) throw new Error('ไม่รู้จักอาชีพ ' + p.job);
   evals = 0;

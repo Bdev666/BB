@@ -743,6 +743,7 @@ async function openLab(opt = {}) {
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
+    if (me && me.job === job.value) p.acc = accId; // the character's own learned per-skill factors (from its real hits)
     if (owned.length) p.owned = owned;
     if (me && me.skills) p.basics = me.skills; // the character's real basic-skill levels (the calculator assumes maxed)
     return p;
@@ -815,7 +816,7 @@ async function openLab(opt = {}) {
       cGo.disabled = true; cOut.replaceChildren(el('p', { class: 'hint' }, 'กำลังอ่านตัวละครล่าสุดและลองการ์ดทุกคอมโบ…'));
       const meNow = (await dash.invoke('lab-me', accId)) || me;
       const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4,
-        target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true,
+        target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true, acc: accId,
         loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
         build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: {}, hotbar: [], c2: meNow.c2 || '' } };
       if (cMine.checked && meNow.ownedCards && meNow.ownedCards.length) q.owned = meNow.ownedCards;
