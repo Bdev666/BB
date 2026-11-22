@@ -432,7 +432,8 @@ function handleEvents(id, events) {
       case 'kill':
         g.lastHitAt = Date.now();
         // a real-DPS measurement is running: keep this character's own hits
-        if (ev.type === 'hit') { fightHit(g, ev); selftest.combatHit(id, ev); }
+        if (ev.type === 'hit') { fightHit(g, ev); selftest.combatHit(id, ev); abHit(g, ev); }
+        if (ev.type === 'kill' && g.ab && g.ab.phase) abBucket(g).kills++;
         if (ev.type === 'kill' && g.fight && ev.target === pretty(g.fight.mob)) fightEnd(g, true);
         if (ev.type === 'hit' && g.measure && Date.now() < g.measure.until) { const m = g.measure; if (!m.first) m.first = Date.now(); m.last = Date.now(); m.hits.push({ dmg: ev.dmg, sid: ev.sid, mob: ev.mob, pet: ev.pet, crit: ev.crit }); }
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
@@ -1364,6 +1365,56 @@ function deathCost(id, g) {
   return { perHour: +(deaths / hours).toFixed(1), feePerHour: Math.round(fee / hours), silverPerHour: Math.round(rate.silverPerHour || 0) };
 }
 
+// ---------- real A/B test: the build before a change (A) against after it (B), same map, measured per minute ----------
+// The game is the judge: active DPS (time between own hits of 3 s or less) and kills, minute by minute, so the
+// spread between minutes says how much a difference has to be before it is real.
+function abBucket(g) {
+  const P = g.ab[g.ab.phase]; const m = Math.floor((Date.now() - P.start) / 60000);
+  while (P.mins.length <= m) P.mins.push({ dmg: 0, activeMs: 0, kills: 0, hits: 0 });
+  return P.mins[m];
+}
+function abHit(g, ev) {
+  const A = g.ab; if (!A || !A.phase || ev.pet || !(ev.dmg > 0)) return;
+  const P = A[A.phase];
+  if (Date.now() - P.start > P.minutes * 60000) { A.phase = null; log.info(`A/B: phase ${A.last} done`); return; }
+  const b = abBucket(g); const now = Date.now();
+  b.dmg += ev.dmg; b.hits++; if (P.lastHit && now - P.lastHit <= 3000) b.activeMs += now - P.lastHit; P.lastHit = now;
+  if (ev.mob) P.mobs[ev.mob] = (P.mobs[ev.mob] || 0) + 1;
+}
+function abStats(P) {
+  if (!P) return null;
+  const full = P.mins.filter((x) => x.activeMs > 10000); // minutes with enough fighting in them
+  const dps = full.map((x) => x.dmg / (x.activeMs / 1000));
+  const n = dps.length; const mean = n ? dps.reduce((t, x) => t + x, 0) / n : 0;
+  const sd = n > 1 ? Math.sqrt(dps.reduce((t, x) => t + (x - mean) ** 2, 0) / (n - 1)) : 0;
+  const kills = P.mins.reduce((t, x) => t + x.kills, 0); const mins = Math.max(1 / 60, Math.min(P.minutes, (Date.now() - P.start) / 60000));
+  const mob = Object.entries(P.mobs).sort((a, b) => b[1] - a[1])[0];
+  return { minutes: +mins.toFixed(1), of: P.minutes, n, dps: Math.round(mean), sd: Math.round(sd), se: n > 1 ? Math.round(sd / Math.sqrt(n)) : null, killsPerMin: +(kills / mins).toFixed(1), map: P.map, mob: mob ? mob[0] : '', label: P.label };
+}
+function abResult(g) {
+  const A = g.ab; if (!A) return null;
+  const a = abStats(A.A); const b = abStats(A.B);
+  let verdict = null;
+  if (a && b && a.n >= 3 && b.n >= 3) {
+    const diff = b.dps - a.dps; const noise = 2 * Math.sqrt((a.se || 0) ** 2 + (b.se || 0) ** 2);
+    const pct = a.dps ? Math.round(diff / a.dps * 1000) / 10 : 0;
+    const same = a.map === b.map && a.mob === b.mob;
+    verdict = { pct, noisePct: a.dps ? Math.round(noise / a.dps * 1000) / 10 : 0, same,
+      says: !same ? 'วัดคนละแมพ/มอน เทียบกันไม่ได้' : Math.abs(diff) <= noise ? 'ยังบอกไม่ได้: ต่างน้อยกว่าความแกว่งของข้อมูล (วัดนานขึ้นอีกหน่อย)' : diff > 0 ? 'ดีขึ้นจริง ✅ เก็บแบบใหม่ไว้' : 'แย่ลงจริง ❌ กลับไปแบบเดิม' };
+  }
+  return { phase: A.phase, A: a, B: b, verdict };
+}
+async function abStart(id, phase, minutes, label) {
+  const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
+  if (!['A', 'B'].includes(phase)) return { ok: false, error: 'phase' };
+  g.ab = g.ab || {};
+  if (phase === 'A') g.ab.B = null;
+  g.ab[phase] = { start: Date.now(), minutes: Math.max(2, Math.min(60, Number(minutes) || 10)), mins: [], mobs: {}, map: mapOf(g), label: String(label || '').slice(0, 80), lastHit: 0 };
+  g.ab.phase = phase; g.ab.last = phase;
+  log.info(`acc ${id}: A/B measuring ${phase} for ${g.ab[phase].minutes} min on ${mapOf(g)}${label ? ` (${label})` : ''}`);
+  return { ok: true };
+}
+
 // ---------- collect rewards: mail gifts, Pass missions (daily / weekly) and Pass tiers ----------
 // the same messages the game's own "รับ" buttons send (mail one by one, then "claim all" on the Pass page)
 async function claimRewards(id) {
@@ -1720,9 +1771,12 @@ function onWorldBoss(v) {
 }
 
 function bossUp(b) {
-  const key = `up:${b.mobType}@${b.map}:${b.until}`;
-  if (bosses.sent.has(key)) return;
-  bosses.sent.add(key);
+  // one heads-up per boss and map per 20 minutes: the game re-estimates the spawn time every minute,
+  // so a key with the time in it said the same boss again every minute (seen 6 times in a row in a log)
+  const key = `${b.mobType}@${b.map}`;
+  bosses.lastUp = bosses.lastUp || new Map();
+  if (bosses.lastUp.has(key) && Date.now() - bosses.lastUp.get(key) < 20 * 60 * 1000) return;
+  bosses.lastUp.set(key, Date.now());
   notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} เกิดแล้ว · ${mapName(b.map)}`);
 }
 
@@ -1743,9 +1797,10 @@ function bossTick() {
   for (const b of bosses.field.values()) {
     if (b.closed || !b.until) continue;
     const left = b.until - now;
-    const soon = `soon:${b.mobType}@${b.map}:${b.until}`;
-    if (left > 0 && left <= lead && !bosses.sent.has(soon)) {
-      bosses.sent.add(soon);
+    const soon = `${b.mobType}@${b.map}`; // not the time: the game re-estimates it every minute
+    bosses.lastSoon = bosses.lastSoon || new Map();
+    if (left > 0 && left <= lead && !(bosses.lastSoon.has(soon) && now - bosses.lastSoon.get(soon) < 20 * 60 * 1000)) {
+      bosses.lastSoon.set(soon, now);
       notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} จะเกิดในอีก ~${Math.max(1, Math.round(left / 60000))} นาที · ${mapName(b.map)}`);
     }
     if (left <= 0 && left > -60000) bossUp(b);
@@ -2135,6 +2190,9 @@ function registerIpc() {
   handle('world-boss-go', (kind) => worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => bountyStart(id, on !== false));
   handle('claim-rewards', (id) => claimRewards(id));
+  handle('ab-start', (id, phase, minutes, label) => abStart(id, phase, minutes, label));
+  handle('ab-get', (id) => { const g = games.get(id); return g ? abResult(g) : null; });
+  handle('ab-stop', (id) => { const g = games.get(id); if (g && g.ab) g.ab.phase = null; return { ok: true }; });
   handle('claim-rewards-all', async () => { const r = []; for (const [id, g] of openGames()) if (g.inGame && !g.demo) r.push({ id, ...(await claimRewards(id)) }); return r; }); // eslint-disable-line no-await-in-loop
   handle('bounty-all', async (on) => { const r = []; for (const [id, g] of openGames()) if (g.inGame && !g.demo) r.push({ id, ...(await bountyStart(id, on !== false)) }); return r; }); // eslint-disable-line no-await-in-loop
   // how many unlocked gear pieces each account would salvage (shown before confirming)

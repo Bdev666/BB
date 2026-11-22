@@ -854,7 +854,7 @@ async function openLab(opt = {}) {
         el('p', { class: 'hint' }, 'อ่านเกียร์ affix ตีบวก การ์ด สเตตัส สกิล Evolution ของตัวละครจากเกมทุก 10 วิ แล้วคำนวณใหม่ · เปลี่ยนของในเกมแล้วดูตัวเลขขยับได้ทันที'));
     };
     lBoss.addEventListener('change', () => { lPrev = null; lTick(); });
-    livePane.append(el('div', { class: 'lab-form' }, el('label', {}, 'เป้า ', lBoss)), lOut);
+    livePane.append(el('div', { class: 'lab-form' }, el('label', {}, 'เป้า ', lBoss)), lOut, abBox(accId));
     livePane.start = () => { lTick(); clearInterval(lTimer); lTimer = setInterval(() => { if ($('#modal').hidden) { clearInterval(lTimer); return; } lTick(); }, 10000); };
   } else {
     cardPane.append(el('p', { class: 'hint' }, 'เลือกตัวละครที่ออนไลน์อยู่ เพื่อจัดการ์ดจากการ์ดที่มี'));
@@ -874,6 +874,34 @@ async function openLab(opt = {}) {
 }
 
 // real test: measure this character's own damage for 60 s (training dummy) and compare with the prediction
+// real A/B test: measure the build as it is (A), change one thing in the game, measure again (B);
+// the minute-by-minute spread decides whether the difference is real
+function abBox(accId) {
+  const mins = el('select', {}, ...[5, 10, 15, 20, 30].map((m) => el('option', { value: String(m), selected: m === 10 ? '' : null }, `${m} นาที`)));
+  const label = el('input', { type: 'text', placeholder: 'เปลี่ยนอะไร เช่น ย้ายแต้ม Smite → Martyrdom', style: 'width:280px;max-width:60vw' });
+  const out = el('div', { class: 'hint' }, 'ยังไม่ได้เริ่ม');
+  let timer = null;
+  const fmtP = (x, name) => (x ? `${name}: ${x.minutes}/${x.of} นาที · DPS ${num(x.dps)}${x.se ? ` ±${num(x.se)}` : ''} · ฆ่า ${x.killsPerMin}/นาที · ${labPretty(x.mob || '-')} @ ${x.map}${x.label ? ` · ${x.label}` : ''}` : `${name}: -`);
+  const show = async () => {
+    const r = await dash.invoke('ab-get', accId);
+    if (!r) return;
+    out.replaceChildren(el('div', {}, fmtP(r.A, 'A (แบบเดิม)')), el('div', {}, fmtP(r.B, 'B (แบบใหม่)')),
+      r.verdict ? el('div', { class: r.verdict.same && r.verdict.says.startsWith('ดีขึ้น') ? 'pos' : r.verdict.says.startsWith('แย่ลง') ? 'neg' : '' }, el('b', {}, `ผล: ${r.verdict.pct > 0 ? '+' : ''}${r.verdict.pct}% (ความแกว่ง ±${r.verdict.noisePct}%) · ${r.verdict.says}`))
+        : el('div', {}, r.phase ? `⏱ กำลังวัด ${r.phase} · ตีตามปกติ (เปิด AUTO ที่แมพเดิม มอนเดิม)` : 'ต้องมีข้อมูลอย่างน้อย 3 นาทีที่ได้ตีทั้ง A และ B'));
+    if (!r.phase && timer && r.A && (r.B || r.A.minutes >= r.A.of)) { /* keep showing */ }
+  };
+  const start = async (phase) => {
+    const r = await dash.invoke('ab-start', accId, phase, +mins.value, label.value);
+    if (!r || !r.ok) { out.textContent = (r && r.error) || 'เริ่มไม่ได้'; return; }
+    clearInterval(timer); timer = setInterval(() => { if ($('#modal').hidden) { clearInterval(timer); return; } show(); }, 5000); show();
+  };
+  return el('div', { class: 'lab-card' },
+    el('div', { class: 'lab-top' }, el('b', {}, '🔬 ทดลองจริง (A/B): ให้เกมตัดสินว่าเปลี่ยนแล้วดีขึ้นจริงไหม')),
+    el('p', { class: 'hint' }, '① กด "วัดแบบเดิม" แล้วฟาร์มตามปกติจนครบเวลา ② เปลี่ยนในเกม 1 อย่าง (แต้มสกิล ช่องลัด การ์ด) ③ กด "วัดแบบใหม่" ที่แมพเดิม มอนเดิม · โปรแกรมเทียบ DPS ช่วงที่ตีอยู่ทีละนาที แล้วบอกว่าต่างจริงหรือแค่แกว่ง'),
+    el('div', { class: 'lab-row' }, el('label', {}, 'วัดนาน ', mins), label),
+    el('div', { class: 'lab-row' }, el('button', { class: 'primary', onclick: () => start('A') }, '① วัดแบบเดิม (A)'), el('button', { class: 'primary', onclick: () => start('B') }, '② เปลี่ยนแล้ว วัดแบบใหม่ (B)'), el('button', { onclick: async () => { await dash.invoke('ab-stop', accId); show(); } }, '■ หยุดวัด')),
+    out);
+}
 function measureBox(accId, me, params) {
   const out = el('div', { class: 'lab-cards' });
   const secs = el('select', {}, ...[30, 60, 120].map((n) => el('option', { value: String(n), selected: n === 60 ? '' : null }, n + ' วิ')));
