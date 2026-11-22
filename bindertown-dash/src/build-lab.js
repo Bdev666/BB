@@ -720,7 +720,7 @@ function describe(b, p) {
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
-    hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(), reorder,
+    hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(),
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
     problems,
@@ -948,7 +948,7 @@ L.predict = async (p) => {
     perSkill: rot.share.map((x) => ({ sid: x.key, name: name(x.key), dps: Math.round(x.dmg / (rot.seconds || 60)) })),
     // per skill: the game's own numbers for one use (to set against real hits from the combat log)
     perHit: ((r && r.skills) || []).map((v) => ({ sid: v.sid, hit: typeof v.hit === 'number' ? Math.round(v.hit * adj) : v.hit, hits: v.hits, perCast: v.perCast, damages: v.damages, cdMs: Math.round(v.cdMs || 0), dmgMult: v.dmgMult, lvMult: v.lvMult, lineMult: v.lineMult })),
-    hotbar: b.hotbar.map(name), notes: (r.notes || []).slice(0, 5), names: Object.fromEntries(Object.keys(G.skills).map((k) => [k, G.skills[k].name || k])),
+    hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(), reorder, notes: (r.notes || []).slice(0, 5), names: Object.fromEntries(Object.keys(G.skills).map((k) => [k, G.skills[k].name || k])),
   };
 };
 

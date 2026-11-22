@@ -202,7 +202,6 @@ function openGame(id, opts = {}) {
     height: 800,
     show: false,
     title: windowTitle(id),
-    icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
     backgroundColor: '#0b1220', // the game's own background: no white flash while loading
     webPreferences: {
@@ -1927,7 +1926,6 @@ function createDashboard() {
     minWidth: 900,
     minHeight: 600,
     title: 'BinderDash',
-    icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
     backgroundColor: '#14121f',
     webPreferences: {
@@ -1963,7 +1961,6 @@ function openSettings(tab) {
     minWidth: 640,
     minHeight: 480,
     title: 'ตั้งค่า — BinderDash',
-    icon: nativeImage.createFromDataURL(icons.normal),
     autoHideMenuBar: true,
     backgroundColor: '#0d0c16',
     webPreferences: { preload: path.join(__dirname, 'preload-dashboard.js'), contextIsolation: true, sandbox: true },
