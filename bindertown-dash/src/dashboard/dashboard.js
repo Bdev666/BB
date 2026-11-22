@@ -639,9 +639,17 @@ async function openLab(opt = {}) {
   const hasLo = !!lo && (Object.keys(lo.equip || {}).length > 0 || Object.keys(lo.album || {}).length > 0);
   const useGear = el('input', { type: 'checkbox', checked: hasLo ? '' : null, disabled: hasLo ? null : '' });
   const packRow = el('label', { hidden: '' }, 'มอนต่อกลุ่ม ', pack, el('small', { class: 'hint' }, ' ตัว (สกิลวง/ทะลุ/กวาด ตีได้หลายตัว)'));
-  const win = el('select', { title: 'ตีบอสนานเกิน 1 นาที: ใช้ดาเมจยาว (นาทีที่ 2–3) ไม่นับช่วงเปิดที่ทุกสกิลพร้อมพร้อมกัน' },
-    el('option', { value: 'sustain' }, 'ดาเมจยาว (นาทีที่ 2–3)'), el('option', { value: 'burst' }, '60 วิแรก (รวมช่วงเปิด)'));
-  const bossRow = el('label', {}, 'เป้า ', boss, ' · คิดจาก ', win);
+  // how long the boss fight lasts: the build is scored on its average damage over that time
+  let ft = { fights: {}, world: {} }; try { ft = await dash.invoke('fight-times'); } catch { /* none yet */ }
+  const win = el('select', { title: 'บิลด์ถูกจัดให้ได้ดาเมจรวมมากที่สุดในเวลาที่ตีบอสจริง (ช่วงเปิดกับช่วงยาวถ่วงตามเวลานั้น)' },
+    el('option', { value: 'auto' }, 'อัตโนมัติ (ตามบอส)'), el('option', { value: 'real' }, 'จากการตีจริง'),
+    el('option', { value: '30' }, '30 วิ'), el('option', { value: '60' }, '1 นาที'), el('option', { value: '180' }, '3 นาที'), el('option', { value: 'sustain' }, 'ยาวมาก (นาทีที่ 2–3)'));
+  const party = num_(1, 1, 30);
+  const realOf = () => { const t = boss.value || ''; const f = ft.fights[t]; return f ? f : null; };
+  const ftNote = el('small', { class: 'hint' });
+  const updFt = () => { const f = realOf(); const wl = ft.world[boss.value]; ftNote.textContent = f ? ` · ตีจริง ${f.n} ครั้ง ค่ากลาง ${f.sec} วิ` : wl ? ` · กิจกรรมยาว ${Math.round(wl / 60)} นาที` : ''; };
+  boss.addEventListener('change', updFt); updFt();
+  const bossRow = el('label', {}, 'เป้า ', boss, ' · ระยะเวลาสู้ ', win, ' · ตีกี่คน ', party, ftNote);
   mode.addEventListener('change', () => { packRow.hidden = mode.value !== 'farm'; bossRow.hidden = mode.value !== 'boss'; });
   const go = el('button', { class: 'primary' }, me && me.job === myJob ? `🧪 วิเคราะห์ ${me.name || 'ตัวละคร'} (สกิล + การ์ด)` : 'คำนวณหาบิลด์ที่ดีที่สุด');
   const res = el('div', { class: 'lab-res' });
@@ -650,14 +658,17 @@ async function openLab(opt = {}) {
     const p = labParams();
     lastLab = p;
     try {
-      renderLab(res, await dash.invoke('lab-run', p));
+      const rr = await dash.invoke('lab-run', p);
+      if (rr.fight) p.fightSec = rr.fight.sec; // cards are scored over the same fight length
+      renderLab(res, rr);
       // a real character: go straight on to the best cards for the winning build
       if (me && me.job === job.value) { const b = res.querySelector('.lab-card.best .lab-cardbtn[data-goal="' + (mode.value === 'boss' ? 'boss' : 'farm') + '"]'); if (b) b.click(); }
     } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     go.disabled = false;
   };
   const labParams = () => {
-    const p = { window: win.value, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+    const rf = realOf();
+    const p = { fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
@@ -872,10 +883,11 @@ function mapBox(x) {
 function renderLab(box, r) {
   const best = r.results[0];
   const cur = r.current;
-  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
+  const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}${r.fight ? ` · คิดจากการสู้ ${r.fight.sec >= 120 ? (r.fight.sec / 60).toFixed(1) + ' นาที' : r.fight.sec + ' วิ'} (${r.fight.why})` : ''} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
-      el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? (x.window === 'burst' ? 'DPS 60 วิแรก' : 'DPS ยาว') : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
+      el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? (x.fightSec ? `DPS เฉลี่ย ${x.fightSec >= 120 ? (x.fightSec / 60).toFixed(1) + ' นาที' : x.fightSec + ' วิ'}` : x.window === 'burst' ? 'DPS 60 วิแรก' : 'DPS ยาว') : 'ดาเมจรวม/วิ'} ${num(x.score)}`),
+      x.fightSec && x.bossHp && r.mode === 'boss' && !/^training/.test(r.target.id) ? el('small', { class: 'hint' }, ` · ล้มบอสคนเดียวใน ~${Math.round(x.bossHp / Math.max(1, x.score))} วิ`) : null,
       r.mode === 'boss' ? el('small', { class: 'hint', title: 'ดาเมจยาว = นาทีที่ 2–3 ของการตีต่อเนื่อง (ไม่มีช่วงเปิดที่ทุกสกิลพร้อมพร้อมกัน) · 60 วิแรก = รวมช่วงเปิด' },
         x.window === 'burst' ? ` · ดาเมจยาว ${num(x.sustained)}` : ` · 60 วิแรก ${num(x.dps)} (ช่วงเปิด +${x.sustained ? Math.round((x.dps / x.sustained - 1) * 100) : 0}%)`) : null,
       i ? el('small', { class: 'hint' }, ` (${Math.round((x.score / best.score - 1) * 100)}%)`) : null,

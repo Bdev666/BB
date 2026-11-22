@@ -182,7 +182,7 @@ function score(b, p) {
   const rot = r.rotation || { dps: 0, share: [] };
   const adj = dummyAdj(b, r);
   let v = rot.dps * adj;
-  if (p.mode === 'boss' && p.window !== 'burst') v = sustainedDps(b, r);
+  if (p.mode === 'boss') v = p.fightSec ? windowDps(b, r, p.fightSec) : p.window === 'burst' ? v : sustainedDps(b, r);
   if (p.mode === 'farm') {
     // damage spread over the pack: each skill's share times how many monsters it hits
     v = 0;
@@ -374,6 +374,8 @@ function rotationOf(r, hotbar, DL = 60000, FROM = 0) {
 }
 // long-fight damage: minutes 2-3 of a 3-minute rotation (no opening burst where every skill is ready at once)
 const SUSTAIN = { DL: 180000, FROM: 60000 };
+// average damage per second over a fight of T seconds from the first hit (opening burst included)
+function windowDps(b, r, T) { const x = rotationOf(r, b.hotbar, Math.max(5, T) * 1000, 0); return x.total / Math.max(5, T) * dummyAdj(b, r); }
 function sustainedDps(b, r) { const x = rotationOf(r, b.hotbar, SUSTAIN.DL, SUSTAIN.FROM); return x.total / x.secs * dummyAdj(b, r); }
 // skills that put the target under crowd control (root / stun / slow / freeze / chill)
 const ccOf = (d) => [d.rootMs && 'ตรึง ' + d.rootMs / 1000 + ' วิ', d.stunMs && 'สตัน ' + d.stunMs / 1000 + ' วิ', d.freezeMs && 'แช่แข็ง ' + d.freezeMs / 1000 + ' วิ', d.slowPct && 'สโลว์ ' + Math.round(d.slowPct * 100) + '%', d.chill && 'หนาว'].filter(Boolean);
@@ -445,7 +447,8 @@ function describe(b, p) {
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
     score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)),
-    sustained: (() => { try { return Math.round(sustainedDps(b, r)); } catch { return 0; } })(), window: p.window === 'burst' ? 'burst' : 'sustain', ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
+    sustained: (() => { try { return Math.round(sustainedDps(b, r)); } catch { return 0; } })(), window: p.window === 'burst' ? 'burst' : 'sustain',
+    fightSec: p.fightSec || 0, fightDps: p.fightSec ? Math.round(windowDps(b, r, p.fightSec)) : 0, bossHp: (r.target && r.target.hp) || 0, ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
@@ -484,7 +487,7 @@ function cardScore(b, p) {
   let r; try { r = calc(b); } catch { return { v: 0 }; }
   const rot = r.rotation || { dps: 0, share: [] };
   let dps = rot.dps * dummyAdj(b, r);
-  if (p.goal === 'boss' && p.window !== 'burst') dps = sustainedDps(b, r);
+  if (p.goal === 'boss') dps = p.fightSec ? windowDps(b, r, p.fightSec) : p.window === 'burst' ? dps : sustainedDps(b, r);
   if (p.goal !== 'boss') { dps = 0; for (const s of rot.share) dps += s.dmg * (s.key === 'basic' ? 1 : targetsOf(s.key, b.skills[s.key] || 1, b.evo[s.key], p.pack)); dps /= rot.seconds || 60; }
   const al = r.album || {};
   const gold = al.gold || 0; const drop = al.drop || 0;
@@ -790,16 +793,42 @@ L.run = async (p) => {
   const base = { ...p, target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
   const paths = p.paths && p.paths.length ? p.paths : ['', ...(G.c2opts[p.job] || [])];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
+  // fight length used to score builds (boss mode): set by the player, recorded from real fights,
+  // the world boss event length, or this boss's HP / (damage per second x players hitting it)
+  let fight = null;
+  if (p.mode === 'boss' && p.fightMode && p.fightMode !== 'sustain' && p.fightMode !== 'burst') {
+    if (/^\d+$/.test(String(p.fightMode))) fight = { sec: +p.fightMode, why: 'ตั้งเอง' };
+    else if (p.fightMode === 'real' && p.realSec) fight = { sec: p.realSec, why: 'จากการตีจริง ' + (p.realN || 0) + ' ครั้ง (ค่ากลาง)' };
+    else if (WORLD[target]) fight = { sec: p.worldSec || 300, why: p.worldSec ? 'ความยาวกิจกรรม World Boss ที่เห็นจริง' : 'ประมาณ 5 นาที (ยังไม่เคยเห็นกิจกรรมนี้)' };
+    else {
+      // first a long-fight build to know the damage, then the time this boss takes to fall
+      const q0 = { ...base, c2: paths[paths.length > 1 ? 1 : 0] };
+      const b0 = await optimize(q0, yieldNow);
+      const r0 = calc(b0);
+      const dps0 = sustainedDps(b0, r0) * Math.max(1, p.party || 1);
+      const hp = (r0.target && r0.target.hp) || 0;
+      const sec = hp && dps0 ? Math.max(10, Math.min(900, Math.round(hp / dps0))) : 60;
+      fight = { sec, why: 'HP บอส ' + Math.round(hp).toLocaleString() + ' ÷ DPS ' + Math.round(dps0).toLocaleString() + ((p.party || 1) > 1 ? ' (' + p.party + ' คน)' : ''), hp };
+    }
+    base.fightSec = fight.sec;
+  }
   const results = [];
   for (const c2 of paths) {
     const q = { ...base, c2 };
     let b = await optimize(q, yieldNow);
-    // long boss fights: the search is greedy, so also search by the first 60 s and keep whichever
-    // build is stronger over the long fight (its hotbar re-ordered for the long fight first)
-    if (q.mode === 'boss' && q.window !== 'burst') {
-      const alt = await optimize({ ...q, window: 'burst' }, yieldNow);
-      curP = q; bestHotbar(alt, q);
-      if (score(alt, q).v > score(b, q).v) b = alt;
+    // boss fights: the search is greedy and can stop at a weaker build, so also search by the other
+    // time scales (long fight, first 60 s), re-order each one's hotbar for this fight, keep the best
+    if (q.mode === 'boss') {
+      const others = [];
+      if (q.fightSec || q.window === 'burst') others.push({ ...q, fightSec: 0, window: 'sustain' });
+      if (q.fightSec || q.window !== 'burst') others.push({ ...q, fightSec: 0, window: 'burst' });
+      let best = score(b, q).v;
+      for (const o of others) {
+        const alt = await optimize(o, yieldNow);
+        curP = q; bestHotbar(alt, q);
+        const v = score(alt, q).v;
+        if (v > best) { best = v; b = alt; }
+      }
     }
     results.push(describe(b, q));
   }
@@ -812,7 +841,7 @@ L.run = async (p) => {
     current = describe(b, q);
   }
   results.sort((a, b) => b.score - a.score);
-  return { mode: p.mode, loadout: !!(p.loadout && (Object.keys(p.loadout.equip || {}).length || Object.keys(p.loadout.album || {}).length)), target: { id: target, name: (tmob && tmob.name) || target, level: base.targetLevel }, results, current, evals, ms: Math.round(performance.now() - t0), budget1: c1Budget(p.job, base.jobLevel) };
+  return { fight, mode: p.mode, loadout: !!(p.loadout && (Object.keys(p.loadout.equip || {}).length || Object.keys(p.loadout.album || {}).length)), target: { id: target, name: (tmob && tmob.name) || target, level: base.targetLevel }, results, current, evals, ms: Math.round(performance.now() - t0), budget1: c1Budget(p.job, base.jobLevel) };
 };
 })();`;
 

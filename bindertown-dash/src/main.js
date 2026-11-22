@@ -408,6 +408,8 @@ function handleEvents(id, events) {
       case 'kill':
         g.lastHitAt = Date.now();
         // a real-DPS measurement is running: keep this character's own hits
+        if (ev.type === 'hit') fightHit(g, ev);
+        if (ev.type === 'kill' && g.fight && ev.target === pretty(g.fight.mob)) fightEnd(g, true);
         if (ev.type === 'hit' && g.measure && Date.now() < g.measure.until) { const m = g.measure; if (!m.first) m.first = Date.now(); m.last = Date.now(); m.hits.push({ dmg: ev.dmg, sid: ev.sid, mob: ev.mob, pet: ev.pet, crit: ev.crit }); }
         if (g.alerts.has('idle')) setAlert(id, 'idle', false);
         break;
@@ -1016,7 +1018,46 @@ function onFieldBosses(list) {
   pushState();
 }
 
+// ---------- real boss fights: how long they take (Build Lab scores builds over that time) ----------
+const { MOBS: MOB_ROLES } = require('./mob-table');
+const WORLD_TYPES = { vale: 'wraithroot_colossus', nacreon: 'pearlheart_titan' };
+const isBossType = (t) => !!t && (Object.values(WORLD_TYPES).includes(t) || /^true_/.test(t) || ['boss', 'mini-boss'].includes((MOB_ROLES[t] || [])[0]));
+function fightHit(g, ev) {
+  if (!isBossType(ev.mob) || ev.pet) return;
+  const now = Date.now();
+  if (!g.fight || g.fight.mob !== ev.mob) { fightEnd(g); g.fight = { mob: ev.mob, start: now, last: now, dmg: 0, hits: 0 }; }
+  g.fight.last = now; g.fight.dmg += ev.dmg || 0; g.fight.hits++;
+}
+function fightEnd(g, killed = false) {
+  const f = g.fight; g.fight = null;
+  if (!f || f.hits < 5) return;
+  const sec = Math.round((f.last - f.start) / 1000);
+  if (sec < 5) return;
+  const list = store.data.fights || (store.data.fights = []);
+  list.push({ mob: f.mob, sec, dmg: f.dmg, killed, at: Date.now() });
+  if (list.length > 200) list.splice(0, list.length - 200);
+  store.save();
+  log.info(`boss fight: ${f.mob} ${sec}s ${f.dmg} dmg${killed ? ' (killed)' : ''}`);
+}
+function fightTick() {
+  for (const [, g] of games) if (g.fight && Date.now() - g.fight.last > 20000) fightEnd(g);
+}
+function fightTimes() {
+  const by = {};
+  for (const f of store.data.fights || []) (by[f.mob] || (by[f.mob] = [])).push(f.sec);
+  const med = (a) => { const x = a.slice().sort((p, q) => p - q); return x[Math.floor(x.length / 2)]; };
+  const out = {};
+  for (const [mob, a] of Object.entries(by)) out[mob] = { sec: med(a), n: a.length };
+  return { fights: out, world: store.data.worldLen || {} };
+}
+
 function onWorldBoss(v) {
+  // the event's real length (start -> end) for the Build Lab
+  if (v.state === 'live' && v.startAt && v.endsAt && v.endsAt > v.startAt && WORLD_TYPES[v.kind]) {
+    const wl = store.data.worldLen || (store.data.worldLen = {});
+    const sec = Math.round((v.endsAt - v.startAt) / 1000);
+    if (wl[WORLD_TYPES[v.kind]] !== sec) { wl[WORLD_TYPES[v.kind]] = sec; store.save(); }
+  }
   const before = bosses.world.get(v.kind);
   bosses.world.set(v.kind, { ...v, seenAt: Date.now() });
   if (before && before.state !== 'live' && v.state === 'live') {
@@ -1428,6 +1469,7 @@ function registerIpc() {
   });
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
   handle('lab-predict', (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`));
+  handle('fight-times', () => fightTimes());
   handle('lab-combos', () => labCall('window.__bdLab.combos()'));
   handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
   handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
@@ -1539,6 +1581,7 @@ app.whenReady().then(() => {
   setInterval(bossTick, 15 * 1000);
   setInterval(reconnectTick, 5000);
   setInterval(marketTick, 15 * 1000);
+  setInterval(fightTick, 5000);
   applyStartWithWindows();
   syncRemote();
 });
