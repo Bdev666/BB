@@ -620,7 +620,12 @@ async function openLab(opt = {}) {
   const num_ = (v, min, max, step = 1) => el('input', { type: 'number', min: String(min), max: String(max), step: String(step), value: String(v) });
   const job = el('select', {}, ...jobs.map((j) => el('option', { value: j.id, selected: j.id === myJob ? '' : null }, labPretty(j.id))));
   const lv = num_(me && me.job === myJob ? me.level : 100, 1, 200);
-  const jlv = num_(me && me.job === myJob ? Math.min(50, me.jobLevel) : 50, 1, 50);
+  // class 1: Job Lv 50 (all skill points) by default, like class 2; untick to use the character's own Job Lv
+  const jlvReal = me && me.job === myJob ? Math.min(50, me.jobLevel) : 50;
+  const jlv = num_(50, 1, 50);
+  const c1Full = el('input', { type: 'checkbox', checked: '' });
+  const c1Sync = () => { jlv.disabled = c1Full.checked; jlv.value = String(c1Full.checked ? 50 : jlvReal); };
+  c1Full.addEventListener('change', c1Sync); c1Sync();
   const c2i = (me && me.c2info) || {};
   const c2SkillPts = me && me.c2 ? Object.entries(me.skills).filter(([k]) => k.startsWith(me.c2 + '_')).reduce((t, [, v]) => t + v, 0) : 0;
   // class 2: Job Lv 50 and all 70 points by default, so every result is compared on a full class 2
@@ -723,7 +728,7 @@ async function openLab(opt = {}) {
     el('div', { class: 'lab-form' },
       el('label', { title: 'ตัวละครที่ออนไลน์อยู่ · อ่านเลเวล สเตตัส สกิล คลาส 2 เกียร์ และการ์ดจากเกม' }, '👤 ตัวละคร ', accSel),
       me && !jobs.some((j) => j.id === me.job) ? el('small', { class: 'hint' }, `(${labPretty(me.job)} ยังไม่มีอาชีพคลาส 1 · เลือกอาชีพเพื่อจำลอง)`) : null,
-      el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', {}, 'Job Lv ', jlv),
+      el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', { title: 'ตามเกม: Job คลาส 1 สูงสุด 50 · แต้มสกิลเต็ม' }, c1Full, ' คลาส 1 Job เต็ม'), el('label', {}, 'Job Lv ', jlv),
       el('label', { title: 'ตามเกม: Job คลาส 2 สูงสุด 50 ได้แต้มรวม 70 (ใช้ร่วมกันทั้งสองสาย)' }, c2Full, ' คลาส 2 Job เต็ม (Lv 50 · 70 แต้ม)'),
       el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
       el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
