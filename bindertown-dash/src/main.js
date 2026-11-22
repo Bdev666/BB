@@ -657,8 +657,18 @@ async function runCommand(id, cmd, arg) {
       const have = () => (g.adapter.inv ? g.adapter.inv.get(p.id) || 0 : 0);
       const start = have();
       let left = qty; let reason = '';
+      // keepSilver: never spend below this (auto-buy); the unit price is learned from the first round
+      const keep = Math.max(0, Number(arg.keepSilver) || 0);
+      const silverNow = async () => { try { return await g.win.webContents.executeJavaScript('(window.__game && window.__game.me() || {}).silver', true); } catch { return null; } };
+      let unit = (p.price || 12) * 1.5;
       while (left > 0) {
-        const n = Math.min(99, left);
+        let n = Math.min(99, left);
+        if (arg.keepSilver != null) {
+          const sv = await silverNow(); // eslint-disable-line no-await-in-loop
+          if (sv != null) n = Math.min(n, Math.floor((sv - keep) / unit));
+          if (n <= 0) { reason = `เหลือ Silver ไม่เกินที่ตั้งเก็บไว้ (${keep.toLocaleString('en-US')})`; break; }
+        }
+        const svBefore = arg.keepSilver != null ? await silverNow() : null; // eslint-disable-line no-await-in-loop
         const before = have(); const sentAt = Date.now();
         // eslint-disable-next-line no-await-in-loop
         if (!(await sendInput(id, { type: 'vendorBuy', itemId: p.id, qty: n }))) { reason = 'เกมยังไม่พร้อม'; break; }
@@ -669,6 +679,7 @@ async function runCommand(id, cmd, arg) {
           got = have() - before;
           if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
         }
+        if (got > 0 && svBefore != null) { const sv = await silverNow(); if (sv != null && svBefore > sv) unit = (svBefore - sv) / got; } // eslint-disable-line no-await-in-loop
         if (got <= 0) { reason = reason || 'ร้านไม่ขายเพิ่ม (Silver ไม่พอ / กระเป๋าหนักเกิน / ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; break; }
         left -= got;
         if (got < n) { reason = 'ได้ไม่ครบรอบนี้ (Silver หรือน้ำหนักกระเป๋าไม่พอ)'; break; }
@@ -1086,10 +1097,10 @@ async function autoBuyPotion(id, g, row) {
   if (g.autoBuyAt[pid] && Date.now() - g.autoBuyAt[pid] < 10 * 60 * 1000) return;
   g.autoBuyAt[pid] = Date.now();
   const qty = 99 * Math.max(1, Math.min(10, Number(ab.rounds) || 3));
-  const r = await runCommand(id, 'buy', { itemId: pid, qty });
+  const r = await runCommand(id, 'buy', { itemId: pid, qty, keepSilver: Math.max(0, Number(ab.keepSilver ?? 5000)) });
   log.info(`acc ${id}: auto-buy ${pid} x${qty} -> ${r.ok ? 'got ' + r.bought : r.error}`);
   if (r.ok) { setAlert(id, 'potion:' + row.name, false); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
-  else notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`);
+  else if (!g.autoBuyFailAt || Date.now() - g.autoBuyFailAt > 60 * 60 * 1000) { g.autoBuyFailAt = Date.now(); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`); } // at most once an hour
 }
 
 // ---------- respawn in place when dead while hidden (Premium) ----------
@@ -1577,7 +1588,7 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
-    if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)) };
+    if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
     if (patch.salvageMaxPrice !== undefined) s.salvageMaxPrice = Math.max(0, Number(patch.salvageMaxPrice) || 0);

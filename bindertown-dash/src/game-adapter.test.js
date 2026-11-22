@@ -123,6 +123,15 @@ d4.ingest({ type: 'market', item: 'โพชั่น', price: 7, t: 3 });
 const pot = d4.bagRows(1)[0];
 assert.strictEqual(Math.round(pot.minutesLeft), 30);
 assert.strictEqual(pot.market, 7);
+// selling is not use, whichever comes first (the sale notice or the smaller bag)
+const d5 = new AccountData(); d5.startedAt = 1;
+d5.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 218, supply: true }], t: 2 });
+d5.ingest({ type: 'sold', item: 'โพชั่น', qty: 188, silver: 376, t: 3 });
+d5.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 30, supply: true }], t: 4 });
+assert.strictEqual(d5.bagRows(1)[0].usedPerHour, 0);
+d5.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 20, supply: true }], t: 5 });
+d5.ingest({ type: 'sold', item: 'โพชั่น', qty: 10, silver: 20, t: 6 });
+assert.strictEqual(d5.bagRows(1)[0].usedPerHour, 0);
 // buying 99 more does not hide the use: still 60/h, now 129 left -> ~129 minutes
 d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 129, supply: true }], t: 3600 * 1000 + 1 });
 assert.strictEqual(Math.round(d4.bagRows(1)[0].minutesLeft), 129);

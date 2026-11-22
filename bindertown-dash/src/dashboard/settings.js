@@ -118,9 +118,9 @@ const gh = document.getElementById('open-gh'); if (gh) gh.addEventListener('clic
 { const ar = document.getElementById('autoRespawnHere');
   if (ar) { dash.invoke('state').then((st) => { ar.checked = st.settings.autoRespawnHere !== false; }).catch(() => {}); ar.addEventListener('change', () => dash.invoke('settings', { autoRespawnHere: ar.checked })); } }
 
-{ const on = document.getElementById('autoBuyOn'); const rd = document.getElementById('autoBuyRounds');
+{ const on = document.getElementById('autoBuyOn'); const rd = document.getElementById('autoBuyRounds'); const kp = document.getElementById('autoBuyKeep');
   if (on && rd) {
-    dash.invoke('state').then((st) => { const ab = st.settings.autoBuy || {}; on.checked = !!ab.on; rd.value = ab.rounds || 3; }).catch(() => {});
-    const save = () => dash.invoke('settings', { autoBuy: { on: on.checked, rounds: Number(rd.value) || 3 } });
-    on.addEventListener('change', save); rd.addEventListener('change', save);
+    dash.invoke('state').then((st) => { const ab = st.settings.autoBuy || {}; on.checked = !!ab.on; rd.value = ab.rounds || 3; if (kp) kp.value = ab.keepSilver ?? 5000; }).catch(() => {});
+    const save = () => dash.invoke('settings', { autoBuy: { on: on.checked, rounds: Number(rd.value) || 3, keepSilver: kp ? Number(kp.value) || 0 : 5000 } });
+    on.addEventListener('change', save); rd.addEventListener('change', save); if (kp) kp.addEventListener('change', save);
   } }

@@ -120,7 +120,7 @@ class AccountData {
       }
       case 'sold': {
         const b = this.bag.get(ev.item);
-        if (b) { b.sold += ev.qty || 0; if (b.useLog.length) b.useLog.push([t, -(ev.qty || 0)]); }
+        if (b) { b.sold += ev.qty || 0; b.useLog.push([t, -(ev.qty || 0)]); } // a sale is not use (it may come before or after the bag drops)
         this.soldSilver += ev.silver || 0;
         this.log(ev.auto ? 'other' : 'loot', `${ev.forged ? 'หลอมอัตโนมัติ' : ev.auto ? 'ขายอัตโนมัติ' : 'ขาย'} ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
         break;
@@ -157,13 +157,13 @@ class AccountData {
     return [...this.bag.entries()].filter(([, b]) => b.qty > 0).map(([name, b]) => {
       // use rate from how much LEFT the stack: buying or picking up more never hides use
       const used = b.useLog.reduce((t, [, n]) => t + n, 0);
-      const usedPerHour = hours > 0 ? Math.max(0, used / hours) : 0;
+      const usedPerHour = hours > 0 ? Math.max(0, used / Math.max(hours, 1 / 6)) : 0; // at least 10 minutes: a quick burst at the start is not the real pace
       const p = this.prices.get(name);
       return {
         name, qty: b.qty, icon: b.icon, ids: b.ids, gainedPerHour: b.gained / hours, usedPerHour,
         // how long the stack lasts at the current rate (potions, arrows ...), needs a few minutes of data
         // only for supplies (potions, ammo …): gear/materials leave the bag by being sold or salvaged
-        minutesLeft: b.supply && usedPerHour > 0 && hours > 0.08 ? (b.qty / usedPerHour) * 60 : null,
+        minutesLeft: b.supply && usedPerHour > 0 && (hours > 0.08 || b.useLog.reduce((n, [, q]) => n + q, 0) >= 10) ? (b.qty / usedPerHour) * 60 : null,
         market: p ? p.price : undefined,
       };
     });

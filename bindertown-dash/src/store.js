@@ -25,7 +25,7 @@ const DEFAULTS = {
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
       fieldBoss: true, worldBoss: true, event: true, daily: true, marketWatch: true,
     },
-    autoBuy: { on: false, rounds: 3 }, // buy potions by themselves when about to run out (rounds x 99)
+    autoBuy: { on: false, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
     autoRespawnHere: true,    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
     marketWatchMin: 2,        // refresh each watched market item every N minutes
     salvageByPrice: true,     // salvage only gear the central market says is worth little
