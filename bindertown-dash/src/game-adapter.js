@@ -366,7 +366,7 @@ class BinderTownAdapter {
       case 'respawned':
         if (e.id === this.sessionId) out.push({ type: 'revive', t: at });
         break;
-      case 'autoRespawned': out.push({ type: 'revive', t: at }); break;
+      case 'autoRespawned': out.push({ type: 'revive', here: true, fee: Number(e.fee) || 0, t: at }); break;
       case 'killGain': {
         const d = (p) => (Array.isArray(p) ? (p[1] || 0) - (p[0] || 0) : 0);
         out.push({ type: 'kill', target: this.lastKill || 'มอน', exp: d(e.xp), job: d(e.job), silver: d(e.gold), t: at });

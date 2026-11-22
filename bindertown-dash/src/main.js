@@ -78,6 +78,7 @@ function publicState() {
         summary: g.data.summary(now),
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
+        autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
       };
@@ -435,8 +436,14 @@ function handleEvents(id, events) {
         if (ev.dead && !g.alerts.has('death')) setAlert(id, 'death', true, 'ตัวละครตาย');
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
         break;
-      case 'death': setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย'); break;
-      case 'revive': setAlert(id, 'death', false); break;
+      case 'death':
+        setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย');
+        backupRespawn(id);
+        break;
+      case 'revive':
+        setAlert(id, 'death', false);
+        if (ev.here) { g.autoRespawns = (g.autoRespawns || 0) + 1; log.info(`acc ${id}: respawned in place by the game's Auto Respawn (-${ev.fee} G)`); }
+        break;
       case 'chat':
         if (ev.channel === 'whisper' && !ev.mine && !ev.backlog) notify(id, 'whisper', `กระซิบจาก ${ev.from}: ${ev.text}`);
         break;
@@ -560,7 +567,10 @@ async function runCommand(id, cmd, arg) {
       }
       break;
     }
-    case 'respawn': ok = await click('#deathoverlay button'); break;
+    case 'respawn':
+      // prefer the "here / in place" button, then any respawn button on the death screen
+      ok = await js(`(() => { const bs = [...document.querySelectorAll('#deathoverlay button')].filter((b) => !b.disabled); const b = bs.find((x) => /ที่เดิม|ตรงนี้|ที่นี่|here/i.test(x.textContent)) || bs[0]; if (!b) return false; b.click(); return true; })()`);
+      break;
     case 'sell': {
       const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
       if (!/^[\w~#.:+^|-]+$/.test(arg.itemId || '')) return { ok: false, error: 'ไอเทมไม่ถูกต้อง' };
@@ -1043,6 +1053,45 @@ function onFieldBosses(list) {
   pushState();
 }
 
+// ---------- respawn in place when dead while hidden (Premium) ----------
+// The game has its own "Auto Respawn" option (AUTO settings, Premium): dying in a field map with AUTO on
+// = up again on the spot for a Gold fee. BinderDash ticks that option for every account (through the
+// game's own checkbox, so the game saves it and tells the server), and as a backup presses the game's
+// respawn button when a hidden character still lies dead (other maps, AUTO off).
+const AUTO_RESPAWN_JS = `(() => { const c = document.getElementById('au-respawn'); if (!c) return { ok: false, why: 'none' };
+  if (c.checked) return { ok: true, on: true }; if (c.disabled) return { ok: false, why: 'premium' };
+  c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, on: c.checked, changed: true }; })()`;
+async function ensureAutoRespawn(id) {
+  const g = games.get(id);
+  if (!g || !g.inGame || g.demo || !g.win || g.win.isDestroyed()) return;
+  if (g.autoRespawnAt && Date.now() - g.autoRespawnAt < 60000) return;
+  g.autoRespawnAt = Date.now();
+  let r; try { r = await g.win.webContents.executeJavaScript(AUTO_RESPAWN_JS, true); } catch { return; }
+  const before = g.autoRespawn && g.autoRespawn.on;
+  g.autoRespawn = r;
+  if (r.changed) log.info(`acc ${id}: turned on the game's Auto Respawn (respawn in place)`);
+  if (!r.ok && r.why === 'premium' && !g.autoRespawnWarned) { g.autoRespawnWarned = true; log.info(`acc ${id}: Auto Respawn needs Premium`); }
+  if (before !== r.on) pushState();
+}
+function backupRespawn(id) {
+  if (store.data.settings.autoRespawnHere === false) return;
+  const g = games.get(id); if (!g || g.demo) return;
+  setTimeout(async () => {
+    if (!g.win || g.win.isDestroyed() || g.win.isVisible()) return; // only when the game window is hidden
+    if (!(await liveDead(id))) return; // the game's own Auto Respawn already got it up
+    const r = await gameCommand(id, 'respawn', {});
+    log.info(`acc ${id}: hidden and still dead after 4 s -> pressed respawn (${r.ok ? 'ok' : r.error})`);
+  }, 4000);
+}
+async function liveDead(id) {
+  const g = games.get(id);
+  try { return await g.win.webContents.executeJavaScript(`(() => { try { const m = window.__game && window.__game.me(); return !!(m && (m.state === 'dead' || m.hp <= 0)) || !!(document.getElementById('deathoverlay') && document.getElementById('deathoverlay').offsetParent); } catch { return false; } })()`, true); } catch { return false; }
+}
+function autoRespawnTick() {
+  if (store.data.settings.autoRespawnHere === false) return;
+  for (const [id, g] of games) if (g.inGame && !g.demo) ensureAutoRespawn(id);
+}
+
 // ---------- real-time market watch: items followed on the central market, refreshed in the background ----------
 // One online account asks the market about one watched item every few seconds (like browsing the board).
 // A watched item is "base id + grade": gear grade comes from how many affixes the asked id carries
@@ -1474,6 +1523,7 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
     if (patch.salvageMaxPrice !== undefined) s.salvageMaxPrice = Math.max(0, Number(patch.salvageMaxPrice) || 0);
     if (patch.salvageKeepVol !== undefined) s.salvageKeepVol = Math.max(0, Number(patch.salvageKeepVol) || 0);
@@ -1707,6 +1757,7 @@ app.whenReady().then(() => {
   setInterval(marketTick, 15 * 1000);
   setInterval(fightTick, 5000);
   setInterval(marketWatchTick, 1000);
+  setInterval(autoRespawnTick, 15000);
   applyStartWithWindows();
   syncRemote();
 });

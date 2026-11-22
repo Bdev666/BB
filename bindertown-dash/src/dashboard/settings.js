@@ -114,3 +114,6 @@ dash.onState(render);
 })();
 
 const gh = document.getElementById('open-gh'); if (gh) gh.addEventListener('click', () => dash.invoke('open-release'));
+
+{ const ar = document.getElementById('autoRespawnHere');
+  if (ar) { dash.invoke('state').then((st) => { ar.checked = st.settings.autoRespawnHere !== false; }).catch(() => {}); ar.addEventListener('change', () => dash.invoke('settings', { autoRespawnHere: ar.checked })); } }

@@ -386,3 +386,5 @@ svg.spark { display: block; }
 .lab-tabs { display: flex; gap: 6px; margin: 6px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 .lab-tabs .tab { border-radius: 9px 9px 4px 4px; }
 .lab-tabs .tab.on { background: linear-gradient(180deg, #8a6dff, #6a48f5); border-color: #7c5cff; font-weight: 600; }
+.ctl-chip { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.ctl-chip.on { color: #8ff0c4; border-color: rgba(60,207,145,.5); background: rgba(60,207,145,.08); }
