@@ -23,7 +23,7 @@ function create(deps) {
   }
 
   // the Build Lab's own query for the character as it is (same as the "this character" button)
-  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target,
+  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target, guild: me.guildLevel || 0,
     loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } });
 
   // ---------- real combat, per skill, kept with the build and the simulator's answer ----------
@@ -65,6 +65,18 @@ function create(deps) {
             if (rb && sb.vsTarget) rec.basicCheck = { realAvgNonCrit: rb.avgNonCrit, simPerHit: Math.round(sb.vsTarget), perHitRatio: rb.avgNonCrit ? +(rb.avgNonCrit / sb.vsTarget).toFixed(3) : null, realPerSec: +(rb.hits / sec).toFixed(2), simPerSec: sb.perSec != null ? +Number(sb.perSec).toFixed(2) : null, realCritRate: rb.critRate, simCrit: sb.critChance };
             const pred = p.withCombos || p.dps;
             rec.ratio = pred ? +(rec.realDps / pred).toFixed(3) : null;
+            // one hit, real against the formula, per skill (non-crit hits; 20+ hits): which skills are off and by how much
+            rec.hitCheck = {};
+            for (const h of p.perHit || []) {
+              const real = rec.skills[h.sid]; const sim = h.hit && h.hit.vsTarget;
+              if (!real || !sim || real.hits < 20 || !real.avgNonCrit) continue;
+              rec.hitCheck[h.sid] = { real: real.avgNonCrit, sim: Math.round(sim), x: +(real.avgNonCrit / sim).toFixed(3) };
+            }
+            const xs = Object.values(rec.hitCheck).map((v) => v.x).sort((a, b2) => a - b2);
+            if (xs.length >= 3) {
+              rec.calib = +xs[Math.floor(xs.length / 2)].toFixed(3);
+              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, n: xs.length, job: me.job, c2: me.c2, at: Date.now() });
+            }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));
           }

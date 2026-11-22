@@ -42,6 +42,8 @@ const selftest = require('./selftest').create({
   salvageOpts: (...a) => salvageOpts(...a), salvageVerdict: (...a) => salvageVerdict(...a), sendInput: (...a) => sendInput(...a),
   runCommand: (...a) => runCommand(...a), MARKET_FILTER, labMe: (id) => (labMeRef ? labMeRef(id) : null),
   labPredict: (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`),
+  // per character: real hit / formula hit (median over skills), eased in over time
+  saveCalib: (id, c) => { const all = store.data.calib || (store.data.calib = {}); const old = all[id]; all[id] = old && old.job === c.job ? { ...c, k: +(old.k * 0.6 + c.k * 0.4).toFixed(3), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 }; store.save(); },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
 });
 
@@ -461,6 +463,7 @@ function handleEvents(id, events) {
         break;
       case 'revive':
         if (g.respawnTries) selftest.count(id, 'respawnOk');
+        g.respawnClicked = false; g.respawnWhy = false;
         if (g.deadSince) { selftest.count(id, 'revives'); selftest.count(id, 'deadMs', Date.now() - g.deadSince); g.deadSince = 0; } // how long it lay dead
         clearTimeout(g.deathAlertTimer);
         if (g.alerts.has('death')) setAlert(id, 'death', false);
@@ -1184,11 +1187,17 @@ async function ensureAutoRespawn(id) {
 // Press the death screen's "respawn here" button right away. The game's own Auto Respawn waits about
 // 3 s and only works in field maps with AUTO on; boss maps / world bosses never get up by themselves
 // (there the button is free). Same price as the game's own (5,000 G in fields, free at world bosses).
-const RESPAWN_HERE_JS = `(() => { const o = document.getElementById('deathoverlay'); if (!o || getComputedStyle(o).display === 'none') return { dead: false };
-  const h = document.getElementById('drespawnhere'); if (!h) return { dead: true, none: true };
+const RESPAWN_HERE_JS = `(() => { const o = document.getElementById('deathoverlay'); const shown = !!(o && getComputedStyle(o).display !== 'none');
+  let me = null; try { me = window.__game && window.__game.me(); } catch {}
+  const dead = shown || !!(me && (me.state === 'dead' || me.hp <= 0));
+  if (!dead) return { dead: false };
+  const h = shown ? document.getElementById('drespawnhere') : null;
+  if (!h) return { dead: true, waiting: true }; // the death screen comes ~2 s after the death
   const free = /ฟรี|free/i.test(h.textContent || ''); if (h.disabled) return { dead: true, disabled: true, free, why: h.title || '' };
   h.click(); return { dead: true, clicked: true, free }; })()`;
-function backupRespawn(id, delay = 400) {
+// on a death: send the same "respawn here" the button sends at once (the button itself only shows ~2 s
+// later), then keep looking every 0.3 s and press the button when it is there, until up
+function backupRespawn(id, delay = 150) {
   if (store.data.settings.autoRespawnHere === false) return;
   const g = games.get(id); if (!g || g.demo || g.respawnPending) return;
   g.respawnPending = true;
@@ -1198,13 +1207,17 @@ function backupRespawn(id, delay = 400) {
     if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
     let r; try { r = await g.win.webContents.executeJavaScript(RESPAWN_HERE_JS, true); } catch { r = null; }
     if (!r || !r.dead) { g.respawnTries = 0; return; } // up already
+    const since = ((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1);
+    if (!g.respawnTries) { // first look: ask the server straight away
+      await sendInput(id, { type: 'respawn', here: true });
+      selftest.count(id, 'respawnPress');
+      log.info(`acc ${id}: dead -> sent respawn here after ${since} s`);
+    }
     if (r.free) g.freeRespawnAt = Date.now();
-    if (r.clicked && !g.respawnTries) {
-      selftest.count(id, 'respawnPress'); // once per death (it may click again while the button is busy)
-      log.info(`acc ${id}: dead -> pressed respawn here${r.free ? ' (free)' : ''} after ${((Date.now() - (g.lastDeathAt || Date.now())) / 1000).toFixed(1)} s`);
-    } else if (r.disabled && !g.respawnTries) log.info(`acc ${id}: respawn here not possible: ${r.why || 'button off'}`);
+    if (r.clicked && !g.respawnClicked) { g.respawnClicked = true; log.info(`acc ${id}: still dead -> pressed the respawn-here button${r.free ? ' (free)' : ''} after ${since} s`); }
+    else if (r.disabled && !g.respawnWhy) { g.respawnWhy = true; log.info(`acc ${id}: respawn here not possible: ${r.why || 'button off'}`); }
     g.respawnTries = (g.respawnTries || 0) + 1;
-    if (g.respawnTries < 10) backupRespawn(id, 700); // still on the death screen: try again (the button is busy ~2 s after a click)
+    if (g.respawnTries < 40) backupRespawn(id, 300); // up to ~12 s, then the 15 s check takes over
     else g.respawnTries = 0;
   }, delay);
 }
@@ -1313,6 +1326,45 @@ function fightTimes() {
   return { fights: out, world: store.data.worldLen || {} };
 }
 
+// ---------- world boss mode: every online account into the arena (the game's own "join (free)") ----------
+// joins with the game's worldBossWarp, turns AUTO on in the arena, and when the event ends takes the
+// accounts that BinderDash sent back to where they were (the game's "leave") with AUTO on again
+const mapOf = (g) => (g.data && g.data.stats && g.data.stats.map) || '';
+async function worldBossGo(kind, reason = 'ปุ่ม') {
+  const out = [];
+  for (const [id, g] of openGames()) {
+    if (!g.inGame || g.demo || g.status !== 'online') continue;
+    const name = g.data.stats.name || account(id).name;
+    const before = mapOf(g);
+    g.bossTrip = { kind, from: before, at: Date.now() };
+    await sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
+    out.push({ id, name, from: before });
+    await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
+  }
+  log.info(`world boss ${kind}: sent ${out.length} account(s) in (${reason})`);
+  // once there: AUTO on (it fights the boss by itself), and say who did not get in
+  setTimeout(async () => {
+    const missed = [];
+    for (const o of out) {
+      const g = games.get(o.id); if (!g || !g.bossTrip) continue;
+      if (mapOf(g) === o.from) { missed.push(o.name); g.bossTrip = null; continue; }
+      if (!(await liveUi(o.id)).auto) await gameCommand(o.id, 'auto', {}); // eslint-disable-line no-await-in-loop
+    }
+    if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / ยังไม่เริ่ม / กำลังวาร์ป)`);
+  }, 8000);
+  return { ok: true, sent: out.length, accounts: out };
+}
+async function worldBossLeave(kind) {
+  for (const [id, g] of openGames()) {
+    if (!g.bossTrip || g.bossTrip.kind !== kind) continue;
+    await sendInput(id, { type: 'worldBossWarp', enter: false, kind }); // eslint-disable-line no-await-in-loop
+    log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip.from})`);
+    g.bossTrip = null;
+    setTimeout(async () => { if (!(await liveUi(id)).auto) gameCommand(id, 'auto', {}); }, 8000);
+    await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
+  }
+}
+
 function onWorldBoss(v) {
   // the event's real length (start -> end) for the Build Lab
   if (v.state === 'live' && v.startAt && v.endsAt && v.endsAt > v.startAt && WORLD_TYPES[v.kind]) {
@@ -1323,8 +1375,10 @@ function onWorldBoss(v) {
   const before = bosses.world.get(v.kind);
   bosses.world.set(v.kind, { ...v, seenAt: Date.now() });
   if (before && before.state !== 'live' && v.state === 'live') {
-    notify(null, 'worldBoss', `🌋 World Boss ${v.name} เริ่มแล้ว · เข้าร่วม ${v.fighters} คน`);
+    notify(null, 'worldBoss', `🌋 World Boss ${v.name} เริ่มแล้ว · เข้าร่วม ${v.fighters} คน${store.data.settings.worldBossAuto ? ' · ส่งทุกบัญชีไปตีแล้ว' : ''}`);
+    if (store.data.settings.worldBossAuto) worldBossGo(v.kind, 'เริ่มเอง');
   }
+  if (before && before.state === 'live' && v.state !== 'live' && store.data.settings.worldBossReturn !== false) worldBossLeave(v.kind);
   pushState();
 }
 
@@ -1677,7 +1731,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
@@ -1735,6 +1789,7 @@ function registerIpc() {
   });
   handle('game-cmd', (id, cmd, arg) => gameCommand(id, cmd, arg || {}));
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
+  handle('world-boss-go', (kind) => worldBossGo(String(kind || ''), 'ปุ่ม'));
   // how many unlocked gear pieces each account would salvage (shown before confirming)
   handle('lab-info', () => labCall('window.__bdLab.info()'));
   // real DPS: sum this character's own hits for N seconds (count from the first hit)
@@ -1762,7 +1817,12 @@ function registerIpc() {
     return { done, started: !!m.first, secs: Math.round(secs * 10) / 10, sec: m.sec, total, pet, dps: secs ? Math.round(total / secs) : 0, hits: mine.length, crits: mine.filter((h) => h.crit).length, perSkill: per, mobs };
   });
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
-  handle('lab-predict', (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`));
+  handle('lab-predict', async (p) => {
+    const r = await labCall(`window.__bdLab.predict(${JSON.stringify(p)})`);
+    const c = p && p.acc != null && (store.data.calib || {})[p.acc];
+    if (r && c && c.job === p.job) r.calib = { k: c.k, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.withCombos || r.dps) * c.k), dps: Math.round(r.dps * c.k) };
+    return r;
+  });
   handle('fight-times', () => fightTimes());
   handle('mw-list', () => ({ watch: mwList(), live: Object.fromEntries(marketLive), hist: mwHist(), every: store.data.settings.marketWatchMin || 2, online: !!openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo) }));
   handle('mw-search', (q) => mwSearch(q));
@@ -1822,6 +1882,7 @@ function registerIpc() {
       // class 2: the game keeps it as a path name or a small JSON object (path, jobLevel, points)
       let c2 = me.c2; let c2obj = null;
       if (typeof c2 === 'string' && c2.trim().startsWith('{')) { try { c2obj = JSON.parse(c2); } catch { /* keep string */ } }
+      else if (typeof c2 === 'string' && c2.includes('|')) { const [path, jl] = c2.split('|'); c2obj = { path, jobLevel: Number(jl) || 0 }; } // "path|jobLevel|jobExp|…" e.g. "scribe|50|0|1"
       else if (c2 && typeof c2 === 'object') c2obj = c2;
       const r = me.c2r && typeof me.c2r === 'object' ? me.c2r : {};
       const c2info = { path: (c2obj && c2obj.path) || (typeof c2 === 'string' && !c2obj ? c2 : '') || r.path || '', jobLevel: (c2obj && c2obj.jobLevel) || r.jobLevel || 0, points: (c2obj && c2obj.points) ?? r.points ?? 0 };

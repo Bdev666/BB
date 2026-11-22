@@ -460,7 +460,7 @@ $('#all-btn').addEventListener('click', openAll);
 function renderBosses() {
   const b = (state && state.bosses) || { field: [], world: [] };
   const rows = [
-    ...b.world.map((w) => ({ cls: w.state === 'live' ? 'up' : '', icon: '🌋', name: w.name,
+    ...b.world.map((w) => ({ cls: w.state === 'live' ? 'up' : '', icon: '🌋', name: w.name, kind: w.kind, live: w.state === 'live',
       sub: w.state === 'live' ? `กำลังสู้ · ${w.fighters} คน${w.hpFrac != null ? ` · HP ${Math.round(w.hpFrac * 100)}%` : ''}` : 'World Boss',
       when: w.state === 'live' ? (w.endsInMs ? `จบใน ${dur(w.endsInMs)}` : 'สด') : w.inMs ? `อีก ${dur(w.inMs)}` : '-' })),
     ...b.field.map((f) => {
@@ -474,7 +474,11 @@ function renderBosses() {
   $('#boss-sum').className = 'sum' + (up ? ' good' : '');
   if (!rows.length) { rebuild($('#bosses'), 'none', () => [el('div', { class: 'empty' }, 'รอข้อมูลจากเกม · เปิดเกมอย่างน้อย 1 บัญชี')]); return; }
   rebuild($('#bosses'), JSON.stringify(rows), () => rows.map((r) => el('div', { class: 'boss ' + r.cls },
-    el('span', { class: 'bi' }, r.icon), el('div', { class: 'bn' }, r.name, el('small', {}, r.sub)), el('b', {}, r.when))));
+    el('span', { class: 'bi' }, r.icon), el('div', { class: 'bn' }, r.name, el('small', {}, r.sub)), el('b', {}, r.when),
+    r.kind && r.live ? el('button', { class: 'tiny primary', title: 'ส่งทุกบัญชีที่ออนไลน์เข้าสนาม World Boss (ฟรี) แล้วเปิด AUTO · จบแล้วพากลับที่เดิม', onclick: async (e) => {
+      e.target.disabled = true; const res = await dash.invoke('world-boss-go', r.kind);
+      showBanner(res && res.sent ? `⚔ ส่ง ${res.sent} บัญชีไปตี ${r.name} แล้ว` : 'ไม่มีบัญชีที่ออนไลน์'); setTimeout(() => { $('#banner').hidden = true; }, 3000);
+    } }, '⚔ ไปตีทุกตัว') : null)));
 }
 
 // ---------- game controls ----------
@@ -827,12 +831,13 @@ async function openLab(opt = {}) {
     const lTick = async () => {
       if (livePane.hidden || $('#modal').hidden) return;
       const m2 = await dash.invoke('lab-me', accId); if (!m2) { lOut.replaceChildren(el('p', {}, 'ตัวละครไม่ได้ออนไลน์')); return; }
-      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2 } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2 } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
       const sh = pr.sheet || {};
       lOut.replaceChildren(
         el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}`),
           d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
+        pr.calib ? el('div', { class: 'lab-row' }, el('span', { class: 'chip ok' }, `ปรับตามดาเมจจริงของตัวละครนี้ ≈ ${num(pr.calib.withCombos)} DPS`), el('small', { class: 'hint' }, ` · ดาเมจต่อฮิตจริงเฉลี่ย ×${pr.calib.k} ของสูตรเกม (จาก ${pr.calib.n} สกิล, ${pr.calib.runs} รอบบันทึก) · ใช้เทียบค่าจริง ส่วนการจัดอันดับบิลด์ใช้สูตรเกม`)) : null,
         el('div', { class: 'lab-row' }, ...[['ATK', sh.atk], ['MATK', sh.matk], ['Spell Amp', sh.spellAmp, '%'], ['ลดคูลดาวน์', sh.cdr, '%'], ['ร่ายเร็ว', sh.castSpd, '%'], ['คริ', sh.crit, '%'], ['ดาเมจคริ', sh.critDmg, '%'], ['เจาะเกราะ', sh.armorPen, '%']].filter((x) => x[1] != null).map(([l, v, u]) => el('span', { class: 'chip' }, `${l} ${Number.isInteger(v) ? num(v) : v}${u || ''}`))),
         comboBox(pr.combos) || el('span'),
         el('table', { class: 'lab-maps' }, el('tr', {}, el('th', {}, 'สกิล'), el('th', {}, 'DPS'), el('th', {}, '%')),

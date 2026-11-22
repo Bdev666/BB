@@ -123,7 +123,7 @@ function baseBuild(p) {
     job: p.job, level: p.level, jobLevel: p.jobLevel, c2: p.c2 || '', c2Job: p.c2Job || 50, c2tr: {},
     stats: noviceFix(p.job, p.stats), skills: {}, evo: {}, traits: {}, hotbar: [], gear: {}, cards: [], cardStars: [],
     weapon: '', offhand: '', affixes: [],
-    calc: { guild: 0, soulforge: 0, pet: '', night: false, codex: 0, target: p.target, targetLevel: p.targetLevel, debuffed: false, lowHp: false },
+    calc: { guild: Number(p.guild) || 0, soulforge: 0, pet: '', night: false, codex: 0, target: p.target, targetLevel: p.targetLevel, debuffed: false, lowHp: false },
     ...loadoutOf(p.loadout),
     ...(p.basics ? { basics: p.basics } : {}),
   };
@@ -139,7 +139,8 @@ function loadoutOf(lo) {
     const head = item.split('#')[0];
     const bar = head.indexOf('|');
     const name = bar >= 0 ? head.slice(0, bar) : head;
-    const id = name.split(/[!+^*~@]/)[0];
+    // the game's item string: id, then &seal / $ (extra row) / * / !set / ^inscription / ~quality / +refine
+    const id = name.split(/[&$!+^*~@]/)[0];
     const plus = /\+(\d+)/.exec(name);
     const affixes = bar >= 0 ? head.slice(bar + 1).split(',').filter(Boolean) : [];
     let refine = plus ? Number(plus[1]) : 0;
@@ -881,6 +882,8 @@ L.predict = async (p) => {
     debug: { sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
     target: { id: target, level: q.targetLevel }, dps: Math.round(rot.dps),
     perSkill: rot.share.map((x) => ({ sid: x.key, name: name(x.key), dps: Math.round(x.dmg / (rot.seconds || 60)) })),
+    // per skill: the game's own numbers for one use (to set against real hits from the combat log)
+    perHit: ((r && r.skills) || []).map((v) => ({ sid: v.sid, hit: typeof v.hit === 'number' ? Math.round(v.hit * adj) : v.hit, hits: v.hits, perCast: v.perCast, damages: v.damages, cdMs: Math.round(v.cdMs || 0), dmgMult: v.dmgMult, lvMult: v.lvMult, lineMult: v.lineMult })),
     hotbar: b.hotbar.map(name), notes: (r.notes || []).slice(0, 5), names: Object.fromEntries(Object.keys(G.skills).map((k) => [k, G.skills[k].name || k])),
   };
 };
