@@ -404,6 +404,51 @@ function canRaise(b, sid, p, c2map) {
   return true;
 }
 
+// start from the character's own build and its real hotbar, and move single skill points while it helps
+// (1%+ a step). With real per-skill numbers in hand, points only go to skills that have real numbers.
+function tuneFrom(b, p) {
+  const c1 = G.jobs[p.job].skills;
+  const c2list = p.c2 ? c2Skills(p.c2) : [];
+  const c2map = Object.fromEntries(c2list.map((x) => [x.sid, x]));
+  const known = Object.keys(SKILL_ADJ).length ? new Set(Object.keys(SKILL_ADJ)) : null;
+  let cur = score(b, p).v; const start = cur;
+  const moves = [];
+  // the game accepted this build; when the lab's own rules disagree, the rules do not block moves
+  const okRules = stillValid(b, p, c2map);
+  const valid = () => !okRules || stillValid(b, p, c2map);
+  for (let n = 0; n < 12; n++) {
+    let best = null;
+    for (const ids of [c1, c2list.map((x) => x.sid)]) {
+      for (const from of ids) {
+        if (!(b.skills[from] > 0)) continue;
+        for (const to of ids) {
+          if (to === from) continue;
+          b.skills[from]--;
+          if (canRaise(b, to, p, c2map) && valid()) {
+            b.skills[to] = (b.skills[to] || 0) + 1;
+            const hb = b.hotbar;
+            b.hotbar = hb.filter((s) => b.skills[s] > 0);
+            if (!b.hotbar.includes(to) && !isPassive(to) && b.hotbar.length < hotbarSize(b)) b.hotbar.push(to);
+            // a skill without real numbers has to win by more (its number is the formula's guess)
+            const need = known && !known.has(to) ? 1.05 : 1.01;
+            const sv = valid() ? score(b, p).v : 0;
+            if (sv > cur * need && (!best || sv / need > best.v / best.need)) best = { from, to, v: sv, need, hb: b.hotbar.slice() };
+            b.hotbar = hb; b.skills[to]--; if (!b.skills[to]) delete b.skills[to];
+          }
+          b.skills[from]++;
+        }
+      }
+    }
+    if (!best) break;
+    b.skills[best.from]--; if (!b.skills[best.from]) delete b.skills[best.from];
+    b.skills[best.to] = (b.skills[best.to] || 0) + 1; b.hotbar = best.hb;
+    moves.push({ from: best.from, to: best.to, gainPct: Math.round((best.v / cur - 1) * 1000) / 10, guess: !!(known && !known.has(best.to)) });
+    cur = best.v;
+  }
+  // why nothing moved: every skill with real numbers at its max, or the build does not pass the lab's rules
+  const why = { rulesOk: okRules, raisable: [...c1, ...c2list.map((x) => x.sid)].filter((sid) => canRaise(b, sid, p, c2map)).length };
+  return { moves, gainPct: Math.round((cur / start - 1) * 1000) / 10, why };
+}
 async function optimize(p, onStep) {
   curP = p;
   const b = baseBuild(p);
@@ -498,8 +543,9 @@ function bestHotbar(b, p) {
   const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => y.dpsAlone - x.dpsAlone).map((s) => s.sid);
   let best = { v: score(b, p).v, hb: b.hotbar.slice() };
-  const tryHb = (hb) => { b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
-  for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
+  // a hotbar holds each skill once (an earlier version could put one skill in two or three slots)
+  const tryHb = (hb) => { if (new Set(hb).size !== hb.length) return; b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
+  for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { if (best.hb.includes(extra)) break; const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
   const a = best.hb.slice(); const n = a.length; const c = new Array(n).fill(0);
   if (n > 1 && n <= 6) { let i = 0; while (i < n) { if (c[i] < i) { const k = i % 2 ? c[i] : 0; [a[k], a[i]] = [a[i], a[k]]; tryHb(a.slice()); c[i]++; i = 0; } else { c[i] = 0; i++; } } }
   else if (n > 6) {
@@ -877,7 +923,9 @@ L.predict = async (p) => {
   curP = q;
   const cur = p.current || {};
   const b = { ...baseBuild(q), skills: { ...(cur.skills || {}) }, evo: { ...(cur.evo || {}) }, traits: { ...(cur.traits || {}) }, c2tr: { ...(cur.c2tr || {}) } };
-  setHotbar(b); bestHotbar(b, q);
+  // the hotbar the character really fights with (when known), else the best one the lab finds
+  const realHb = cur.hotbar && Array.isArray(cur.hotbar) ? [...new Set(cur.hotbar)].filter((sid) => (b.skills[sid] || 0) > 0 && !isPassive(sid)).slice(0, hotbarSize(b)) : [];
+  if (realHb.length) b.hotbar = realHb; else { setHotbar(b); bestHotbar(b, q); }
   const r = calc(b);
   const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
   const adj = dummyAdj(b, r);
@@ -1081,6 +1129,10 @@ L.run = async (p) => {
     const b = { ...baseBuild(q), skills: { ...p.current.skills }, evo: { ...(p.current.evo || {}) }, traits: { ...(p.current.traits || {}) }, c2tr: { ...(p.current.c2tr || {}) } };
     if (p.current.hotbar && p.current.hotbar.length) b.hotbar = p.current.hotbar.slice(0, hotbarSize(b)); else setHotbar(b);
     current = describe(b, q);
+    // a gentle version: the character's own build, a few single points moved (what the real numbers back up)
+    const t = tuneFrom(b, q);
+    if (t.moves.length) { const name = (sid) => (G.skills[sid] || {}).name || sid; current.tuned = { ...describe(b, q), moves: t.moves.map((m) => ({ ...m, fromName: name(m.from), toName: name(m.to) })), gainPct: t.gainPct, realBacked: Object.keys(SKILL_ADJ).length > 0 }; }
+    else current.tuned = { moves: [], gainPct: 0, realBacked: Object.keys(SKILL_ADJ).length > 0, why: t.why };
   }
   results.sort((a, b) => b.score - a.score);
   return { fight, mode: p.mode, loadout: !!(p.loadout && (Object.keys(p.loadout.equip || {}).length || Object.keys(p.loadout.album || {}).length)), target: { id: target, name: (tmob && tmob.name) || target, level: base.targetLevel }, results, current, evals, ms: Math.round(performance.now() - t0), budget1: c1Budget(p.job, base.jobLevel) };

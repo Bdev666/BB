@@ -1078,7 +1078,20 @@ function renderLab(box, r) {
     x.notes.length ? el('details', {}, el('summary', {}, `ข้อสังเกต ${x.notes.length} ข้อ (ส่วนที่เครื่องคิดเลขของเกมไม่ได้นับ)`), ...x.notes.map((n) => el('div', { class: 'hint' }, '· ' + n))) : null);
   box.replaceChildren(...[head,
     cur ? el('p', { class: 'hint' }, `บิลด์ปัจจุบัน: ${r.mode === 'boss' ? 'DPS' : 'ดาเมจรวม/วิ'} ${num(cur.score)}`) : null,
+    cur && cur.tuned ? tunedBox(cur.tuned) : null,
     ...r.results.map(card)].filter(Boolean));
+}
+// the gentle way: the character's own build with a few single points moved, backed by its real hits
+function tunedBox(t) {
+  const head = el('b', {}, '🔧 ปรับจากบิลด์ที่ใช้อยู่ (ทีละแต้ม)');
+  if (!t.moves.length) {
+    return el('div', { class: 'lab-card best' }, el('div', { class: 'lab-top' }, head),
+      el('p', {}, t.realBacked ? '✅ บิลด์ปัจจุบันดีแล้ว: ย้ายแต้มจุดไหนก็ไม่แรงขึ้นเกิน 1% ตามดาเมจจริงที่บันทึกไว้' : 'บิลด์ปัจจุบันดีแล้วตามสูตรเกม (ยังไม่มีดาเมจจริงของตัวละครนี้ · ฟาร์ม/ตีบอสสัก 10 นาทีแล้วคำนวณใหม่จะแม่นขึ้น)'));
+  }
+  return el('div', { class: 'lab-card best' }, el('div', { class: 'lab-top' }, head, el('span', { class: 'lab-score pos' }, ` +${t.gainPct}%`)),
+    el('p', { class: 'hint' }, t.realBacked ? 'คิดจากดาเมจจริงต่อสกิลของตัวละครนี้ · ทำตามทีละขั้นแล้ววัดใหม่ได้' : 'คิดจากสูตรเกม (ยังไม่มีดาเมจจริงของตัวละครนี้)'),
+    el('ol', {}, ...t.moves.map((m) => el('li', {}, `ย้าย 1 แต้ม: ${m.fromName} → ${m.toName} (+${m.gainPct}%)`, m.guess ? el('small', { class: 'warnc', title: 'สกิลนี้ยังไม่เคยใช้ จึงไม่มีดาเมจจริง ตัวเลขมาจากสูตรเกมซึ่งมักคลาด · ลองแล้วตีจริงสัก 10 นาทีเพื่อยืนยัน' }, ' ⚠ ยังไม่มีข้อมูลจริง') : null))),
+    el('div', { class: 'lab-row' }, el('small', {}, 'ช่องลัดหลังปรับ: '), ...(t.hotbar || []).map((h, k) => el('span', { class: 'chip' }, `${k + 1}. ${h}`))));
 }
 
 async function openMarketSell(opt = {}) {

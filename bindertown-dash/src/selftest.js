@@ -23,8 +23,8 @@ function create(deps) {
   }
 
   // the Build Lab's own query for the character as it is (same as the "this character" button)
-  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50,
-    loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } });
+  const predictFor = (me, target, hotbar) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50,
+    loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr, ...(hotbar ? { hotbar } : {}) } });
 
   // ---------- real combat, per skill, kept with the build and the simulator's answer ----------
   // own hits are summed per skill; "active" time = gaps between own hits of 3 s or less (walking to
@@ -80,7 +80,19 @@ function create(deps) {
             rec.targetKind = /^(wraithroot_colossus|pearlheart_titan)$/.test(rec.mainMob || '') ? 'world' : 'field';
             if (xs.length >= 3) {
               rec.calib = +xs[Math.floor(xs.length / 2)].toFixed(3);
-              const rel = Object.fromEntries(Object.entries(rec.hitCheck).map(([sid, v]) => [sid, +(v.x / rec.calib).toFixed(3)]));
+              let rel = Object.fromEntries(Object.entries(rec.hitCheck).map(([sid, v]) => [sid, +(v.x / rec.calib).toFixed(3)]));
+              // better: each skill's real DPS against the formula's, with the skills really used as the hotbar
+              // (covers how often a skill really goes off, not only how hard it hits)
+              try {
+                const used = Object.entries(rec.skills).filter(([k]) => !/^(basic|proc_|c2_|atk_)/.test(k) && ((me.skills || {})[k] || 0) > 0).sort((a, b2) => b2[1].dmg - a[1].dmg).map(([k]) => k);
+                if (used.length >= 3) {
+                  const p2 = await predictFor(me, rec.mainMob, used);
+                  const f = {};
+                  for (const x of (p2 && p2.perSkill) || []) { const real = (rec.skills[x.sid] || {}).dps; if (real && x.dps > 0 && (x.sid === 'basic' || used.includes(x.sid))) f[x.sid] = real / x.dps; }
+                  const fv = Object.values(f).sort((a, b2) => a - b2);
+                  if (fv.length >= 3) { const m = fv[Math.floor(fv.length / 2)]; rel = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, +(v / m).toFixed(3)])); rec.dpsCheck = { median: +m.toFixed(3), rel }; }
+                }
+              } catch { /* keep the per-hit numbers */ }
               if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
