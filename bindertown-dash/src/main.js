@@ -1364,6 +1364,19 @@ const BOUNTY_GO_JS = (map) => `(async () => { const win = document.getElementByI
   const b = document.querySelector('#huntbody [data-goto="' + ${JSON.stringify(map)} + '"]'); if (!b) return { ok: false, why: 'no button' }; b.click();
   await new Promise((r) => setTimeout(r, 900));
   const go = document.querySelector('.wdgo'); if (!go) return { ok: false, why: 'no travel button' }; go.click(); return { ok: true }; })()`;
+// the game's "warp to X (then walk on)?" box: warp when it is free (Premium), else walk (never pays Gold)
+const WARP_CONFIRM_JS = `(() => { const box = document.getElementById('buyconfirm'); if (!box || box.style.display === 'none' || !box.offsetParent && getComputedStyle(box).display === 'none') return { box: false };
+  const text = box.innerText || ''; if (!/วาร์ป/.test(text)) return { box: true, warp: false };
+  const free = /ฟรี/.test(text); const b = document.getElementById(free ? 'bcyes' : 'bcno'); if (!b || b.disabled) return { box: true, warp: true, free, pressed: false };
+  b.click(); return { box: true, warp: true, free, pressed: true }; })()`;
+async function answerWarpBox(id, g) {
+  for (let i = 0; i < 8; i++) { // the box comes after the server answers (a moment)
+    let r; try { r = await g.win.webContents.executeJavaScript(WARP_CONFIRM_JS, true); } catch { r = null; } // eslint-disable-line no-await-in-loop
+    if (r && r.pressed) { log.info(`acc ${id}: bounty travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
+    await new Promise((res) => setTimeout(res, 500)); // eslint-disable-line no-await-in-loop
+  }
+  return null;
+}
 const MOB_SPOT_JS = (type) => `(() => { try { const g = window.__game; const me = g.me(); const all = []; g.state().mobs.forEach((m) => all.push(m));
   const want = all.filter((m) => (m.mobType || m.type) === ${JSON.stringify(type)} && m.hp > 0).map((m) => ({ x: m.x, y: m.y, d: Math.hypot(m.x - me.x, m.y - me.y) })).sort((a, b) => a.d - b.d);
   return want.length ? { x: Math.round(want[0].x), y: Math.round(want[0].y), d: want[0].d, n: want.length } : { n: 0 }; } catch (e) { return null; } })()`;
@@ -1438,13 +1451,14 @@ async function bountyStep(id) {
       return;
     }
     if (here !== cur.map) {
-      if (B.phase === 'travel' && Date.now() - B.travelAt < 6 * 60 * 1000) { B.note = `กำลังเดินทางไป ${mapName(cur.map)}`; return; }
+      if (B.phase === 'travel' && Date.now() - B.travelAt < 6 * 60 * 1000) { B.note = `กำลังเดินทางไป ${mapName(cur.map)}`; await answerWarpBox(id, g); return; }
       if (B.phase === 'travel') { B.skip.push(cur.id); B.cur = null; B.note = `ไป ${mapName(cur.map)} ไม่ถึงใน 6 นาที · ข้ามใบนี้`; log.info(`acc ${id}: bounty travel timed out -> skip ${cur.id}`); return; }
       if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off: the game's travel walks
       let r; try { r = await g.win.webContents.executeJavaScript(BOUNTY_GO_JS(cur.map), true); } catch (e) { r = { ok: false, why: e.message }; }
       if (!r || !r.ok) { B.skip.push(cur.id); B.cur = null; B.note = `เดินทางไม่ได้ (${(r && r.why) || '?'}) · ข้ามใบนี้`; return; }
       B.phase = 'travel'; B.travelAt = Date.now(); B.note = `กำลังเดินทางไป ${mapName(cur.map)}`;
       log.info(`acc ${id}: bounty travel ${here} -> ${cur.map}`);
+      await answerWarpBox(id, g);
       return;
     }
     // on the map: stand next to the bounty monster and fight there
