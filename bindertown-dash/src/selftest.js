@@ -159,8 +159,9 @@ function create(deps) {
       const before = page.silver;
       const r = await deps.runCommand(id, 'buy', { itemId: 'potion', qty: 1 });
       const after = await js(g, '(window.__game.me() || {}).silver');
-      const unit = typeof before === 'number' && typeof after === 'number' ? before - after : null;
-      return { ok: r.ok, detail: r.ok ? `ซื้อได้ ${r.bought} ขวด · จ่ายจริง ${unit} Silver/ขวด${page.premium ? ' (Premium ซื้อจาก HUD)' : ''}` : `ซื้อไม่ได้: ${r.error}`, data: { ok: r.ok, unit, premium: page.premium, error: r.error || '' } };
+      let unit = typeof before === 'number' && typeof after === 'number' ? before - after : null;
+      if (unit != null && unit <= 0) unit = null; // Silver from kills came in meanwhile
+      return { ok: r.ok, detail: r.ok ? `ซื้อได้ ${r.bought} ขวด · ${unit != null ? `จ่ายจริง ${unit} Silver/ขวด` : 'วัดราคาไม่ได้ (ได้ Silver จากมอนระหว่างซื้อ)'}${page.premium ? ' (Premium ซื้อจาก HUD)' : ''}` : `ซื้อไม่ได้: ${r.error}`, data: { ok: r.ok, unit, premium: page.premium, error: r.error || '' } };
     });
 
     await step(out, 'เกิดที่เดิม', async () => {
@@ -170,7 +171,7 @@ function create(deps) {
       const c = counters.get(id) || {};
       let detail = s.box ? (s.disabled ? 'ตัวเลือกของเกมล็อคอยู่ (ต้อง Premium)' : s.checked ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมติ๊กอยู่ ✓' : 'ตัวเลือกของเกมยังไม่ติ๊ก') : 'ไม่พบตัวเลือกในหน้าเกม (เกมอาจเปลี่ยน)';
       detail += ` · หน้าจอตาย${s.overlay ? 'เจอ' : 'ไม่เจอ'} · ตั้งค่าโปรแกรม${on ? 'เปิด' : 'ปิด'}`;
-      if (c.deaths) detail += ` · ตายรอบนี้ ${c.deaths} · เกม respawn ให้ ${c.autoRespawned || 0} · โปรแกรมกดเอง ${c.respawnPress || 0} (สำเร็จ ${c.respawnOk || 0})`;
+      if (c.deaths) detail += ` · ตายรอบนี้ ${c.deaths} · เกม respawn ให้ ${c.autoRespawned || 0} · โปรแกรมกดเอง ${c.respawnPress || 0} (สำเร็จ ${c.respawnOk || 0})${c.deathLoops ? ` · ตายวนซ้ำ ${c.deathLoops} ครั้ง (พักเกิดที่เดิม)` : ''}`;
       return { ok: s.box && s.overlay, warn: (on && s.box && !s.disabled && !s.checked) || !!s.disabled, detail, data: { ...s, counters: { deaths: c.deaths || 0, autoRespawned: c.autoRespawned || 0, press: c.respawnPress || 0, pressOk: c.respawnOk || 0 } } };
     });
 
@@ -279,7 +280,7 @@ function create(deps) {
       try {
         const r = g.data.rates(Date.now());
         const st = g.data.stats || {};
-        const pots = g.data.detail(Date.now()).bag.filter((b) => b.minutesLeft != null || b.usedPerHour > 0).map((b) => ({ id: (b.ids && b.ids[0] && b.ids[0].id) || '', qty: b.qty, perHour: Math.round(b.usedPerHour) }));
+        const pots = g.data.detail(Date.now()).bag.filter((b) => (b.minutesLeft != null || b.usedPerHour > 0) && (b.ids || []).some((x) => /potion|elixir|ether/.test(x.id))).map((b) => ({ id: (b.ids && b.ids[0] && b.ids[0].id) || '', qty: b.qty, perHour: Math.round(b.usedPerHour) }));
         const h = g.adapter.health();
         lines.push(JSON.stringify({
           t: new Date().toISOString(), app: version(), acc: id, job: st.job, level: st.level, map: st.map,

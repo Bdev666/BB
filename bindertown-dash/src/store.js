@@ -27,7 +27,8 @@ const DEFAULTS = {
     },
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)
-    autoRespawnHere: true,    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
+    autoRespawnHere: true,
+    deathLoopGuard: true, // 4 deaths in 2 minutes = respawn in place off for 10 minutes    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
     marketWatchMin: 2,        // refresh each watched market item every N minutes
     salvageByPrice: true,     // salvage only gear the central market says is worth little
     salvageMaxPrice: 1000000, // ... under this many Gold (or no price at all)

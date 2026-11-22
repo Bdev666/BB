@@ -355,7 +355,7 @@ async function pollSnapshots() {
       if (!g.win || g.win.isDestroyed()) continue;
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
-      if (snap && snap.ready) g.inGame = true;
+      if (snap && snap.ready) { if (!g.inGame) g.inGameAt = Date.now(); g.inGame = true; }
       else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
       watchScreen(id, snap);
       if (g.data.stats.name !== prevName) g.win.setTitle(windowTitle(id));
@@ -446,7 +446,10 @@ function handleEvents(id, events) {
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
         break;
       case 'death':
+        if (g.lastDeathAt && Date.now() - g.lastDeathAt < 1500) break; // the same death, second message
+        g.lastDeathAt = Date.now();
         selftest.count(id, 'deaths');
+        deathLoopCheck(id, g);
         setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย');
         backupRespawn(id);
         break;
@@ -691,7 +694,7 @@ async function runCommand(id, cmd, arg) {
           got = have() - before;
           if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
         }
-        if (got > 0 && svBefore != null) { const sv = await silverNow(); if (sv != null && svBefore > sv) unit = (svBefore - sv) / got; } // eslint-disable-line no-await-in-loop
+        if (got > 0 && svBefore != null) { const sv = await silverNow(); const u = sv != null ? (svBefore - sv) / got : 0; if (u >= (p.price || 1) * 0.3 && u <= (p.price || 1) * 10) unit = u; } // eslint-disable-line no-await-in-loop -- kills add Silver meanwhile: keep only a believable price
         if (got <= 0) { reason = reason || 'ร้านไม่ขายเพิ่ม (Silver ไม่พอ / กระเป๋าหนักเกิน / ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; break; }
         left -= got;
         if (got < n) { reason = 'ได้ไม่ครบรอบนี้ (Silver หรือน้ำหนักกระเป๋าไม่พอ)'; break; }
@@ -817,7 +820,7 @@ function logChanges() {
       if (g.loggedStatus !== undefined || g.status !== 'closed') log.info(`acc ${id}: status ${g.loggedStatus || '-'} -> ${g.status}`);
       g.loggedStatus = g.status;
     }
-    if (!g.inGame || g.demo) continue;
+    if (!g.inGame || g.demo || (g.inGameAt && Date.now() - g.inGameAt < 60000)) continue; // the HUD is still drawing just after loading
     const h = g.adapter.health();
     const key = JSON.stringify([h.build, h.ok, h.problems]);
     if (g.loggedHealth !== key && (h.build || !h.ok)) {
@@ -1138,9 +1141,25 @@ async function autoBuyPotion(id, g, p) {
 const AUTO_RESPAWN_JS = `(() => { const c = document.getElementById('au-respawn'); if (!c) return { ok: false, why: 'none' };
   if (c.checked) return { ok: true, on: true }; if (c.disabled) return { ok: false, why: 'premium' };
   c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, on: c.checked, changed: true }; })()`;
+// death loop: up on the spot, killed again, again (seen: 8 deaths in a minute, 5,000 G each).
+// 4 deaths within 2 minutes = turn the game's "respawn in place" off for this account for 10 minutes,
+// so the next death goes back to town like normal, and say so
+function deathLoopCheck(id, g) {
+  if (store.data.settings.autoRespawnHere === false || store.data.settings.deathLoopGuard === false) return;
+  const now = Date.now();
+  g.deathTimes = (g.deathTimes || []).filter((t) => now - t < 120000); g.deathTimes.push(now);
+  if (g.deathTimes.length < 4 || (g.respawnPausedUntil && now < g.respawnPausedUntil)) return;
+  g.respawnPausedUntil = now + 10 * 60 * 1000; g.deathTimes = [];
+  selftest.count(id, 'deathLoops');
+  if (g.win && !g.win.isDestroyed()) g.win.webContents.executeJavaScript(`(() => { const c = document.getElementById('au-respawn'); if (c && c.checked && !c.disabled) { c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true; } return false; })()`, true).catch(() => {});
+  log.info(`acc ${id}: death loop (4 deaths in 2 min) -> respawn in place off for 10 min`);
+  notify(id, 'death', '☠ ตายวนซ้ำ 4 ครั้งใน 2 นาที · ปิด "เกิดที่เดิม" ของบัญชีนี้ 10 นาที (ตายครั้งต่อไปกลับเมือง) · ลองเปลี่ยนจุดฟาร์มหรือเช็คยา/อุปกรณ์');
+  g.autoRespawnAt = 0; pushState();
+}
 async function ensureAutoRespawn(id) {
   const g = games.get(id);
   if (!g || !g.inGame || g.demo || !g.win || g.win.isDestroyed()) return;
+  if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause
   if (g.autoRespawnAt && Date.now() - g.autoRespawnAt < 60000) return;
   g.autoRespawnAt = Date.now();
   let r; try { r = await g.win.webContents.executeJavaScript(AUTO_RESPAWN_JS, true); } catch { return; }
@@ -1157,6 +1176,7 @@ function backupRespawn(id, delay = 4000) {
   setTimeout(async () => {
     g.respawnPending = false;
     if (!g.win || g.win.isDestroyed()) return;
+    if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
     if (!(await liveDead(id))) return; // the game's own Auto Respawn already got it up
     const r = await gameCommand(id, 'respawn', { hereOnly: true });
     selftest.count(id, 'respawnPress'); if (r.ok) selftest.count(id, 'respawnOk');
@@ -1635,7 +1655,7 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard']) if (patch[k] !== undefined) s[k] = !!patch[k];
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
