@@ -436,7 +436,9 @@ L.cards = async (p) => {
   const star = Math.max(1, Math.min(5, p.stars || 5));
   // only the cards this character owns (how many of each, best star), or every card in the game
   const owned = Array.isArray(p.owned) && p.owned.length ? Object.fromEntries(p.owned.map((o) => [o.mob, o])) : null;
-  const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap && (!owned || owned[id]));
+  // a "crit card": its main effect is crit chance / crit damage (p.noCrit leaves them out)
+  const isCritCard = (id) => { const fx = (G.cardDefs[id] || {}).fx || []; return !!fx.length && (fx[0].k === 'crit' || fx[0].k === 'critDmg'); };
+  const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap && (!owned || owned[id]) && !(p.noCrit && isCritCard(id)));
   const starOf = (id) => (owned && owned[id] ? Math.max(1, Math.min(5, owned[id].stars || 1)) : star);
   const haveLeft = (id) => !owned || b.cards.filter((c) => c === id).length < (owned[id].n || 1);
   const used = () => b.cards.reduce((t, c) => t + cardLoad(c), 0);
@@ -542,7 +544,14 @@ L.cards = async (p) => {
   const magic = !!(fin.r && fin.r.basic && fin.r.basic.usesMatk) || ((fin.r && fin.r.skills) || []).filter((x) => x.magic && b.skills[x.sid]).length > ((fin.r && fin.r.skills) || []).filter((x) => !x.magic && x.damages && b.skills[x.sid]).length;
   return {
     goal, target: { id: target, level: b.calc.targetLevel }, slots, cap, load: used(), star, magic,
-    owned: !!owned, poolSize: pool.length,
+    owned: !!owned, poolSize: pool.length, noCrit: !!p.noCrit,
+    critCards: [...new Set(b.cards.filter(isCritCard))],
+    // skills in this build that always crit (an Evolution that says so) - the only magic damage crit cards help
+    sureCrit: Object.keys(b.skills || {}).filter((sid) => b.skills[sid] > 0 && b.evo && b.evo[sid]).map((sid) => {
+      const d = G.skills[sid] || {}; const i = b.evo[sid] === 'a' ? 0 : 1;
+      const t = (d.c2 && d.c2.evo && d.c2.evo[i]) || null;
+      return t && /คริแน่นอน/.test(t[1] || '') ? (d.name || sid) + ' (Evo ' + b.evo[sid].toUpperCase() + ' · ' + t[0] + ')' : null;
+    }).filter(Boolean),
     now: q0 ? { dps: Math.round(q0.dps), gold: Math.round(q0.gold * 10) / 10, drop: Math.round(q0.drop * 10) / 10, cards: nowCards } : null,
     cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], why: why[i], proc: (G.cardDefs[id].fx || []).some((f) => f.k !== 'stat' && !/Pct$|^(crit|critDmg|cdr|aspd|armorPen|boss|elite|night|gold|drop|spellAmp|castSpd|hit|flee|def|mdef|matk|atk|maxHp|maxMp|dmgTaken|slayer|ward|wardBoss|wardNight|debuffed|opener|desperate|haste|barrier|spirit|gather|block|lifesteal|magicRes|thorns)$/.test(f.k)), role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },

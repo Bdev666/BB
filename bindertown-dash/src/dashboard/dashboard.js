@@ -781,14 +781,30 @@ function cardBox(x) {
   const stars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
   const hasOwned = !!(lastLab && lastLab.owned && lastLab.owned.length);
   const onlyMine = el('input', { type: 'checkbox', checked: hasOwned ? '' : null, disabled: hasOwned ? null : '' });
+  const noCrit = el('input', { type: 'checkbox' });
   const run = async (goal, btn) => {
     for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = true;
     out.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองการ์ดทุกใบในเกม ตามช่องที่เปิดและ Spirit Load…'));
     try {
       const q = { ...lastLab, build: x.build, goal, stars: +stars.value };
       if (!onlyMine.checked) delete q.owned;
+      if (noCrit.checked) q.noCrit = true;
       const r = await dash.invoke('lab-cards', q);
       out.replaceChildren(...cardsView(r, goal));
+      // magic build that got crit cards: say why, and work out the same search without them to compare
+      if (r.magic && r.critCards.length && !q.noCrit) {
+        const why = r.sureCrit.length
+          ? `สกิลเวทปกติไม่คริ (ใช้ Spell Amp แทน) · การ์ดคริช่วยเฉพาะ ${r.sureCrit.join(', ')} ที่เกมบอกว่า "คริแน่นอน" (ดาเมจ × 1 + (ดาเมจคริ − 1) × 0.6)`
+          : 'สกิลเวทปกติไม่คริ (ใช้ Spell Amp แทน) · การ์ดคริในชุดนี้ช่วยโจมตีปกติและค่าอื่นของการ์ด (เช่น ดาเมจใส่บอส)';
+        const cmp = el('div', { class: 'lab-crit' }, el('div', {}, '💡 ' + why), el('div', { class: 'hint' }, 'กำลังลองชุดที่ไม่มีการ์ดคริเทียบ…'));
+        out.insertBefore(cmp, out.children[2] || null);
+        try {
+          const r2 = await dash.invoke('lab-cards', { ...q, noCrit: true });
+          const d = r.after.dps ? Math.round((r2.after.dps / r.after.dps - 1) * 1000) / 10 : 0;
+          cmp.lastChild.replaceWith(el('div', {}, `ถ้าไม่ใส่การ์ดคริ: DPS ${num(r2.after.dps)} (${d > 0 ? '+' : ''}${d}%) · ใช้ ${r2.cards.map((c) => labPretty(c.id)).join(', ')}`,
+            el('button', { class: 'tiny', onclick: () => out.replaceChildren(...cardsView(r2, goal)) }, 'ดูชุดนี้')));
+        } catch { cmp.lastChild.textContent = ''; }
+      }
     } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = false;
   };
@@ -797,6 +813,7 @@ function cardBox(x) {
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'boss', onclick: (e) => run('boss', e.target) }, '👑 DPS ตีบอส'),
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'farm', onclick: (e) => run('farm', e.target) }, '🌾 DPS ฟาร์ม'),
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'gold', onclick: (e) => run('gold', e.target) }, '💰 ฟาร์มเงิน'),
+      el('label', { class: 'hint', title: 'ไม่ใช้การ์ดที่ค่าหลักเป็นโอกาสคริ / ดาเมจคริ (สายเวทปกติไม่คริ)' }, noCrit, ' ไม่เอาการ์ดคริ'),
       el('label', { class: 'hint', title: hasOwned ? 'จัดจากการ์ดที่ตัวละครมี (ใส่อยู่ + ในกระเป๋า) จำนวนและดาวตามจริง' : 'ต้องวิเคราะห์จากตัวละครที่ออนไลน์อยู่' }, onlyMine, ' เฉพาะการ์ดที่มี'),
       el('small', { class: 'hint' }, ' · ดาว (ถ้าใช้ทุกใบ) '), stars),
     out);
