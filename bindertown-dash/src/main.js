@@ -471,6 +471,7 @@ function handleEvents(id, events) {
         clearTimeout(g.deathAlertTimer);
         { const by = ev.by; const at = g.deadSince;
           g.deathAlertTimer = setTimeout(() => { if (g.deadSince === at) setAlert(id, 'death', true, by ? `ตัวละครตายค้าง (เกิน 10 วิ) · โดย ${by}` : 'ตัวละครตายค้าง (เกิน 10 วิ)'); }, 10000); }
+        g.respawnTries = 0; g.respawnClicked = false; g.respawnWhy = false; g.respawnSends = 0; // a new death: start over (send again)
         backupRespawn(id);
         break;
       case 'revive':
@@ -1222,12 +1223,13 @@ function backupRespawn(id, delay = 150) {
     if (!g.win || g.win.isDestroyed()) return;
     if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
     let r; try { r = await g.win.webContents.executeJavaScript(RESPAWN_HERE_JS, true); } catch { r = null; }
-    if (!r || !r.dead) { g.respawnTries = 0; return; } // up already
+    if (!r) { g.respawnTries = (g.respawnTries || 0) + 1; if (g.respawnTries < 40) backupRespawn(id, 300); return; } // page busy: look again, do not give up
+    if (!r.dead) { if (g.respawnTries) log.info(`acc ${id}: up again after ${((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1)} s`); g.respawnTries = 0; return; } // up already
     const since = ((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1);
-    if (!g.respawnTries) { // first look: ask the server straight away
+    if (!g.respawnTries || (g.respawnTries % 5 === 0 && !r.clicked)) { // at once, then again every ~1.5 s while still down
       await sendInput(id, { type: 'respawn', here: true });
-      selftest.count(id, 'respawnPress');
-      log.info(`acc ${id}: dead -> sent respawn here after ${since} s`);
+      g.respawnSends = (g.respawnSends || 0) + 1;
+      if (!g.respawnTries) { selftest.count(id, 'respawnPress'); log.info(`acc ${id}: dead -> sent respawn here after ${since} s`); }
     }
     if (r.free) g.freeRespawnAt = Date.now();
     if (r.clicked && !g.respawnClicked) { g.respawnClicked = true; log.info(`acc ${id}: still dead -> pressed the respawn-here button${r.free ? ' (free)' : ''} after ${since} s`); }
