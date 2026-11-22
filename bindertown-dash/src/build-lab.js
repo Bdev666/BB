@@ -192,8 +192,33 @@ function comboOf(b, p, r) {
   const boss = isBossTarget(b);
   const parts = []; let mult = 1;
   const rate = (sid) => ((rot.per[sid] || {}).n || 0) / secs; // casts per second over the long fight
+  // 0) gear proc affixes (suffixes like Chain Spark, Rend, Echo Strike...): the calculator leaves them out.
+  // The game's proc table: trigger, chance, internal cooldown; the affix value is the % in its text.
+  const PROC = { chain: { on: 'hit', ch: 0.10, icd: 600 }, bleed: { on: 'crit', ch: 0.50, icd: 300 }, frost: { on: 'hit', ch: 0.08, icd: 800 }, echo: { on: 'hit', ch: 0.12, icd: 700 }, expose: { on: 'hit', ch: 0.08, icd: 4000 }, haste: { on: 'crit', ch: 0.30, icd: 8000 } };
+  const procVal = {};
+  for (const it of Object.values(b.gear || {})) for (const a of (it && it.affixes) || []) { const m = /^p_(\w+):\d+:(\d+)$/.exec(a); if (m && PROC[m[1]]) procVal[m[1]] = (procVal[m[1]] || 0) + Number(m[2]); }
+  let procUp = 0;
+  if (Object.keys(procVal).length && rot.total) {
+    const sh0 = r.sheet || {};
+    const hitsPS = rot.ae.reduce((t, x) => t + rate(x.sid) * Math.max(1, x.perCast || 1), 0) + rate('basic');
+    const avgHit = hitsPS ? rot.total / secs / hitsPS : 0;
+    // crits: basic attacks and physical skill hits can crit (magic hits use Spell Amp instead)
+    const physShare = rot.total ? (((rot.per.basic || {}).dmg || 0) + rot.ae.filter((x) => !x.magic).reduce((t, x) => t + ((rot.per[x.sid] || {}).dmg || 0), 0)) / rot.total : 0;
+    const critPS = hitsPS * Math.min(1, sh0.crit || 0) * physShare;
+    const fire = (k, per) => Math.min(per * PROC[k].ch, 1000 / PROC[k].icd);
+    const dps = rot.total / secs; let add = 0; const bits = [];
+    if (procVal.chain) { const n = boss ? 0 : Math.min(3, Math.max(0, (p.pack || 1) - 1)); const a = fire('chain', hitsPS) * avgHit * procVal.chain / 100 * n; add += a; bits.push('Chain Spark ' + (n ? '+' + Math.round(a / dps * 1000) / 10 + '%' : '(ไม่มีมอนข้างๆ ให้เด้ง)')); }
+    if (procVal.echo) { const a = fire('echo', hitsPS) * avgHit * procVal.echo / 100; add += a; bits.push('Echo Strike +' + Math.round(a / dps * 1000) / 10 + '%'); }
+    if (procVal.bleed) { const a = fire('bleed', critPS) * avgHit * (sh0.critDmg || 1.5) * procVal.bleed / 100; add += a; bits.push('Rend +' + Math.round(a / dps * 1000) / 10 + '%'); }
+    let m = 1 + add / dps;
+    if (procVal.expose) { const upE = Math.min(1, fire('expose', hitsPS) * 4); const g = upE * procVal.expose / 100 * 0.5; m *= 1 + g; bits.push('Sunder ~+' + Math.round(g * 1000) / 10 + '%'); }
+    if (procVal.haste) { const upH = Math.min(1, fire('haste', critPS) * 4); const g = upH * procVal.haste / 100 * ((rot.per.basic || {}).dmg || 0) / rot.total; m *= 1 + g; bits.push('Frenzy +' + Math.round(g * 1000) / 10 + '%'); }
+    if (procVal.frost) { procUp = Math.min(1, fire('frost', hitsPS) * 2); bits.push('Frostbite สโลว์ ' + Math.round(procUp * 100) + '% ของเวลา'); }
+    mult *= m;
+    parts.push({ k: 'proc', name: 'Proc จากเกียร์', gain: Math.round((m - 1) * 1000) / 10, list: bits });
+  }
   // 1) target under status: how much of the time, and what the calculator's "debuffed" switch is worth
-  let up = 0; const ccSk = [];
+  let up = procUp; const ccSk = procUp ? ['Frostbite (เกียร์)'] : [];
   for (const sid of b.hotbar) {
     const d = defOf(b, sid); const n = rate(sid); if (!n) continue;
     let ms = 0;
@@ -687,6 +712,7 @@ L.cards = async (p) => {
   const q = { ...p, goal, pack: Math.max(1, p.pack || 4), mode: goal === 'boss' ? 'boss' : 'farm' };
   curP = q;
   const b = { ...baseBuild({ ...q, target, targetLevel: targetLevelFor(target, goal === 'boss' ? 'boss' : 'farm', p.level) }), ...JSON.parse(JSON.stringify(p.build || {})) };
+  if (!b.hotbar || !b.hotbar.length) { setHotbar(b); bestHotbar(b, { ...q, mode: q.mode }); } // a character's build: order its hotbar like the game would
   const q0 = (b.cards && b.cards.length) ? cardScore(b, q) : null; // the character's own cards now
   const nowCards = q0 ? b.cards.slice() : [];
   b.cards = []; b.cardStars = [];
@@ -835,7 +861,11 @@ L.predict = async (p) => {
   const rot = { ...rot0, dps: rot0.dps * adj, share: (rot0.share || []).map((x) => ({ ...x, dmg: x.dmg * adj })) };
   const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
   const bs = r.basic || {}; const sh = r.sheet || {};
+  let cmb = { mult: 1, parts: [] }; try { cmb = comboOf(b, { ...q, pack: 1 }, r); } catch { /* none */ }
   return {
+    withCombos: Math.round(rot.dps * cmb.mult), combos: cmb.parts, sheet: sheetOf(r),
+    gear: Object.entries(b.gear || {}).map(([slot, it]) => ({ slot, id: it.id, name: (G.mobs && false) || it.id, affixes: it.affixes || [], refine: it.refine || 0 })),
+    cards: (b.cards || []).map((c, i) => ({ id: c, star: (b.cardStars || [])[i] || 1 })),
     debug: { sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
     target: { id: target, level: q.targetLevel }, dps: Math.round(rot.dps),
     perSkill: rot.share.map((x) => ({ sid: x.key, name: name(x.key), dps: Math.round(x.dmg / (rot.seconds || 60)) })),

@@ -773,11 +773,9 @@ async function openLab(opt = {}) {
     } catch (e) { alert(e.message); }
     comboBtn.disabled = false;
   } }, '📖 คอมโบการ์ดทั้งหมด');
-  out.replaceChildren(...[
+  const skillPane = el('div', {}, ...[
     el('p', { class: 'hint' }, 'ใช้สูตรดาเมจของเกมเอง (ตัวเดียวกับหน้าบิลด์แนะนำในเกม) ลองลงแต้มสกิล · Evolution A/B · Trait ของสาย · ลำดับช่องลัด แล้วจัดอันดับ คลาส 1 อย่างเดียว เทียบกับคลาส 2 ทั้งสองสาย'),
     el('div', { class: 'lab-form' },
-      el('label', { title: 'ตัวละครที่ออนไลน์อยู่ · อ่านเลเวล สเตตัส สกิล คลาส 2 เกียร์ และการ์ดจากเกม' }, '👤 ตัวละคร ', accSel),
-      me && !jobs.some((j) => j.id === me.job) ? el('small', { class: 'hint' }, `(${labPretty(me.job)} ยังไม่มีอาชีพคลาส 1 · เลือกอาชีพเพื่อจำลอง)`) : null,
       el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', { title: 'ตามเกม: Job คลาส 1 สูงสุด 50 · แต้มสกิลเต็ม' }, c1Full, ' คลาส 1 Job เต็ม'), el('label', {}, 'Job Lv ', jlv),
       el('label', { title: 'ตามเกม: Job คลาส 2 สูงสุด 50 ได้แต้มรวม 70 (ใช้ร่วมกันทั้งสองสาย)' }, c2Full, ' คลาส 2 Job เต็ม (Lv 50 · 70 แต้ม)'),
       el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
@@ -792,6 +790,73 @@ async function openLab(opt = {}) {
     el('div', { class: 'lab-row' }, go, full, el('small', { class: 'hint' }, ' ดาวการ์ด (โหมดแข่ง ถ้าไม่ใช้เฉพาะที่มี) '), fullStars, comboBtn), res,
     el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · คลาส 2 คิดแบบ Job เต็ม (Lv 50 · 70 แต้ม ตามเกม) ถ้าอยากใช้ค่าจริงของตัวละครให้เอาติ๊กออก'),
   ].filter(Boolean));
+
+  // ---- tab: cards from the character's own collection (equipped + bag), for its current skill build ----
+  const cardPane = el('div', { hidden: '' });
+  const livePane = el('div', { hidden: '' });
+  if (me) {
+    const cGoal = el('select', {}, el('option', { value: 'boss' }, '👑 DPS ตีบอส'), el('option', { value: 'farm' }, '🌾 DPS ฟาร์ม'), el('option', { value: 'gold' }, '💰 ฟาร์มเงิน'));
+    const cBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value }, o.textContent)));
+    const cMine = el('input', { type: 'checkbox', checked: owned.length ? '' : null, disabled: owned.length ? null : '' });
+    const cNoCrit = el('input', { type: 'checkbox' });
+    const cStars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
+    const cOut = el('div', {});
+    const cGo = el('button', { class: 'primary' }, owned.length ? `🃏 จัดการ์ดจาก ${owned.length} ชนิดที่มี` : '🃏 จัดการ์ด');
+    cGo.onclick = async () => {
+      cGo.disabled = true; cOut.replaceChildren(el('p', { class: 'hint' }, 'กำลังอ่านตัวละครล่าสุดและลองการ์ดทุกคอมโบ…'));
+      const meNow = (await dash.invoke('lab-me', accId)) || me;
+      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: 50, c2Points: 70, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4,
+        target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true,
+        loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
+        build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: {}, hotbar: [], c2: meNow.c2 || '' } };
+      if (cMine.checked && meNow.ownedCards && meNow.ownedCards.length) q.owned = meNow.ownedCards;
+      if (cNoCrit.checked) q.noCrit = true;
+      try { cOut.replaceChildren(...cardsView(await dash.invoke('lab-cards', q), q.goal)); } catch (e) { cOut.replaceChildren(el('p', {}, '✖ ' + e.message)); }
+      cGo.disabled = false;
+    };
+    cardPane.append(
+      el('p', { class: 'hint' }, 'จัดการ์ดให้บิลด์สกิลที่ตัวละครใช้อยู่ตอนนี้ (อ่านจากเกมทุกครั้งที่กด) · ใช้เฉพาะการ์ดที่มีจริง (ที่ใส่อยู่ + ในกระเป๋า) จำนวนและดาวตามจริง · รวมเกียร์และ affix ที่ใส่อยู่'),
+      el('div', { class: 'lab-form' }, el('label', {}, 'เป้าหมาย ', cGoal), el('label', {}, 'เป้า ', cBoss),
+        el('label', {}, cMine, ` เฉพาะการ์ดที่มี (${owned.length} ชนิด)`), el('label', {}, cNoCrit, ' ไม่เอาการ์ดคริ'), el('label', {}, 'ดาว (ถ้าใช้ทุกใบในเกม) ', cStars)),
+      cGo, cOut);
+
+    // ---- tab: the character as it is right now, re-read every 10 s ----
+    const lBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value, selected: o.value === 'training_dummy' ? '' : null }, o.textContent)));
+    const lOut = el('div', {}); let lPrev = null; let lTimer = null;
+    const lTick = async () => {
+      if (livePane.hidden || $('#modal').hidden) return;
+      const m2 = await dash.invoke('lab-me', accId); if (!m2) { lOut.replaceChildren(el('p', {}, 'ตัวละครไม่ได้ออนไลน์')); return; }
+      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2 } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+      const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
+      const sh = pr.sheet || {};
+      lOut.replaceChildren(
+        el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}`),
+          d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
+        el('div', { class: 'lab-row' }, ...[['ATK', sh.atk], ['MATK', sh.matk], ['Spell Amp', sh.spellAmp, '%'], ['ลดคูลดาวน์', sh.cdr, '%'], ['ร่ายเร็ว', sh.castSpd, '%'], ['คริ', sh.crit, '%'], ['ดาเมจคริ', sh.critDmg, '%'], ['เจาะเกราะ', sh.armorPen, '%']].filter((x) => x[1] != null).map(([l, v, u]) => el('span', { class: 'chip' }, `${l} ${Number.isInteger(v) ? num(v) : v}${u || ''}`))),
+        comboBox(pr.combos) || el('span'),
+        el('table', { class: 'lab-maps' }, el('tr', {}, el('th', {}, 'สกิล'), el('th', {}, 'DPS'), el('th', {}, '%')),
+          ...pr.perSkill.map((x) => el('tr', {}, el('td', {}, x.name), el('td', {}, num(x.dps)), el('td', {}, pr.dps ? Math.round(x.dps / pr.dps * 100) + '%' : '-')))),
+        el('div', { class: 'lab-row' }, el('small', {}, 'เกียร์: '), ...pr.gear.map((g) => el('span', { class: 'chip', title: g.affixes.join(', ') }, `${g.slot}: ${labPretty(g.id)}${g.refine ? ' +' + g.refine : ''}${g.affixes.length ? ` · ${g.affixes.length} affix` : ''}`))),
+        el('div', { class: 'lab-row' }, el('small', {}, 'การ์ดที่ใส่: '), ...(pr.cards.length ? pr.cards.map((c) => el('span', { class: 'chip' }, `${labPretty(c.id)} ${'★'.repeat(c.star)}`)) : [el('small', { class: 'hint' }, 'ไม่มี')])),
+        el('p', { class: 'hint' }, 'อ่านเกียร์ affix ตีบวก การ์ด สเตตัส สกิล Evolution ของตัวละครจากเกมทุก 10 วิ แล้วคำนวณใหม่ · เปลี่ยนของในเกมแล้วดูตัวเลขขยับได้ทันที'));
+    };
+    lBoss.addEventListener('change', () => { lPrev = null; lTick(); });
+    livePane.append(el('div', { class: 'lab-form' }, el('label', {}, 'เป้า ', lBoss)), lOut);
+    livePane.start = () => { lTick(); clearInterval(lTimer); lTimer = setInterval(() => { if ($('#modal').hidden) { clearInterval(lTimer); return; } lTick(); }, 10000); };
+  } else {
+    cardPane.append(el('p', { class: 'hint' }, 'เลือกตัวละครที่ออนไลน์อยู่ เพื่อจัดการ์ดจากการ์ดที่มี'));
+    livePane.append(el('p', { class: 'hint' }, 'เลือกตัวละครที่ออนไลน์อยู่เพื่อดูบิลด์ปัจจุบันแบบสด'));
+  }
+  const tabs = [['skills', '🧪 สกิล', skillPane], ['cards', '🃏 การ์ด', cardPane], ['live', '📡 บิลด์ปัจจุบัน (สด)', livePane]];
+  const tabBar = el('div', { class: 'lab-tabs' }, ...tabs.map(([k, label, pane]) => el('button', { class: 'tab' + (k === 'skills' ? ' on' : ''), 'data-k': k, onclick: (e) => {
+    for (const [, , p2] of tabs) p2.hidden = p2 !== pane;
+    for (const t of tabBar.children) t.classList.toggle('on', t === e.currentTarget);
+    if (pane === livePane && livePane.start) livePane.start();
+  } }, label)));
+  out.replaceChildren(
+    el('div', { class: 'lab-form' }, el('label', { title: 'ตัวละครที่ออนไลน์อยู่ · อ่านเลเวล สเตตัส สกิล คลาส 2 เกียร์ และการ์ดจากเกม' }, '👤 ตัวละคร ', accSel),
+      me && !jobs.some((j) => j.id === me.job) ? el('small', { class: 'hint' }, `(${labPretty(me.job)} ยังไม่มีอาชีพคลาส 1 · เลือกอาชีพเพื่อจำลอง)`) : null),
+    tabBar, skillPane, cardPane, livePane);
   if (opt.auto && me) go.click();
 }
 
@@ -919,6 +984,7 @@ function comboBox(parts) {
       : `🧊 เป้าติดสถานะ ${c.up}% ของเวลา (จาก ${c.skills.join(', ')}) · ยังไม่มีเกียร์/การ์ด/สกิลที่แรงขึ้นใส่เป้าติดสถานะ (เช่น affix "ดาเมจใส่เป้าติดดีบัฟ", การ์ด Bramble Pact)`;
     if (c.k === 'mark') return `🎯 Hunter's Mark ค้างได้ ${c.stacks}/${c.cap} สแตก${c.apex ? ' · Apex ทั้งปาร์ตี้ +30%' : ''} → ดาเมจ +${c.gain}%`;
     if (c.k === 'shatter') return c.boss ? `❄️ Chill → Shatter: บอส/มินิบอสไม่แข็ง จึงไม่มี Shatter (ได้แค่สโลว์จาก ${c.skills.join(', ')})` : `❄️ Chill → Shatter ~${c.perMin} ครั้ง/นาที ต่อมอน 1 ตัว (จาก ${c.skills.join(', ')}) → ดาเมจ +${c.gain}% (ไม่นับระเบิดรอบตัว 30%)`;
+    if (c.k === 'proc') return `🎲 Proc จากเกียร์ → ดาเมจ +${c.gain}% (${c.list.join(' · ')})`;
     if (c.k === 'res') {
       const bits = [c.stacks != null ? `ค้าง ${c.stacks}/${c.cap}` : '', c.perMin != null ? `${c.perMin} ครั้ง/นาที` : '', c.up != null ? `ติด ${c.up}% ของเวลา` : '', c.spend ? 'มีสกิลใช้สแตก' : ''].filter(Boolean).join(' · ');
       return `⚡ ${c.name}${bits ? ' ' + bits : ''} → ดาเมจ +${c.gain}%`;
