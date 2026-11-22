@@ -25,6 +25,7 @@
 //   { type:'world', w, h, self:{x,y}, monsters:[{x,y,name}], players:[{x,y}], drops:[] }
 const { unpack, Packr } = require('msgpackr');
 const DROP_NAMES = require('./drop-names');
+const NAMES = require('./game-names');
 const { MOBS: MOB_TABLE, CATEGORY } = require('./mob-table');
 
 // NPC sell price of a monster drop, same formula as the game client:
@@ -148,19 +149,20 @@ function marketPrice(guide, now = Date.now()) {
 }
 
 // The NPC shop's potions (from the client's vendor table, Silver, before the economy index)
+const NAMES_POT = (id) => NAMES.items[id] || id;
 const POTIONS = [
-  { id: 'potion', name: 'โพชั่น', kind: 'hp', price: 12 },
-  { id: 'hi_potion', name: 'ไฮโพชั่น', kind: 'hp', price: 32 },
-  { id: 'mega_potion', name: 'เมก้าโพชั่น', kind: 'hp', price: 75 },
-  { id: 'elixir', name: 'Elixir', kind: 'hp', price: 150 },
-  { id: 'grand_elixir', name: 'Grand Elixir', kind: 'hp', price: 260 },
-  { id: 'pearl_elixir', name: 'Pearl Elixir', kind: 'hp', price: 400 },
-  { id: 'sovereign_elixir', name: 'Sovereign Elixir', kind: 'hp', price: 560 },
-  { id: 'mana_potion', name: 'ยามานา', kind: 'mp', price: 16 },
-  { id: 'ether', name: 'Ether', kind: 'mp', price: 40 },
-  { id: 'high_ether', name: 'High Ether', kind: 'mp', price: 100 },
-  { id: 'pearl_ether', name: 'Pearl Ether', kind: 'mp', price: 150 },
-  { id: 'sovereign_ether', name: 'Sovereign Ether', kind: 'mp', price: 210 },
+  { id: 'potion', name: NAMES_POT('potion'), kind: 'hp', price: 12 },
+  { id: 'hi_potion', name: NAMES_POT('hi_potion'), kind: 'hp', price: 32 },
+  { id: 'mega_potion', name: NAMES_POT('mega_potion'), kind: 'hp', price: 75 },
+  { id: 'elixir', name: NAMES_POT('elixir'), kind: 'hp', price: 150 },
+  { id: 'grand_elixir', name: NAMES_POT('grand_elixir'), kind: 'hp', price: 260 },
+  { id: 'pearl_elixir', name: NAMES_POT('pearl_elixir'), kind: 'hp', price: 400 },
+  { id: 'sovereign_elixir', name: NAMES_POT('sovereign_elixir'), kind: 'hp', price: 560 },
+  { id: 'mana_potion', name: NAMES_POT('mana_potion'), kind: 'mp', price: 16 },
+  { id: 'ether', name: NAMES_POT('ether'), kind: 'mp', price: 40 },
+  { id: 'high_ether', name: NAMES_POT('high_ether'), kind: 'mp', price: 100 },
+  { id: 'pearl_ether', name: NAMES_POT('pearl_ether'), kind: 'mp', price: 150 },
+  { id: 'sovereign_ether', name: NAMES_POT('sovereign_ether'), kind: 'mp', price: 210 },
 ];
 
 // Items that are everyday supplies, not loot worth a market check
@@ -205,7 +207,9 @@ function pretty(id) {
     const cat = def && CATEGORY[def[2]];
     return cat ? `${titleCase(drop[1])} · ${cat}` : `${titleCase(drop[1])} (ดรอป)`;
   }
-  return titleCase(base);
+  // the game's own names (items in Thai as the game shows them, monsters, skills, jobs)
+  const real = NAMES.items[base] || NAMES.mobs[base] || NAMES.skills[base] || NAMES.jobs[base];
+  return real || titleCase(base);
 }
 
 function announcementText(e) {

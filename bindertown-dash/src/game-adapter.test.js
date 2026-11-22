@@ -12,49 +12,49 @@ function frame(type, message) {
 
 assert.deepStrictEqual(decodeFrame(frame('server', { type: 'pong', t: 5, online: 7228 })), { type: 'server', message: { type: 'pong', t: 5, online: 7228 } });
 assert.strictEqual(decodeFrame(Buffer.from([14, 1, 2])), null, 'state patches are not ROOM_DATA');
-assert.strictEqual(pretty('cosmic_warden'), 'Cosmic Warden');
-assert.strictEqual(pretty('yellow_potion~2'), 'Yellow Potion');
+assert.strictEqual(pretty('frost_fang'), 'Frost Fang');
+assert.strictEqual(pretty('potion~2'), 'โพชั่น');
 
 const ad = new BinderTownAdapter();
 // page snapshot gives the session id, the character and the mobs around
 let ev = ad.snapshot({
   ready: true, sessionId: 'me1',
-  self: { name: '666', job: 'kensei', level: 116, jobLevel: 70, hp: 6207, maxHp: 6561, mp: 166, maxMp: 182, xp: 5000, silver: 353200, str: 99, x: 10, y: 12, state: 'idle' },
-  mobs: { m1: ['cosmic_warden', 115, 11, 12, 'idle', ''], pet: ['wolf', 1, 10, 12, 'idle', 'me1'] },
-  players: [[3, 4, 'Other']], mapId: 'starfall_ruins', xpText: 'Lv 116  ·  EXP 97.30%', jobText: 'JOB 70 · 100.00%', mini: 'data:image/png;base64,AAAA',
+  self: { name: '666', job: 'mage', level: 116, jobLevel: 70, hp: 6207, maxHp: 6561, mp: 166, maxMp: 182, xp: 5000, silver: 353200, str: 99, x: 10, y: 12, state: 'idle' },
+  mobs: { m1: ['frost_fang', 115, 11, 12, 'idle', ''], pet: ['wolf', 1, 10, 12, 'idle', 'me1'] },
+  players: [[3, 4, 'Other']], mapId: 'frostpeak_slopes', xpText: 'Lv 116  ·  EXP 97.30%', jobText: 'JOB 70 · 100.00%', mini: 'data:image/png;base64,AAAA',
 });
 const self = ev.find((e) => e.type === 'self');
 assert.strictEqual(self.expPct, 97.3);
 assert.strictEqual(self.sp, 166);
 assert.strictEqual(self.maxSp, 182);
-assert.strictEqual(self.job, 'Kensei');
+assert.strictEqual(self.job, 'Mage');
 assert.strictEqual(self.dead, false);
 const world = ev.find((e) => e.type === 'world');
 assert.strictEqual(world.monsters.length, 1, 'own pet is not a monster');
 assert.ok(ev.find((e) => e.type === 'minimap'));
 
 // packed hit from me, my pet's hit, a mob hitting me, a miss, a crit
-ev = ad.incoming(frame('server', [[1, 'm1', 19025, 'crit', 'me1', 'iaigiri'], [1, 'm1', 500, '', 'pet'], [1, 'me1', 300, '', 'm1'], [1, 'm1', 0, 'miss', 'me1']]));
+ev = ad.incoming(frame('server', [[1, 'm1', 19025, 'crit', 'me1', 'bolt'], [1, 'm1', 500, '', 'pet'], [1, 'me1', 300, '', 'm1'], [1, 'm1', 0, 'miss', 'me1']]));
 assert.deepStrictEqual(ev.map((e) => e.type), ['hit', 'hit', 'hurt', 'miss']);
-assert.strictEqual(ev[0].target, 'Cosmic Warden');
+assert.strictEqual(ev[0].target, 'Frost Fang');
 assert.strictEqual(ev[0].crit, true);
-assert.strictEqual(ev[0].skill, 'Iaigiri');
-assert.strictEqual(ev[2].from, 'Cosmic Warden');
+assert.strictEqual(ev[0].skill, 'Spirit Bolt');
+assert.strictEqual(ev[2].from, 'Frost Fang');
 
 // the mob dies, then the kill reward
 ev = ad.incoming(frame('server', [{ type: 'died', id: 'm1' }, { type: 'killGain', xp: [100, 18550], job: [0, 0], gold: [0, 120] }]));
-assert.deepStrictEqual(ev, [{ type: 'kill', target: 'Cosmic Warden', exp: 18450, job: 0, silver: 120, t: ev[0].t }]);
+assert.deepStrictEqual(ev, [{ type: 'kill', target: 'Frost Fang', exp: 18450, job: 0, silver: 120, t: ev[0].t }]);
 
 // inventory: full, then a delta with a pickup and a used potion
-ev = ad.incoming(frame('server', { type: 'inv', items: [{ id: 'yellow_potion', qty: 10 }, { id: 'refine_stone', qty: 2 }] }));
+ev = ad.incoming(frame('server', { type: 'inv', items: [{ id: 'potion', qty: 10 }, { id: 'hi_potion', qty: 2 }] }));
 const strip = (items) => items.map(({ name, qty }) => ({ name, qty }));
-assert.deepStrictEqual(strip(ev[0].items), [{ name: 'Yellow Potion', qty: 10 }, { name: 'Refine Stone', qty: 2 }]);
-assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear: false, locked: false, bound: false }]);
+assert.deepStrictEqual(strip(ev[0].items), [{ name: 'โพชั่น', qty: 10 }, { name: 'ไฮโพชั่น', qty: 2 }]);
+assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'potion', qty: 10, gear: false, locked: false, bound: false }]);
 // gear instances and locks
 {
   const a2 = new BinderTownAdapter();
   const e2 = a2.incoming(frame('server', { type: 'inv', items: [{ id: 'chipped_blade#u1', qty: 1 }, { id: 'buckler#u2', qty: 1 }], locks: ['buckler#u2'] }));
-  assert.deepStrictEqual(e2[0].items.map((i) => [i.name, i.ids[0].gear, i.ids[0].locked]), [['Chipped Blade', true, false], ['Buckler', true, true]]);
+  assert.deepStrictEqual(e2[0].items.map((i) => [i.name, i.ids[0].gear, i.ids[0].locked]), [['ดาบบิ่น', true, false], ['โล่จิ๋ว', true, true]]);
 }
 // grades as the game computes them, from real market ids
 {
@@ -71,19 +71,19 @@ assert.deepStrictEqual(ev[0].items[0].ids, [{ id: 'yellow_potion', qty: 10, gear
   // market item view -> price for that kind + grade (cheapest now, like the market board)
   const a6 = new BinderTownAdapter();
   const ev6 = a6.incoming(frame('server', { type: 'marketItem', view: { key: 'robe_t10|epic', itemId: 'robe_t10|p_gust:4:21,bossres:8:8,dex:7:13,magicres:3:5#e316', low: 10000, last: 450000, vol7: 61, stock: 56 } }));
-  assert.deepStrictEqual([ev6[0].item, ev6[0].price, ev6[0].basis, ev6[0].key], ['Robe T10 (Epic)', 10000, 'listed', 'robe_t10|epic']);
+  assert.deepStrictEqual([ev6[0].item, ev6[0].price, ev6[0].basis, ev6[0].key], ['เสื้อคลุมผู้คุมหุบเขา (Epic)', 10000, 'listed', 'robe_t10|epic']);
   // auto-sold gear is 'sold', not 'used': no "runs out" clock for gear
   const a7 = new BinderTownAdapter();
   const d7 = new AccountData(); d7.startedAt = 1;
   for (const x of a7.incoming(frame('server', { type: 'inv', items: [{ id: 'staff_t10|a:1:1,b:1:1#s1', qty: 1 }, { id: 'potion', qty: 50 }] }), 2)) d7.ingest(x);
   for (const x of a7.incoming(frame('server', [{ type: 'autoSold', itemId: 'staff_t10|a:1:1,b:1:1#s1', qty: 1 }, { type: 'inv', d: 1, items: [{ id: 'potion', qty: 20 }], gone: ['staff_t10|a:1:1,b:1:1#s1'] }]), 3600 * 1000)) d7.ingest(x);
   const rows = d7.bagRows(1);
-  assert.deepStrictEqual(rows.map((r) => [r.name, r.minutesLeft != null]), [['Potion', true]], 'only the potion gets a clock; sold staff is gone');
+  assert.deepStrictEqual(rows.map((r) => [r.name, r.minutesLeft != null]), [['โพชั่น', true]], 'only the potion gets a clock; sold staff is gone');
 }
-ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'yellow_potion', qty: 9 }, { id: 'warden_shard', qty: 1 }], gone: ['refine_stone'] }));
+ev = ad.incoming(frame('server', { type: 'inv', d: 1, items: [{ id: 'potion', qty: 9 }, { id: 'stone_maul', qty: 1 }], gone: ['hi_potion'] }));
 assert.deepStrictEqual(ev.map((e) => e.type), ['loot', 'bag']);
-assert.strictEqual(ev[0].item, 'Warden Shard');
-assert.deepStrictEqual(strip(ev[1].items), [{ name: 'Yellow Potion', qty: 9 }, { name: 'Warden Shard', qty: 1 }]);
+assert.strictEqual(ev[0].item, 'ค้อนหิน');
+assert.deepStrictEqual(strip(ev[1].items), [{ name: 'โพชั่น', qty: 9 }, { name: 'ค้อนหิน', qty: 1 }]);
 assert.strictEqual(ev[0].worthChecking, true, 'non-drop, non-supply loot gets a market check');
 
 // chat, whisper, party invite, death, ping
@@ -91,13 +91,13 @@ ev = ad.incoming(frame('server', [
   { type: 'chat', id: 'x', name: 'Pooh', channel: 'world', guild: '420power', text: 'hi [[0]]', items: ['fly_wing'] },
   { type: 'chat', id: 'x', name: 'Mika', channel: 'whisper', text: 'psst' },
   { type: 'socialInvite', kind: 'party', from: 'Six', partyName: 'GODZONE' },
-  { type: 'youDied', cause: { kind: 'mob', mobType: 'star_raider' } },
+  { type: 'youDied', cause: { kind: 'mob', mobType: 'frost_wisp' } },
 ]));
 assert.strictEqual(ev[0].text, 'hi [Fly Wing]');
 assert.strictEqual(ev[0].guild, '420power');
 assert.strictEqual(ev[1].channel, 'whisper');
 assert.strictEqual(ev[2].type, 'party');
-assert.deepStrictEqual([ev[3].type, ev[3].by], ['death', 'Star Raider']);
+assert.deepStrictEqual([ev[3].type, ev[3].by], ['death', 'Frost Wisp']);
 ad.outgoing(frame('input', { type: 'ping', t: 1234.5 }), 1000);
 ev = ad.incoming(frame('server', { type: 'pong', t: 1234.5, online: 7219 }), 1070);
 assert.deepStrictEqual([ev[0].ping, ev[0].online], [70, 7219]);
@@ -105,21 +105,21 @@ assert.deepStrictEqual([ev[0].ping, ev[0].online], [70, 7219]);
 // session data turns events into the dashboard's numbers
 const d = new AccountData();
 d.ingest({ type: 'self', silver: 100, xp: 0, level: 1, expPct: 10 });
-d.ingest({ type: 'hit', target: 'Slime', dmg: 50, crit: true });
-d.ingest({ type: 'kill', target: 'Slime', exp: 10, job: 1, silver: 5 });
-d.ingest({ type: 'loot', item: 'Potion', qty: 2 });
-d.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 2, ids: [{ id: 'potion', qty: 2 }] }] });
+d.ingest({ type: 'hit', target: 'Sprout', dmg: 50, crit: true });
+d.ingest({ type: 'kill', target: 'Sprout', exp: 10, job: 1, silver: 5 });
+d.ingest({ type: 'loot', item: 'โพชั่น', qty: 2 });
+d.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 2, ids: [{ id: 'potion', qty: 2 }] }] });
 d.ingest({ type: 'chat', channel: 'world', from: 'A', text: 'hi' });
 d.ingest({ type: 'net', ping: 69.6, online: 7211 });
 const det = d.detail();
 assert.strictEqual(det.events.length, 3);
-assert.strictEqual(det.events[0].text, 'ตี Slime 50 (คริ)');
-assert.strictEqual(det.bag[0].name, 'Potion');
+assert.strictEqual(det.events[0].text, 'ตี Sprout 50 (คริ)');
+assert.strictEqual(det.bag[0].name, 'โพชั่น');
 // potion clock: 60 used in an hour with 30 left -> 30 minutes
 const d4 = new AccountData(); d4.startedAt = 1;
-d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 90, supply: true }], t: 2 });
-d4.ingest({ type: 'bag', items: [{ name: 'Potion', qty: 30, supply: true }], t: 3600 * 1000 });
-d4.ingest({ type: 'market', item: 'Potion', price: 7, t: 3 });
+d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 90, supply: true }], t: 2 });
+d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 30, supply: true }], t: 3600 * 1000 });
+d4.ingest({ type: 'market', item: 'โพชั่น', price: 7, t: 3 });
 const pot = d4.bagRows(1)[0];
 assert.strictEqual(Math.round(pot.minutesLeft), 30);
 assert.strictEqual(pot.market, 7);
@@ -172,7 +172,7 @@ assert.ok(encodeInput({ type: 'ping', t: decodeFrame(real).message.t }).equals(r
 assert.deepStrictEqual(marketPrice({ listed: [120, 90], sales: [] }), { price: 90, basis: 'listed', listed: 2 });
 assert.strictEqual(marketPrice({ listed: [], sales: [{ t: Date.now(), unit: 10 }, { t: Date.now(), unit: 30 }, { t: Date.now(), unit: 20 }] }).price, 20);
 assert.strictEqual(marketPrice({ listed: [], sales: [{ t: 0, unit: 10 }] }), null, 'sales older than 14 days ignored');
-ev = ad.incoming(frame('server', [{ type: 'sold', itemId: 'drop_sprout', qty: 5, silver: 20 }, { type: 'marketGuide', itemId: 'warden_shard', listed: [300], sales: [] }, { type: 'pass', premiumUntil: 123 }]));
+ev = ad.incoming(frame('server', [{ type: 'sold', itemId: 'drop_sprout', qty: 5, silver: 20 }, { type: 'marketGuide', itemId: 'mana_potion', listed: [300], sales: [] }, { type: 'pass', premiumUntil: 123 }]));
 assert.deepStrictEqual(ev.map((e) => e.type), ['sold', 'market', 'premium']);
 assert.strictEqual(ev[1].price, 300);
 

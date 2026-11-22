@@ -1,39 +1,53 @@
-// Demo mode: fake events so the dashboard can be previewed without the game.
+// Demo mode: made-up activity so the dashboard can be previewed without the game.
 // Nothing here talks to the game. Turned on in Settings › "โหมดตัวอย่าง".
-const MONSTERS = ['Moss Brute', 'Willow Brute', 'Star Raider', 'Cosmic Warden'];
-const ITEMS = ['Yellow Potion', 'Blue Potion', 'Copper Ore', 'Equipment Fragment', 'Refine Stone'];
-const SKILLS = ['', '', 'Iaigiri', 'Issen'];
+// Everything shown is real Binder Town content (maps, the monsters that live there, jobs,
+// skills, items) from game-names.js; only the numbers and the players are invented.
+const N = require('./game-names');
+const { pretty } = require('./game-adapter');
+
+// four real field maps with their own monsters, one per demo character
+const SPOTS = [
+  { map: 'frostpeak_slopes', job: 'mage', level: 50 },
+  { map: 'peatcut_bog', job: 'scout', level: 41 },
+  { map: 'howling_steppes', job: 'knight', level: 61 },
+  { map: 'kitewind_terraces', job: 'acolyte', level: 67 },
+];
 const CHANNELS = ['world', 'world', 'party', 'guild', 'whisper', 'system'];
 const NAMES = ['Mika', 'Toon', 'Ploy', 'Arthit', 'Nok'];
-const LINES = ['มีใครไปบอสไหม', 'ขายแร่ทองแดง', 'ปาร์ตี้ขาดฮีล 1', 'gg', 'แมพนี้มอนเยอะดี'];
+const LINES = ['มีใครไปบอสไหม', 'ขายยามานาราคาถูก', 'ปาร์ตี้ขาดฮีล 1', 'gg', 'แมพนี้มอนเยอะดี'];
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const rnd = (a, b) => Math.floor(a + Math.random() * (b - a));
 
 class DemoFeed {
   constructor(seed) {
-    this.level = 40 + seed * 7;
+    const spot = SPOTS[seed % SPOTS.length];
+    this.mapId = spot.map;
+    this.homeMobs = (N.homes[spot.map] || [['sprout', 1, 3, 'trash']]).map(([id]) => N.mobs[id] || pretty(id));
+    this.skills = ['', '', ...(N.jobSkills[spot.job] || []).slice(0, 3).map((id) => N.skills[id] || pretty(id))];
+    this.items = ['potion', 'mana_potion', 'hi_potion', ...(N.homes[spot.map] || []).slice(0, 2).map(([id]) => 'drop_' + id)].map((id) => pretty(id)).filter((n) => !/\(ดรอป\)$/.test(n)); // only drops whose name the game data gives
+    this.level = spot.level;
     this.maxExp = 500000 * (seed + 1);
     this.exp = Math.floor(this.maxExp * 0.3);
     this.silver = 100000 * (seed + 1);
     this.hp = 3000; this.maxHp = 3000; this.sp = 180; this.maxSp = 180;
-    this.bag = Object.fromEntries(ITEMS.map((n) => [n, rnd(10, 300)]));
-    this.mobs = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), name: pick(MONSTERS) }));
+    this.bag = Object.fromEntries(this.items.map((n) => [n, rnd(10, 300)]));
+    this.mobs = Array.from({ length: 14 }, () => ({ x: Math.random(), y: Math.random(), name: pick(this.homeMobs) }));
     this.players = Array.from({ length: 4 }, () => ({ x: Math.random(), y: Math.random(), name: pick(NAMES) }));
     this.self = { x: 0.5, y: 0.5 };
     this.tickN = 0;
     this.seed = seed;
     this.name = ['Kenji', 'Somchai', 'Lina', 'Pim'][seed % 4];
-    this.job = ['Kensei', 'Scout', 'Acolyte', 'Mage'][seed % 4];
+    this.job = N.jobs[spot.job] || pretty(spot.job);
   }
 
   tick() {
     const out = [];
     this.tickN++;
-    const target = pick(MONSTERS);
+    const target = pick(this.homeMobs);
     if (Math.random() < 0.85) {
       const crit = Math.random() < 0.2;
-      out.push({ type: 'hit', target, dmg: rnd(100, 5000) * (crit ? 3 : 1), crit, skill: pick(SKILLS) });
+      out.push({ type: 'hit', target, dmg: rnd(100, 2500) * (crit ? 2 : 1), crit, skill: pick(this.skills) });
     } else out.push({ type: 'miss', target });
     if (Math.random() < 0.2) {
       const dmg = rnd(20, 400);
@@ -47,14 +61,14 @@ class DemoFeed {
       out.push({ type: 'kill', target, exp, job: 0 });
       this.silver += rnd(50, 900);
       if (Math.random() < 0.6) {
-        const item = pick(ITEMS);
-        this.bag[item]++;
+        const item = pick(this.items.slice(3).length ? this.items.slice(3) : this.items);
+        this.bag[item] = (this.bag[item] || 0) + 1;
         out.push({ type: 'loot', item, qty: 1 });
       }
     }
     if (this.tickN % 10 === 0) {
       this.hp = Math.min(this.maxHp, this.hp + 400);
-      this.bag['Yellow Potion'] = Math.max(0, this.bag['Yellow Potion'] - 1);
+      this.bag[this.items[0]] = Math.max(0, this.bag[this.items[0]] - 1);
     }
     if (Math.random() < 0.08) {
       out.push({ type: 'chat', channel: pick(CHANNELS), from: pick(NAMES), guild: Math.random() < 0.5 ? 'Demo' : '', text: pick(LINES) });
@@ -65,11 +79,11 @@ class DemoFeed {
     out.push({
       type: 'self', name: this.name, job: this.job, level: this.level, jobLevel: 50, hp: this.hp, maxHp: this.maxHp,
       sp: this.sp, maxSp: this.maxSp, exp: this.exp, maxExp: this.maxExp, silver: this.silver, gold: 260,
-      str: 99, agi: 99, vit: 66, int: 1, dex: 30, luk: 1, map: ['Frostpeak Slopes', 'Shattered Vale', 'Umbral Depths', 'Moonpool Gardens'][this.seed % 4],
+      str: 1, agi: 20, vit: 30, int: 99, dex: 70, luk: 20, map: this.mapId,
     });
     if (this.tickN % 5 === 1) {
       out.push({ type: 'bag', items: Object.entries(this.bag).map(([name, qty]) => ({ name, qty })) });
-      out.push({ type: 'buffs', list: [{ name: 'EXP x2', until: Date.now() + 28 * 60 * 1000 }, { name: 'Drop x2', stacks: 1 }] });
+      out.push({ type: 'buffs', list: [{ name: 'Rested EXP ×2', until: Date.now() + 28 * 60 * 1000 }] });
       out.push({ type: 'world', w: 1, h: 1, self: { ...this.self }, monsters: this.mobs.map((m) => ({ ...m })), players: this.players, drops: [] });
     }
     return out;
