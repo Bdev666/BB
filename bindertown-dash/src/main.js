@@ -839,9 +839,31 @@ function tradableGear(g) {
 }
 
 // gear pieces that may be salvaged: unlocked, of the chosen grades (default Normal + Magic)
-function salvageable(g, rarities) {
+function salvageable(g, rarities, opt) {
   const want = new Set(Array.isArray(rarities) && rarities.length ? rarities : ['normal', 'magic']);
-  return g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && want.has(rarityOf(x))) : [];
+  const ids = g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && want.has(rarityOf(x))) : [];
+  return opt && opt.byPrice ? ids.filter((x) => salvageVerdict(g, x, opt).salvage) : ids;
+}
+// salvage only what the central market says is worth little: no price, or under the limit, and not a steady seller
+function salvageOpts(o) {
+  const s = store.data.settings;
+  return { byPrice: o && o.byPrice != null ? !!o.byPrice : s.salvageByPrice !== false, maxPrice: Number((o && o.maxPrice) ?? s.salvageMaxPrice ?? 1000000), keepVol: Number((o && o.keepVol) ?? s.salvageKeepVol ?? 3) };
+}
+function salvageVerdict(g, id, opt) {
+  if (g.adapter.bound.has(id)) return { salvage: true, why: 'ผูกตัว ขายในตลาดไม่ได้' };
+  const p = g.data.itemPrices.get(id);
+  if (!p) return { salvage: false, why: 'ยังไม่รู้ราคาตลาด (เก็บไว้ก่อน)' };
+  if (p.vol7 >= opt.keepVol && opt.keepVol > 0) return { salvage: false, why: `ขายออกบ่อย ${p.vol7} ชิ้นใน 7 วัน`, price: p.price, vol7: p.vol7 };
+  if (p.price && p.price >= opt.maxPrice) return { salvage: false, why: `ราคาตลาด ${Math.round(p.price).toLocaleString()} G`, price: p.price, vol7: p.vol7 };
+  return { salvage: true, why: p.price ? `ราคาต่ำ ${Math.round(p.price).toLocaleString()} G` : 'ไม่มีราคาในตลาด', price: p.price || 0, vol7: p.vol7 || 0 };
+}
+// ask the market about gear in the bag that has no recent price, then wait for the answers
+async function priceGear(id, ids) {
+  const g = rt(id);
+  const todo = ids.filter((x) => !g.adapter.bound.has(x) && (!g.data.itemPrices.has(x) || Date.now() - g.data.itemPrices.get(x).at > 30 * 60 * 1000));
+  for (const x of todo) { await requestPrice(id, x, true); await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
+  if (todo.length) await new Promise((r) => setTimeout(r, 1500));
+  return todo.length;
 }
 
 // AUTO / sleep straight from the game page: the once-a-second snapshot can be a beat behind
@@ -870,7 +892,9 @@ async function commandAll(cmd, arg) {
       r = await gameCommand(id, cmd, arg);
     } else if (cmd === 'salvageAll') {
       // unlocked gear of the chosen grades in this account's bag (the player confirmed the counts first)
-      const ids = salvageable(g, arg.rarities);
+      const opt = salvageOpts(arg);
+      if (opt.byPrice) await priceGear(id, salvageable(g, arg.rarities));
+      const ids = salvageable(g, arg.rarities, opt);
       r = ids.length ? await gameCommand(id, 'salvage', { itemIds: ids }) : { ok: true, skipped: true, error: 'ไม่มีอุปกรณ์ให้ย่อย' };
       if (r.ok && ids.length) r.count = ids.length;
     } else {
@@ -1391,6 +1415,9 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
+    if (patch.salvageMaxPrice !== undefined) s.salvageMaxPrice = Math.max(0, Number(patch.salvageMaxPrice) || 0);
+    if (patch.salvageKeepVol !== undefined) s.salvageKeepVol = Math.max(0, Number(patch.salvageKeepVol) || 0);
     if (patch.highValueGold !== undefined) s.highValueGold = Math.max(0, Number(patch.highValueGold) || 0);
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
     if (patch.bossLeadMinutes !== undefined) s.bossLeadMinutes = Math.min(60, Math.max(1, Number(patch.bossLeadMinutes) || 5));
@@ -1494,9 +1521,20 @@ function registerIpc() {
       return { ...me, c2: c2info.path, c2info, loadout: g.adapter.loadout, ownedCards: Object.values(owned), name: (account(id) || {}).name };
     } catch { return null; }
   });
-  handle('salvage-preview', (rarities) => openGames().filter(([, g]) => g.inGame && !g.demo).map(([id, g]) => ({
-    id, name: g.data.stats.name || account(id).name, count: salvageable(g, rarities).length,
-  })));
+  handle('salvage-preview', async (rarities, o) => {
+    const opt = salvageOpts(o);
+    const list = openGames().filter(([, g]) => g.inGame && !g.demo);
+    if (opt.byPrice) await Promise.all(list.map(([id, g]) => priceGear(id, salvageable(g, rarities))));
+    return list.map(([id, g]) => { const all = salvageable(g, rarities); const ok = opt.byPrice ? salvageable(g, rarities, opt) : all; return { id, name: g.data.stats.name || account(id).name, count: ok.length, kept: all.length - ok.length }; });
+  });
+  // one account: every unlocked gear piece with its market numbers and the verdict
+  handle('salvage-verdicts', async (id, o) => {
+    const g = games.get(id); if (!g || !g.inGame) return null;
+    const opt = salvageOpts(o);
+    const all = salvageable(g, ['normal', 'magic', 'rare', 'epic']);
+    await priceGear(id, all);
+    return { opt, items: all.map((x) => ({ id: x, ...salvageVerdict(g, x, opt) })) };
+  });
   handle('potions', () => POTIONS);
   handle('item-watch', (name, limit) => {
     const w = store.data.settings.itemWatch;

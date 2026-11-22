@@ -424,6 +424,7 @@ async function openAll() {
   };
   const sel = el('select', {}, potionList.map((p) => el('option', { value: p.id }, `${p.kind === 'hp' ? '❤' : '💧'} ${p.name} · ${p.price} Silver`)));
   const qty = el('input', { type: 'number', min: '1', max: '999', value: '50' });
+  const salvUi = salvageOptsUi();
   openModal(`สั่งทุกบัญชี (${inGame.length} บัญชีในเกม)`, [
     el('p', { class: 'hint' }, 'ทำทีละบัญชีตามลำดับ เหมือนกดเองทีละบัญชี · บัญชีที่เป็นอยู่แล้วจะข้าม'),
     el('div', { class: 'quick' },
@@ -435,14 +436,19 @@ async function openAll() {
       el('button', { onclick: async () => {
         const rarities = [...document.querySelectorAll('#salv-r input:checked')].map((x) => x.value);
         if (!rarities.length) { out.replaceChildren(el('p', {}, 'เลือกเกรดที่จะย่อยก่อน')); return; }
-        const pre = await dash.invoke('salvage-preview', rarities);
+        const o = salvUi.get();
+        out.replaceChildren(el('p', { class: 'hint' }, o.byPrice ? 'กำลังเช็คราคาตลาดกลางของอุปกรณ์ทุกบัญชี…' : 'กำลังนับ…'));
+        const pre = await dash.invoke('salvage-preview', rarities, o);
+        out.replaceChildren();
         const total = pre.reduce((t, p) => t + p.count, 0);
+        const kept = pre.reduce((t, p) => t + (p.kept || 0), 0);
         const label = rarities.map((r) => RARITIES.find((x) => x[0] === r)[1]).join(' + ');
-        if (!total) { out.replaceChildren(el('p', {}, `ไม่มีอุปกรณ์เกรด ${label} ที่ย่อยได้ (ของที่ล็อกไว้ไม่นับ)`)); return; }
-        if (confirm(`ย่อยอุปกรณ์เกรด ${label} ที่ไม่ได้ล็อก รวม ${total} ชิ้น?\n${pre.map((p) => `${p.name}: ${p.count} ชิ้น`).join('\n')}\nย่อยแล้วเอาคืนไม่ได้ (ล็อกของที่อยากเก็บในเกมก่อน)`)) run('salvageAll', { rarities }, 'ย่อยของ');
+        if (!total) { out.replaceChildren(el('p', {}, `ไม่มีอุปกรณ์เกรด ${label} ที่ย่อยได้${kept ? ` (เก็บไว้ ${kept} ชิ้นเพราะมีราคา/ขายออกบ่อย/ยังไม่รู้ราคา)` : ''}`)); return; }
+        if (confirm(`ย่อยอุปกรณ์เกรด ${label} รวม ${total} ชิ้น?${o.byPrice ? `\n(เฉพาะไม่มีราคาหรือต่ำกว่า ${num(o.maxPrice)} G · เก็บไว้ ${kept} ชิ้น)` : ''}\n${pre.map((p) => `${p.name}: ย่อย ${p.count}${p.kept ? ` · เก็บ ${p.kept}` : ''}`).join('\n')}\nย่อยแล้วเอาคืนไม่ได้`)) run('salvageAll', { rarities, ...o }, 'ย่อยของ');
       } }, '🔨 ย่อยของทุกบัญชี')),
     el('div', { class: 'quick', id: 'salv-r' }, el('span', { class: 'hint' }, 'เกรดที่จะย่อย: '),
       RARITIES.map(([r, label]) => el('label', { class: 'rpick' }, el('input', { type: 'checkbox', value: r, ...(r === 'normal' || r === 'magic' ? { checked: '' } : {}) }), ` ${label}`))),
+    salvUi.node,
     el('label', {}, '🧪 ซื้อยา ', sel, qty, el('button', { onclick: () => run('buy', { itemId: sel.value, qty: Number(qty.value) }, 'ซื้อยา') }, 'ซื้อทุกบัญชี')),
     el('p', { class: 'hint' }, 'ซื้อ/ขายจากระยะไกลใช้ได้เฉพาะบัญชี Premium (กฎของเกม)'),
     out,
@@ -528,40 +534,83 @@ async function openBuy() {
 }
 
 const RARITIES = [['normal', 'Normal'], ['magic', 'Magic'], ['rare', 'Rare'], ['epic', 'Epic']];
+// salvage by market value: the controls (shared by the one-account and all-accounts windows)
+function salvageOptsUi(onChange) {
+  const st = (state && state.settings) || {};
+  const by = el('input', { type: 'checkbox', checked: st.salvageByPrice !== false ? '' : null });
+  const max = el('input', { type: 'number', min: '0', step: '100000', value: String(st.salvageMaxPrice ?? 1000000), style: 'width:110px' });
+  const vol = el('input', { type: 'number', min: '0', max: '999', value: String(st.salvageKeepVol ?? 3), style: 'width:56px' });
+  const save = () => { dash.invoke('settings', { salvageByPrice: by.checked, salvageMaxPrice: +max.value || 0, salvageKeepVol: +vol.value || 0 }); if (onChange) onChange(); };
+  for (const x of [by, max, vol]) x.addEventListener('change', save);
+  return { get: () => ({ byPrice: by.checked, maxPrice: +max.value || 0, keepVol: +vol.value || 0 }),
+    node: el('div', { class: 'salv-opts' },
+      el('label', {}, by, ' ย่อยเฉพาะของที่ไม่มีราคา หรือราคาตลาดกลางต่ำกว่า ', max, ' G'),
+      el('label', {}, 'และไม่ย่อยของที่ขายออกบ่อย: ขายจริงใน 7 วัน ≥ ', vol, ' ชิ้น'),
+      el('small', { class: 'hint' }, 'ของที่ยังไม่รู้ราคาจะเก็บไว้ (โปรแกรมถามราคาตลาดให้ก่อนทุกครั้ง) · ของผูกตัวขายไม่ได้ ย่อยได้ตามปกติ')) };
+}
 function gearList() {
   return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked).map((x) => ({ ...x, name: b.name, market: b.market })));
 }
 function gearCount() { return gearList().length; }
 
-function openSalvage() {
+async function openSalvage() {
   const gear = gearList();
-  const boxes = gear.map((g) => {
+  const list = el('div', { class: 'gearlist' });
+  const out = el('div', {});
+  let verdicts = null; // id -> { salvage, why, price, vol7 }
+  const rows = gear.map((g) => {
     const box = el('input', { type: 'checkbox', value: g.id, 'data-rarity': g.rarity || 'normal' });
-    return el('label', { class: 'gear' }, box, el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]), ` ${g.name}`, g.market != null ? el('small', {}, ` · ตลาด ~${short(g.market)} G`) : null,
-      el('button', { class: 'tiny', type: 'button', title: 'ดูราคาตลาดก่อนย่อย', onclick: (e) => { e.preventDefault(); cmd('price', { itemId: g.id }, 'กำลังถามราคาตลาด…'); } }, 'G?'));
+    const why = el('small', { class: 'hint' }, ' · กำลังเช็คราคา…');
+    return { g, box, why, row: el('label', { class: 'gear' }, box, el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]), ` ${g.name}`, why) };
   });
+  list.replaceChildren(...(rows.length ? rows.map((r) => r.row) : [el('p', {}, 'ไม่มีอุปกรณ์ในกระเป๋าที่ย่อยได้')]));
+  // verdict per piece from its market numbers (same rule as the program's own: no price / under the limit, not a steady seller)
+  const judge = (g) => {
+    const o = ui.get(); const v = verdicts && verdicts[g.id];
+    if (!o.byPrice) return { salvage: true, why: v && v.price ? `ตลาด ~${short(v.price)} G` : '' };
+    if (!v) return { salvage: false, why: 'ยังไม่รู้ราคาตลาด (เก็บไว้ก่อน)' };
+    if (/ผูกตัว/.test(v.why || '')) return { salvage: true, why: v.why };
+    if (v.price == null && /ยังไม่รู้/.test(v.why || '')) return { salvage: false, why: v.why };
+    if (o.keepVol > 0 && (v.vol7 || 0) >= o.keepVol) return { salvage: false, why: `ขายออกบ่อย ${v.vol7} ชิ้นใน 7 วัน` };
+    if (v.price && v.price >= o.maxPrice) return { salvage: false, why: `ราคาตลาด ${short(v.price)} G` };
+    return { salvage: true, why: v.price ? `ราคาต่ำ ${short(v.price)} G` : 'ไม่มีราคาในตลาด' };
+  };
+  const refresh = () => {
+    for (const r of rows) { const j = judge(r.g); r.why.textContent = ' · ' + (j.salvage ? '✔ ย่อยได้' : '✖ เก็บไว้') + (j.why ? ': ' + j.why : ''); r.row.classList.toggle('keep', !j.salvage); r.box.checked = j.salvage && ['normal', 'magic'].includes(r.g.rarity || 'normal'); }
+  };
+  const ui = salvageOptsUi(refresh);
   const go = el('button', { class: 'primary', onclick: async () => {
-    const ids = boxes.map((b) => b.querySelector('input')).filter((x) => x.checked).map((x) => x.value);
+    const ids = rows.filter((r) => r.box.checked).map((r) => r.g.id);
     if (!ids.length) { showBanner('เลือกของที่จะย่อยก่อน'); return; }
-    if (!confirm(`ย่อย ${ids.length} ชิ้น? ย่อยแล้วเอาคืนไม่ได้`)) return;
+    const risky = rows.filter((r) => r.box.checked && !judge(r.g).salvage);
+    if (!confirm(`ย่อย ${ids.length} ชิ้น?${risky.length ? `\n⚠ มี ${risky.length} ชิ้นที่ระบบแนะนำให้เก็บ: ${risky.map((r) => r.g.name).join(', ')}` : ''}\nย่อยแล้วเอาคืนไม่ได้`)) return;
     const r = await cmd('salvage', { itemIds: ids }, `กำลังย่อย ${ids.length} ชิ้น…`);
     if (r && r.ok) closeModal();
   } }, 'ย่อยที่เลือก');
-  // pick by grade, like the game's salvage window
+  // pick by grade, like the game's salvage window (only pieces the price rule allows, when it is on)
   const byRarity = el('div', { class: 'quick' }, el('span', { class: 'hint' }, 'เลือกทั้งเกรด: '), RARITIES.map(([r, label]) => {
     const n = gear.filter((g) => (g.rarity || 'normal') === r).length;
     return el('button', { class: 'tiny', disabled: n ? null : '', onclick: () => {
-      const these = boxes.map((b) => b.querySelector('input')).filter((x) => x.dataset.rarity === r);
-      const all = these.every((x) => x.checked);
+      const these = rows.filter((x) => (x.g.rarity || 'normal') === r && judge(x.g).salvage).map((x) => x.box);
+      const all = these.length && these.every((x) => x.checked);
       these.forEach((x) => { x.checked = !all; });
     } }, `${label} (${n})`);
   }));
   openModal('🔨 ย่อยของ', [
-    el('p', { class: 'hint' }, 'แยกชิ้นอุปกรณ์ในกระเป๋าเป็นวัตถุดิบ · ของที่ล็อกไว้ในเกมไม่แสดงและจะไม่ถูกย่อย · ดูราคาตลาดก่อนได้ด้วยปุ่ม G?'),
+    el('p', { class: 'hint' }, 'แยกชิ้นอุปกรณ์ในกระเป๋าเป็นวัตถุดิบ · ของที่ล็อกไว้ในเกมไม่แสดงและจะไม่ถูกย่อย'),
+    gear.length ? ui.node : null,
     gear.length ? byRarity : null,
-    gear.length ? el('div', { class: 'gearlist' }, boxes) : el('p', {}, 'ไม่มีอุปกรณ์ในกระเป๋าที่ย่อยได้'),
+    list, out,
     gear.length ? go : null,
   ]);
+  if (!rows.length) return;
+  out.replaceChildren(el('p', { class: 'hint' }, 'กำลังเช็คราคาตลาดกลางของทุกชิ้น…'));
+  try {
+    const v = await dash.invoke('salvage-verdicts', selected, ui.get());
+    verdicts = v ? Object.fromEntries(v.items.map((x) => [x.id, x])) : {};
+    out.replaceChildren(el('p', { class: 'hint' }, `เช็คราคาแล้ว · ย่อยได้ ${rows.filter((r) => judge(r.g).salvage).length} ชิ้น · เก็บไว้ ${rows.filter((r) => !judge(r.g).salvage).length} ชิ้น`));
+  } catch (e) { out.replaceChildren(el('p', {}, '✖ ' + e.message)); verdicts = {}; }
+  refresh();
 }
 
 // ---------- sell gear on the central market ----------
