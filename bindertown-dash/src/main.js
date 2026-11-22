@@ -1342,17 +1342,42 @@ async function worldBossGo(kind, reason = 'ปุ่ม') {
     await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
   }
   log.info(`world boss ${kind}: sent ${out.length} account(s) in (${reason})`);
-  // once there: AUTO on (it fights the boss by itself), and say who did not get in
+  // once there: walk up to the boss first (AUTO only fights inside 16 tiles of where it was switched on,
+  // and the arena's warp-in point is farther than that), then AUTO on; say who did not get in
   setTimeout(async () => {
     const missed = [];
     for (const o of out) {
       const g = games.get(o.id); if (!g || !g.bossTrip) continue;
       if (mapOf(g) === o.from) { missed.push(o.name); g.bossTrip = null; continue; }
-      if (!(await liveUi(o.id)).auto) await gameCommand(o.id, 'auto', {}); // eslint-disable-line no-await-in-loop
     }
+    await Promise.all(out.filter((o) => (games.get(o.id) || {}).bossTrip).map((o) => walkToBossThenAuto(o.id, kind)));
     if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / ยังไม่เริ่ม / กำลังวาร์ป)`);
-  }, 8000);
+  }, 7000);
   return { ok: true, sent: out.length, accounts: out };
+}
+// where to stand: next to the world boss; if it is not in sight, the middle of the monsters around
+const BOSS_SPOT_JS = (type) => `(() => { try { const g = window.__game; const st = g.state(); const me = g.me(); if (!st || !me) return null;
+  const all = []; st.mobs.forEach((m) => all.push(m));
+  const kind = (m) => m.mobType || m.type || '';
+  const biggest = all.slice().sort((a, b) => (b.maxHp || 0) - (a.maxHp || 0))[0];
+  const boss = all.find((m) => kind(m) === ${JSON.stringify(type)}) || all.find((m) => /colossus|titan/i.test(kind(m))) || (biggest && biggest.maxHp > 1e6 ? biggest : null);
+  let x, y, how;
+  if (boss) { x = boss.x; y = boss.y; how = 'boss'; } else if (all.length) { x = all.reduce((t, m) => t + m.x, 0) / all.length; y = all.reduce((t, m) => t + m.y, 0) / all.length; how = 'mobs'; } else return { me: [me.x, me.y], none: true };
+  return { x: Math.round(x), y: Math.round(y), how, d: Math.hypot(x - me.x, y - me.y), me: [Math.round(me.x), Math.round(me.y)] }; } catch (e) { return null; } })()`;
+async function walkToBossThenAuto(id, kind) {
+  const g = games.get(id); if (!g || !g.win || g.win.isDestroyed()) return;
+  const type = WORLD_TYPES[kind] || '';
+  if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off while walking (it would stop to fight on the way)
+  let spot = null;
+  for (let i = 0; i < 15; i++) { // up to ~30 s
+    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
+    if (!spot || spot.none) { await new Promise((r) => setTimeout(r, 2000)); continue; } // eslint-disable-line no-await-in-loop
+    if (spot.d <= 5) break;
+    await sendInput(id, { type: 'moveTo', x: spot.x + (spot.how === 'boss' ? 2 : 0), y: spot.y }); // eslint-disable-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+  }
+  log.info(`acc ${id}: world boss -> walked to the ${spot && spot.how ? spot.how : 'arena'}${spot && spot.d != null ? ` (${Math.round(spot.d)} tiles left)` : ''}, AUTO on`);
+  if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
 }
 async function worldBossLeave(kind) {
   for (const [id, g] of openGames()) {
