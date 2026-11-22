@@ -1408,3 +1408,9 @@ $('#toggle-settings').addEventListener('click', () => dash.invoke('open-settings
 dash.onState((s) => { state = s; render(); });
 dash.invoke('state').then((s) => { state = s; render(); refreshDetail(); });
 setInterval(refreshDetail, 1000);
+
+// macOS: shortcuts use Cmd, and "start with Windows" means start at login
+if (dash.platform === 'darwin') {
+  const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (/Ctrl|พร้อม Windows|มุมขวาล่าง/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Ctrl\+/g, 'Cmd+').replace(/พร้อม Windows/g, 'ตอนเปิด Mac').replace(/มุมขวาล่าง/g, 'บนแถบเมนูด้านบน');
+}
