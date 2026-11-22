@@ -442,21 +442,29 @@ function handleEvents(id, events) {
           if (w < s.weightCriticalPct - 2 && g.alerts.has('weightFull')) setAlert(id, 'weightFull', false);
           if (w < s.weightFullPct - 5 && g.alerts.has('weight')) setAlert(id, 'weight', false);
         }
-        if (ev.dead && !g.alerts.has('death')) setAlert(id, 'death', true, 'ตัวละครตาย');
+        if (ev.dead && !g.deadSince) g.deadSince = Date.now(); // a death the event stream missed
+        if (ev.dead && !g.alerts.has('death') && Date.now() - g.deadSince > 10000) setAlert(id, 'death', true, 'ตัวละครตายค้าง (เกิน 10 วิ)');
         else if (ev.dead === false && g.alerts.has('death')) setAlert(id, 'death', false);
+        if (ev.dead === false && g.deadSince && Date.now() - g.deadSince > 15000) g.deadSince = 0; // up (the revive message was missed)
         break;
       case 'death':
         if (g.lastDeathAt && Date.now() - g.lastDeathAt < 1500) break; // the same death, second message
         g.lastDeathAt = Date.now(); g.deadSince = g.lastDeathAt;
         selftest.count(id, 'deaths');
         deathLoopCheck(id, g);
-        setAlert(id, 'death', true, ev.by ? `ตัวละครตาย · โดย ${ev.by}` : 'ตัวละครตาย');
+        // a death that gets up again in a few seconds is not news (it was 940 notifications in a few days):
+        // the alert / notification only comes when it is still lying dead after 10 s
+        clearTimeout(g.deathAlertTimer);
+        { const by = ev.by; const at = g.deadSince;
+          g.deathAlertTimer = setTimeout(() => { if (g.deadSince === at) setAlert(id, 'death', true, by ? `ตัวละครตายค้าง (เกิน 10 วิ) · โดย ${by}` : 'ตัวละครตายค้าง (เกิน 10 วิ)'); }, 10000); }
         backupRespawn(id);
         break;
       case 'revive':
         if (g.respawnTries) selftest.count(id, 'respawnOk');
         if (g.deadSince) { selftest.count(id, 'revives'); selftest.count(id, 'deadMs', Date.now() - g.deadSince); g.deadSince = 0; } // how long it lay dead
-        setAlert(id, 'death', false); g.respawnTries = 0;
+        clearTimeout(g.deathAlertTimer);
+        if (g.alerts.has('death')) setAlert(id, 'death', false);
+        g.respawnTries = 0;
         if (ev.here) selftest.count(id, 'autoRespawned');
         if (ev.here) { g.autoRespawns = (g.autoRespawns || 0) + 1; log.info(`acc ${id}: respawned in place by the game's Auto Respawn (-${ev.fee} G)`); }
         break;
