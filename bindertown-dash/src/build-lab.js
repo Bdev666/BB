@@ -345,6 +345,71 @@ function stillValid(b, p, c2map) {
   return true;
 }
 
+// ---------- skill order: replay the game's own rotation (same loop as its calculator) ----------
+// every 50 ms over 60 s: if not busy casting, cast the first hotbar skill that is ready (charges, cooldown),
+// otherwise swing a basic attack when its timer allows. Repeat charges hit for 50%.
+function rotationOf(r, hotbar) {
+  const V = (r && r.skills) || [];
+  const ae = hotbar.map((sid) => V.find((x) => x.sid === sid && x.damages && x.hit)).filter(Boolean);
+  const st = new Map(ae.map((x) => [x.sid, { left: x.charges || 1, refill: 0, first: true }]));
+  const basic = (r && r.basic) || { cdMs: 1000, vsTarget: 0 };
+  const STEP = 50; const DL = 60000; const REPEAT = 0.5;
+  let busy = 0; let nextBasic = 0; const casts = []; const per = {}; let total = 0;
+  for (let t = 0; t < DL; t += STEP) {
+    if (t < busy) continue;
+    const we = ae.find((x) => { const s = st.get(x.sid); if (s.left <= 0 && t >= s.refill) { s.left = x.charges || 1; s.first = true; } return s.left > 0; });
+    if (we) {
+      const s = st.get(we.sid);
+      const dmg = (we.hit.vsTarget * we.perCast + (we.dot || 0)) * (s.first ? 1 : REPEAT);
+      s.first = false; s.left--; s.refill = t + we.cdMs;
+      casts.push({ t, sid: we.sid, dmg }); total += dmg;
+      const q = per[we.sid] || (per[we.sid] = { n: 0, dmg: 0 }); q.n++; q.dmg += dmg;
+      busy = t + Math.max(STEP, we.castMs || 0);
+      if (we.castMs > 0) continue;
+    }
+    if (t >= nextBasic && basic.cdMs) { total += basic.vsTarget || 0; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += basic.vsTarget || 0; nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
+  }
+  return { casts, per, total, ae };
+}
+// skills that put the target under crowd control (root / stun / slow / freeze / chill)
+const ccOf = (d) => [d.rootMs && 'ตรึง ' + d.rootMs / 1000 + ' วิ', d.stunMs && 'สตัน ' + d.stunMs / 1000 + ' วิ', d.freezeMs && 'แช่แข็ง ' + d.freezeMs / 1000 + ' วิ', d.slowPct && 'สโลว์ ' + Math.round(d.slowPct * 100) + '%', d.chill && 'หนาว'].filter(Boolean);
+function skillOrder(b, p, r) {
+  const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
+  const rot = rotationOf(r, b.hotbar);
+  const adj = dummyAdj(b, r);
+  const V = (r && r.skills) || [];
+  const rank = Object.entries(rot.per).map(([sid, q]) => {
+    const v = V.find((x) => x.sid === sid) || {};
+    return { sid, name: name(sid), casts: q.n, perCast: Math.round(q.dmg / Math.max(1, q.n) * adj), share: rot.total ? Math.round(q.dmg / rot.total * 1000) / 10 : 0,
+      cdMs: sid === 'basic' ? Math.round(((r.basic || {}).cdMs || 0)) : Math.round(v.cdMs || 0), castMs: Math.round(v.castMs || 0), charges: v.charges || 1,
+      slot: b.hotbar.indexOf(sid) + 1 };
+  }).sort((a, c) => c.share - a.share);
+  const opener = rot.casts.filter((c) => c.t < 15000).map((c) => ({ t: Math.round(c.t / 100) / 10, name: name(c.sid) }));
+  // crowd-control combo: what the "target is debuffed / under CC" bonuses are worth for this build
+  let combo = null;
+  const cc = b.hotbar.map((sid) => { let d = G.skills[sid] || {}; if (G.def) { try { d = G.def(sid, b.skills[sid] || 1, b.evo[sid] || undefined) || d; } catch { /* keep */ } } return { sid, name: name(sid), what: ccOf(d), ms: d.rootMs || d.stunMs || d.freezeMs || d.slowMs || (d.chill ? 2000 : 0), cd: d.cdMs || 0 }; }).filter((x) => x.what.length);
+  if (cc.length) {
+    let on; try { on = calc({ ...b, calc: { ...b.calc, debuffed: true } }); } catch { on = null; }
+    const base = (r.rotation || {}).dps || 0; const up = on ? (on.rotation || {}).dps || 0 : 0;
+    const gain = base ? (up / base - 1) : 0;
+    // how much of the fight the target is under CC from these skills (duration / cooldown, capped at 100%)
+    const uptime = Math.min(1, cc.reduce((t, x) => t + (x.cd ? x.ms / x.cd : 0), 0));
+    combo = { skills: cc.map((x) => ({ name: x.name, what: x.what.join(' · ') })), fullGain: Math.round(gain * 1000) / 10, uptime: Math.round(uptime * 100), realGain: Math.round(gain * uptime * 1000) / 10, opener: cc[0].name };
+  }
+  // why this hotbar order: compare with the plain "biggest hit first" order
+  let naive = null;
+  try {
+    const byHit = rank.filter((x) => x.sid !== 'basic').sort((a, c) => c.perCast - a.perCast).map((x) => x.sid);
+    if (byHit.join() !== b.hotbar.join()) {
+      const rn = calc({ ...b, hotbar: byHit });
+      const d0 = (r.rotation || {}).dps || 0; const d1 = (rn.rotation || {}).dps || 0;
+      naive = { order: byHit.map(name), gain: d1 ? Math.round((d0 / d1 - 1) * 1000) / 10 : 0 };
+    }
+  } catch { /* skip */ }
+  const filler = rank.filter((x) => x.sid !== 'basic').sort((a, c) => c.casts - a.casts)[0];
+  return { rank, opener, combo, naive, filler: filler ? filler.name : '' };
+}
+
 function describe(b, p) {
   const s = score(b, p);
   const r = s.r || {};
@@ -383,6 +448,7 @@ function describe(b, p) {
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
     problems,
     build: { skills: b.skills, evo: b.evo, traits: b.traits, c2tr: b.c2tr, hotbar: b.hotbar, c2: b.c2 },
+    order: (() => { try { return skillOrder(b, p, r); } catch (e) { return null; } })(),
   };
 }
 

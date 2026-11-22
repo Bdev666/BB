@@ -819,6 +819,30 @@ function cardBox(x) {
     out);
 }
 
+// skill order: ranking, the opening sequence as the game casts it, and the crowd-control combo
+function orderBox(o) {
+  if (!o || !o.rank) return null;
+  const sec = (ms) => (ms ? (ms / 1000).toFixed(ms % 1000 ? 1 : 0) + ' วิ' : '-');
+  return el('details', { class: 'lab-order' },
+    el('summary', {}, `⚔️ อันดับสกิลและลำดับการปล่อย · ${o.rank.filter((r) => r.sid !== 'basic').map((r) => r.name).slice(0, 3).join(' > ')}`),
+    o.combo ? el('div', { class: 'lab-crit' },
+      o.combo.fullGain > 0
+        ? el('div', {}, `🔗 คอมโบติดสถานะ: เปิดด้วย ${o.combo.opener} ก่อน แล้วค่อยปล่อยสกิลแรง · ถ้าเป้าติดสถานะตลอด ดาเมจ +${o.combo.fullGain}% · สกิลในบิลด์ทำให้ติดได้ราว ${o.combo.uptime}% ของเวลา → คาดได้จริง ~+${o.combo.realGain}%`)
+        : el('div', {}, '🔗 สกิลติดสถานะในบิลด์นี้ช่วยคุมมอน/เอาตัวรอด แต่ไม่เพิ่มดาเมจ (ไม่มีการ์ด เกียร์ หรือสกิลที่แรงขึ้นใส่เป้าติดสถานะ) จึงไม่ต้องเปิดด้วยสกิลเหล่านี้'),
+      el('div', { class: 'hint' }, o.combo.skills.map((x) => `${x.name}: ${x.what}`).join(' · '))) : null,
+    el('div', { class: 'lab-row' }, el('small', {}, [
+      o.naive ? `ลำดับช่องลัดนี้แรงกว่าเรียงตามดาเมจต่อครั้ง (${o.naive.order.join(' > ')}) ${o.naive.gain >= 0 ? '+' : ''}${o.naive.gain}%` : 'ลำดับนี้ตรงกับการเรียงตามดาเมจต่อครั้ง',
+      o.filler ? ` · ${o.filler} เป็นสกิลตีถี่ เติมช่องว่างระหว่างคูลดาวน์ของสกิลแรง` : '',
+    ].join(''))),
+    el('div', { class: 'lab-row' }, el('small', {}, 'ลำดับช่วงเปิด 15 วิแรก (เกมกดตามช่องลัด สกิลไหนพร้อมก่อนในลำดับ กดก่อน): ')),
+    el('div', { class: 'lab-timeline' }, ...o.opener.map((c) => el('span', { class: 'tl' }, el('small', {}, c.t + 's'), ' ', c.name))),
+    el('table', { class: 'lab-maps' },
+      el('tr', {}, ...['#', 'สกิล', 'ช่อง', '% ดาเมจ', 'ดาเมจ/ครั้ง', 'ครั้ง/นาที', 'คูลดาวน์', 'ร่าย', 'ชาร์จ'].map((h) => el('th', {}, h))),
+      ...o.rank.map((r, i) => el('tr', {}, el('td', {}, String(i + 1)), el('td', {}, r.name), el('td', {}, r.slot > 0 ? String(r.slot) : '-'),
+        el('td', { class: 'gold' }, r.share + '%'), el('td', {}, num(r.perCast)), el('td', {}, String(r.casts)), el('td', {}, sec(r.cdMs)), el('td', {}, sec(r.castMs)), el('td', {}, String(r.charges))))),
+    el('p', { class: 'hint' }, 'จำลองแบบเดียวกับเครื่องคิดเลขของเกม: ทุก 50 ms ถ้าไม่ได้ร่ายอยู่ กดสกิลแรกในช่องลัดที่พร้อม ไม่งั้นตีปกติ · ชาร์จที่ 2 ขึ้นไปแรง 50% · ลำดับช่องลัดที่แสดงคือแบบที่ดีที่สุดจากการลองทุกลำดับ'));
+}
+
 // which map earns the most silver per hour with this build (+ the cards picked for gold farming, if any)
 function mapBox(x) {
   const out = el('div', { class: 'lab-cards' });
@@ -858,6 +882,7 @@ function renderLab(box, r) {
       el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
+    orderBox(x.order),
     cardBox(x),
     mapBox(x),
     x.notes.length ? el('details', {}, el('summary', {}, `ข้อสังเกต ${x.notes.length} ข้อ (ส่วนที่เครื่องคิดเลขของเกมไม่ได้นับ)`), ...x.notes.map((n) => el('div', { class: 'hint' }, '· ' + n))) : null);

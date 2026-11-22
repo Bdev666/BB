@@ -369,3 +369,9 @@ h3.foldable::before { content: ''; width: 7px; height: 7px; border-right: 2px so
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
 .lab-crit { background: rgba(124,92,255,.10); border: 1px solid rgba(124,92,255,.35); border-radius: 10px; padding: 8px 10px; margin: 6px 0; font-size: 12.5px; }
 .lab-crit button { margin-left: 8px; }
+
+.lab-order { margin-top: 8px; background: rgba(255,255,255,.02); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.lab-order > summary { cursor: pointer; font-weight: 600; }
+.lab-timeline { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+.lab-timeline .tl { background: #221d45; border: 1px solid #36306a; border-radius: 8px; padding: 1px 8px; font-size: 12px; }
+.lab-timeline .tl small { color: var(--muted); }
