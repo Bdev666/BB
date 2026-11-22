@@ -1517,6 +1517,13 @@ async function walkToBossThenAuto(id, kind) {
   const type = WORLD_TYPES[kind] || '';
   if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off while walking (it would stop to fight on the way)
   let spot = null;
+  // in early (before it spawns): wait for the boss to show up, up to ~3 minutes
+  for (let i = 0; i < 60; i++) {
+    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
+    if (spot && spot.how === 'boss') break;
+    if (i === 0) log.info(`acc ${id}: world boss not in sight yet -> waiting for it`);
+    await new Promise((r) => setTimeout(r, 3000)); // eslint-disable-line no-await-in-loop
+  }
   for (let i = 0; i < 15; i++) { // up to ~30 s
     try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
     if (!spot || spot.none) { await new Promise((r) => setTimeout(r, 2000)); continue; } // eslint-disable-line no-await-in-loop
@@ -1546,10 +1553,10 @@ function onWorldBoss(v) {
     if (wl[WORLD_TYPES[v.kind]] !== sec) { wl[WORLD_TYPES[v.kind]] = sec; store.save(); }
   }
   const before = bosses.world.get(v.kind);
-  bosses.world.set(v.kind, { ...v, seenAt: Date.now() });
+  bosses.world.set(v.kind, { ...v, seenAt: Date.now(), goneFor: before && before.goneFor });
   if (before && before.state !== 'live' && v.state === 'live') {
     notify(null, 'worldBoss', `🌋 World Boss ${v.name} เริ่มแล้ว · เข้าร่วม ${v.fighters} คน${store.data.settings.worldBossAuto ? ' · ส่งทุกบัญชีไปตีแล้ว' : ''}`);
-    if (store.data.settings.worldBossAuto) worldBossGo(v.kind, 'เริ่มเอง');
+    if (store.data.settings.worldBossAuto && !(before.goneFor && Math.abs((v.startAt || 0) - before.goneFor) < 5 * 60 * 1000)) worldBossGo(v.kind, 'เริ่มเอง');
   }
   if (before && before.state === 'live' && v.state !== 'live' && store.data.settings.worldBossReturn !== false) worldBossLeave(v.kind);
   pushState();
@@ -1593,6 +1600,12 @@ function bossTick() {
     if (start && left > 0 && left <= lead && !bosses.sent.has(soon)) {
       bosses.sent.add(soon);
       notify(null, 'worldBoss', `🌋 World Boss ${w.name} จะเริ่มในอีก ~${Math.max(1, Math.round(left / 60000))} นาที`);
+    }
+    // go in 1 minute early: the trip in (back to town first, then the warp) can take a while
+    const early = `wgo:${w.kind}:${start}`;
+    if (s.worldBossAuto && start && left > 0 && left <= 75000 && !bosses.sent.has(early)) {
+      bosses.sent.add(early); w.goneFor = start;
+      worldBossGo(w.kind, 'ก่อนเกิด 1 นาที');
     }
   }
   if (bosses.sent.size > 500) bosses.sent.clear();
