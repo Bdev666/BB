@@ -477,7 +477,7 @@ function handleEvents(id, events) {
       case 'revive':
         if (g.respawnTries) selftest.count(id, 'respawnOk');
         g.respawnClicked = false; g.respawnWhy = false;
-        if (g.deadSince) { selftest.count(id, 'revives'); selftest.count(id, 'deadMs', Date.now() - g.deadSince); g.deadSince = 0; } // how long it lay dead
+        if (g.deadSince) { const ms = Date.now() - g.deadSince; selftest.count(id, 'revives'); selftest.count(id, 'deadMs', ms); log.info(`acc ${id}: up again after ${(ms / 1000).toFixed(1)} s${ev.here ? ' (the game\'s own)' : ''}`); g.deadSince = 0; } // how long it lay dead
         clearTimeout(g.deathAlertTimer);
         if (g.alerts.has('death')) setAlert(id, 'death', false);
         g.respawnTries = 0;
@@ -509,14 +509,18 @@ function handleEvents(id, events) {
         break;
       case 'pass':
       case 'mail': {
-        // once a day per account, when there is something new to collect
-        const w = g.data.rewardsWaiting();
-        const day = new Date().toDateString();
-        const [lastDay, lastCount] = (g.rewardsNotified || ':0').split(':');
-        if (w.total > 0 && (lastDay !== day || w.total > Number(lastCount))) {
-          g.rewardsNotified = `${day}:${w.total}`;
-          notify(id, 'daily', `🎁 มีของรอรับ: ${[w.pass ? `ภารกิจ Pass ${w.pass}` : null, w.mail ? `จดหมาย ${w.mail} ฉบับ` : null].filter(Boolean).join(' · ')}`);
-        }
+        // once a day per account, when there is something new to collect. At midnight several pass / mail
+        // messages come in a row (the count goes 1, 2, 3): wait 10 s and say it once with the total
+        clearTimeout(g.rewardsTimer);
+        g.rewardsTimer = setTimeout(() => {
+          const w = g.data.rewardsWaiting();
+          const day = new Date().toDateString();
+          const [lastDay, lastCount] = (g.rewardsNotified || ':0').split(':');
+          if (w.total > 0 && (lastDay !== day || w.total > Number(lastCount))) {
+            g.rewardsNotified = `${day}:${w.total}`;
+            notify(id, 'daily', `🎁 มีของรอรับ: ${[w.pass ? `ภารกิจ Pass ${w.pass}` : null, w.mail ? `จดหมาย ${w.mail} ฉบับ` : null].filter(Boolean).join(' · ')}`);
+          }
+        }, 10000);
         break;
       }
       case 'worldBoss': onWorldBoss(ev); break;
