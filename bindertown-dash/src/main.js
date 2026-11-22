@@ -1587,7 +1587,9 @@ async function finderStep(id) {
       if (!r.ok) { log.info(`acc ${id}: farm finder: ${r.error} -> skip ${c.map}`); f.i++; return; }
       if (!r.here && !(await arrive(id, g, c.map))) { log.info(`acc ${id}: farm finder: did not reach ${c.map} -> skip`); f.i++; return; }
       if (r.here) { await setFarmRange(g, 0); if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); }
-      f.phase = 'measure'; f.start = Math.floor(Date.now() / 60000) + 1; f.deaths0 = deaths; f.at = Date.now();
+      f.phase = 'measure';
+      if (f.back) { f.back = false; f.at += Date.now() - f.leftAt; return; } // back after dying in town: keep counting
+      f.start = Math.floor(Date.now() / 60000) + 1; f.deaths0 = deaths; f.at = Date.now();
       log.info(`acc ${id}: farm finder measuring ${c.map} for ${f.minutes} min`);
       return;
     }
@@ -1596,7 +1598,9 @@ async function finderStep(id) {
       const got = (farmSummary(id, 0, f.start).find((x) => x.map === c.map) || {}).minutes || 0;
       f.note = `วัดผล ${mapName(c.map)} ${got}/${f.minutes} นาที (${f.i + 1}/${f.list.length})`;
       if (deaths - f.deaths0 >= 3) { log.info(`acc ${id}: farm finder: ${deaths - f.deaths0} deaths on ${c.map} -> not safe, next`); c.unsafe = true; f.i++; f.phase = 'go'; return; }
-      if (got >= f.minutes || Date.now() - f.at > f.minutes * 2 * 60000) { f.i++; f.phase = 'go'; }
+      if (got >= f.minutes || Date.now() - f.at > f.minutes * 2 * 60000) { f.i++; f.phase = 'go'; return; }
+      // died and woke up in town (no respawn in place): go back to the map being tried
+      if (mapOf(g) !== c.map && !g.travelling && !g.alerts.has('death')) { log.info(`acc ${id}: farm finder: in ${mapOf(g)} instead of ${c.map} (died?) -> back`); f.back = true; f.leftAt = Date.now(); f.phase = 'go'; }
       return;
     }
     if (f.phase === 'pick') {
