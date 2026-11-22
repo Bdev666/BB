@@ -8,7 +8,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">BinderDash <small>ไม่เป็นทางการ · อ่านอย่างเดียว</small></div>
+    <div class="brand"><img src="../assets/logo-64.png" alt="" class="brand-logo"><div><div class="brand-name">BinderDash <span class="ver" id="app-ver"></span></div><small>Binder Town multi-account dashboard · fan-made</small></div></div>
     <div class="kpis">
       <span>ออนไลน์ <b id="k-online">0 / 0</b></span>
       <span>Silver รวม <b id="k-silver">-</b></span>
@@ -101,18 +101,36 @@
         </div>
       </section>
       <section class="panel bosses" data-fold="bosses">
-        <h3>บอส <small class="hint" id="boss-note"></small></h3>
+        <h3><span class="ttl">👑 บอส</span><span class="sum" id="boss-sum"></span><small class="hint" id="boss-note"></small></h3>
         <div id="bosses"></div>
       </section>
       <section class="panel hivalue" data-fold="hivalue">
-        <h3>💎 ของมีค่า <small class="hint" id="hv-note"></small></h3>
+        <h3><span class="ttl">💎 ของมีค่า</span><span class="sum" id="hv-sum"></span><small class="hint" id="hv-note"></small></h3>
         <div id="hivalue"></div>
       </section>
       <section class="panel bag" data-fold="bag">
-        <h3>กระเป๋า <small class="hint">กดที่ไอเทมเพื่อตั้งเตือนใกล้หมด</small></h3>
+        <h3><span class="ttl">🎒 กระเป๋า</span><span class="sum" id="bag-sum"></span><button class="ptool" id="bag-max" title="ขยายกระเป๋าเต็มคอลัมน์ / กลับปกติ">⤢</button></h3>
         <div id="bag"></div>
       </section>
     </aside>
+  </div>
+
+  <!-- update card: a new version is out -->
+  <div class="upd-veil" id="upd" hidden>
+    <div class="upd-card">
+      <div class="upd-head">
+        <img src="../assets/logo-64.png" alt="" class="upd-logo">
+        <div><div class="upd-title">มีเวอร์ชันใหม่</div><div class="upd-ver"><span id="upd-cur"></span> → <b id="upd-new"></b></div></div>
+      </div>
+      <div class="upd-notes" id="upd-notes"></div>
+      <div class="upd-bar" id="upd-bar" hidden><div id="upd-fill"></div></div>
+      <div class="upd-status" id="upd-status">อัปเดตแล้วโปรแกรมจะติดตั้งและเปิดใหม่เองในราว 1 นาที · บัญชีที่เปิดอยู่จะเปิดกลับให้</div>
+      <div class="upd-actions">
+        <button id="upd-later">ภายหลัง</button>
+        <button id="upd-notes-link" class="ghost">ดูบน GitHub</button>
+        <button id="upd-go" class="primary">อัปเดตตอนนี้</button>
+      </div>
+    </div>
   </div>
 
   <div class="modal" id="modal" hidden>

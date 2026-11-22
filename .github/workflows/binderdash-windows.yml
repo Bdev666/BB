@@ -46,6 +46,11 @@ jobs:
           else
             echo "releasing v$v"; echo "publish=always" >> "$GITHUB_OUTPUT"
           fi
+      - name: Release notes from the commit message
+        shell: bash
+        run: |
+          git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session):' | sed -e '/^$/N;/^\n$/D' > build/release-notes.md
+          cat build/release-notes.md
       - name: Build (and publish the release when new)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

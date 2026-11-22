@@ -303,6 +303,9 @@ function renderBag() {
   const items = ((detail && detail.bag) || []).slice().sort((x, y) => y.qty - x.qty);
   const key = JSON.stringify([live, canSell(), watch, items.map((it) => [it.name, it.qty, Math.round(it.usedPerHour), Math.round(it.gainedPerHour), it.minutesLeft && Math.round(it.minutesLeft), it.market])]);
   rebuild($('#bag'), key, () => (items.length ? items.map((it) => bagRow(it, watch[it.name], live)) : [el('div', { class: 'empty' }, 'ยังไม่มีข้อมูลกระเป๋า')]));
+  const w = detail && detail.stats && detail.stats.weightPct;
+  $('#bag-sum').textContent = items.length ? `${items.length} รายการ${typeof w === 'number' ? ` · หนัก ${Math.round(w)}%` : ''}` : '';
+  $('#bag-sum').className = 'sum' + (typeof w === 'number' && w >= 90 ? ' bad' : '');
 }
 
 function bagRow(it, limit, live) {
@@ -459,7 +462,11 @@ function renderBosses() {
       return { cls: f.up ? 'up' : '', icon: '♛', name: f.name, sub: info ? info.name : f.map, when: f.up ? 'เกิดแล้ว' : `อีก ${dur(f.inMs)}` };
     }),
   ];
-  $('#boss-note').textContent = rows.length ? '' : 'รอข้อมูลจากเกม (เปิดเกมอย่างน้อย 1 บัญชี)';
+  $('#boss-note').textContent = '';
+  const up = rows.filter((r) => r.cls === 'up').length;
+  $('#boss-sum').textContent = rows.length ? (up ? `เกิดแล้ว ${up}` : `${rows.length} ตัว`) : '';
+  $('#boss-sum').className = 'sum' + (up ? ' good' : '');
+  if (!rows.length) { rebuild($('#bosses'), 'none', () => [el('div', { class: 'empty' }, 'รอข้อมูลจากเกม · เปิดเกมอย่างน้อย 1 บัญชี')]); return; }
   rebuild($('#bosses'), JSON.stringify(rows), () => rows.map((r) => el('div', { class: 'boss ' + r.cls },
     el('span', { class: 'bi' }, r.icon), el('div', { class: 'bn' }, r.name, el('small', {}, r.sub)), el('b', {}, r.when))));
 }
@@ -502,14 +509,21 @@ async function openBuy() {
     cost.textContent = `ราคาประมาณ ${num(p.price * (Number(qty.value) || 0))} Silver (ราคาจริงตามดัชนีเศรษฐกิจของเซิร์ฟ) · Silver ที่มี ${num(s.silver)}`;
   };
   sel.addEventListener('change', upd); qty.addEventListener('input', upd); upd();
+  const result = el('div', { class: 'buy-result' });
   const go = el('button', { class: 'primary', onclick: async () => {
-    const r = await cmd('buy', { itemId: sel.value, qty: Number(qty.value) }, 'กำลังซื้อยา…');
-    if (r && r.ok) closeModal();
+    go.disabled = true;
+    const want = Number(qty.value) || 0;
+    result.replaceChildren(el('p', { class: 'hint' }, `กำลังซื้อ ${want} ชิ้น (ร้านขายครั้งละไม่เกิน 99 จะซื้อเป็นรอบ ๆ)…`));
+    const r = await dash.invoke('game-cmd', selected, 'buy', { itemId: sel.value, qty: want });
+    await refreshDetail();
+    if (r && r.ok) result.replaceChildren(el('p', { class: r.bought >= want ? 'ok' : 'warn' }, `✔ ได้ ${num(r.bought)} / ${num(want)} ชิ้น${r.note ? ' · ' + r.note : ''}`));
+    else result.replaceChildren(el('p', { class: 'bad' }, '✖ ' + ((r && r.error) || 'ซื้อไม่สำเร็จ')));
+    go.disabled = false; upd();
   } }, 'ซื้อ');
   const quick = el('div', { class: 'quick' }, [10, 50, 100, 300].map((n) => el('button', { class: 'tiny', onclick: () => { qty.value = n; upd(); } }, String(n))));
   openModal('🧪 ซื้อยา HP/MP', [
     el('p', { class: 'hint' }, 'ซื้อจากร้าน NPC ผ่าน HUD โดยไม่ต้องเปิดหน้าเกม (ตามกฎเกม ใช้ได้กับบัญชี Premium)'),
-    el('label', {}, 'ยา ', sel), el('label', {}, 'จำนวน ', qty, quick), cost, go,
+    el('label', {}, 'ยา ', sel), el('label', {}, 'จำนวน ', qty, quick), cost, go, result,
   ]);
 }
 
@@ -566,6 +580,7 @@ function renderHighValue() {
   const unknown = gear.filter((g) => !ip[g.id]).length;
   const pending = (detail && detail.pending) || [];
   $('#hv-note').textContent = `≥ ${short(min)} G`;
+  $('#hv-sum').textContent = rich.length ? `${rich.length} ชิ้น · ${short(rich.reduce((t, g) => t + g.p.price, 0))} G` : pending.length ? `รอขึ้นตลาด ${pending.length}` : '';
   const key = JSON.stringify([live, min, rich.map((g) => [g.id, g.p.price]), unknown, pending.map((p) => [p.itemId, p.state, Math.ceil(p.left / 60000)])]);
   rebuild($('#hivalue'), key, () => {
     const out = rich.map((g) => el('div', { class: 'item hv' },
@@ -935,6 +950,8 @@ function renderNow() {
   $('#k-silver').textContent = live.length ? num(sum('silver')) : '-';
   $('#k-silver-run').textContent = live.length ? signed(sum('silverToday')) : '-';
   const u = state.update || {};
+  renderUpdate(u);
+  if (u.current) $('#app-ver').textContent = 'v' + u.current;
   const ub = $('#update-btn');
   ub.hidden = !['available', 'downloading', 'ready'].includes(u.status);
   ub.textContent = u.status === 'downloading' ? `กำลังโหลด ${u.percent}%` : u.status === 'ready' ? 'กำลังติดตั้ง…' : `อัปเดต v${u.version}`;
@@ -974,7 +991,28 @@ function showBanner(text) {
   showBanner.t = setTimeout(() => { b.hidden = true; }, 10000);
 }
 
-$('#update-btn').addEventListener('click', () => dash.invoke('update-now'));
+$('#update-btn').addEventListener('click', () => { updSkip = ''; renderUpdate((state && state.update) || {}); });
+// ---------- update card ----------
+let updSkip = (() => { try { return localStorage.getItem('upd-skip') || ''; } catch { return ''; } })();
+function renderUpdate(u) {
+  const box = $('#upd');
+  const show = (u.status === 'available' && updSkip !== u.version) || u.status === 'downloading' || u.status === 'ready';
+  box.hidden = !show;
+  if (!show) return;
+  $('#upd-cur').textContent = 'v' + (u.current || '');
+  $('#upd-new').textContent = 'v' + (u.version || '');
+  const notes = (u.notes || '').split(/\n+/).map((x) => x.replace(/^[-*•]\s*/, '').trim()).filter((x) => x && !/^(Co-Authored-By|Claude-Session)/i.test(x) && !/^BinderDash \d/.test(x)).slice(0, 12);
+  $('#upd-notes').replaceChildren(...(notes.length ? [el('div', { class: 'upd-sub' }, 'มีอะไรใหม่'), el('ul', {}, ...notes.map((n) => el('li', {}, n)))] : [el('div', { class: 'hint' }, 'ปรับปรุงและแก้ไขข้อผิดพลาด · ดูรายละเอียดบน GitHub')]));
+  const busy = u.status === 'downloading' || u.status === 'ready';
+  $('#upd-bar').hidden = !busy;
+  $('#upd-fill').style.width = (u.status === 'ready' ? 100 : u.percent || 0) + '%';
+  $('#upd-status').textContent = u.status === 'downloading' ? `กำลังดาวน์โหลด ${u.percent || 0}%…` : u.status === 'ready' ? 'ดาวน์โหลดเสร็จ · กำลังติดตั้งและเปิดใหม่…' : 'อัปเดตแล้วโปรแกรมจะติดตั้งและเปิดใหม่เองในราว 1 นาที · บัญชีที่เปิดอยู่จะเปิดกลับให้';
+  $('#upd-go').disabled = busy; $('#upd-later').disabled = busy;
+  $('#upd-go').textContent = busy ? 'กำลังอัปเดต…' : 'อัปเดตตอนนี้';
+}
+$('#upd-go').addEventListener('click', () => dash.invoke('update-now'));
+$('#upd-later').addEventListener('click', () => { const v = state && state.update && state.update.version; updSkip = v || ''; try { localStorage.setItem('upd-skip', updSkip); } catch { /* */ } $('#upd').hidden = true; });
+$('#upd-notes-link').addEventListener('click', () => dash.invoke('open-release'));
 // send chat from the Dashboard
 function syncChatTo() { $('#chat-to').hidden = $('#chat-ch').value !== 'whisper'; }
 $('#chat-ch').addEventListener('change', syncChatTo);
@@ -1021,6 +1059,13 @@ $('#chat-panel').addEventListener('click', () => { if (document.querySelector('.
 try { setChatMin(localStorage.getItem('chatMin') === '1'); } catch { /* storage off */ }
 
 $('#lab-btn').addEventListener('click', () => openLab());
+// the bag can take the whole right column (other panels step aside) and come back
+{
+  let max = false; try { max = localStorage.getItem('bag-max') === '1'; } catch { /* */ }
+  const apply = () => { document.querySelector('.rightcol').classList.toggle('bag-max', max); $('#bag-max').textContent = max ? '⤡' : '⤢'; if (max) document.querySelector('.bag').classList.remove('folded'); };
+  $('#bag-max').addEventListener('click', (e) => { e.stopPropagation(); max = !max; try { localStorage.setItem('bag-max', max ? '1' : ''); } catch { /* */ } apply(); });
+  apply();
+}
 // right-column panels fold by clicking their title (remembered per panel)
 for (const sec of document.querySelectorAll('[data-fold]')) {
   const key = 'fold-' + sec.dataset.fold;

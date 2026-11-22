@@ -1,7 +1,7 @@
 // In-app updates from GitHub Releases (Bdev666/BB). Checks on start and every
 // 30 minutes, asks before downloading, then installs and restarts by itself with
 // the accounts that were open opened again.
-const { app, dialog, BrowserWindow } = require('electron');
+const { app } = require('electron');
 
 let autoUpdater = null;
 try { ({ autoUpdater } = require('electron-updater')); } catch { /* dev without the module */ }
@@ -9,7 +9,6 @@ try { ({ autoUpdater } = require('electron-updater')); } catch { /* dev without 
 const state = { status: 'idle', version: null, notes: '', percent: 0, error: '', checkedAt: null };
 let onChange = () => {};
 let beforeInstall = () => {};
-let busyAsking = false;
 
 const log = require('./logger');
 function set(patch) {
@@ -27,23 +26,9 @@ function notesText(info) {
   return text.replace(/<[^>]+>/g, '').trim().slice(0, 1200);
 }
 
-async function askToDownload() {
-  if (busyAsking) return;
-  busyAsking = true;
-  const parent = BrowserWindow.getAllWindows().find((w) => w.isVisible() && w.getTitle() === 'BinderDash');
-  const { response } = await dialog.showMessageBox(parent, {
-    type: 'info',
-    buttons: ['อัปเดต', 'ภายหลัง'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true,
-    title: 'มีเวอร์ชันใหม่',
-    message: `BinderDash ${state.version} พร้อมแล้ว (ตอนนี้ ${app.getVersion()})`,
-    detail: `${state.notes ? state.notes + '\n\n' : ''}กด "อัปเดต" โปรแกรมจะดาวน์โหลด ปิด ติดตั้ง แล้วเปิดใหม่เอง (ราว 1 นาที) บัญชีที่เปิดอยู่จะเปิดให้ใหม่ ตัวละครออกจากเกมแป๊บหนึ่ง\nกด "ภายหลัง" แล้วกดปุ่มทองมุมขวาบนของ Dashboard ได้ตลอด`,
-  });
-  busyAsking = false;
-  if (response === 0) download();
-}
+// a new version: the dashboard shows its own update card (version, what's new, progress)
+let onAvailable = () => {};
+function askToDownload() { onAvailable({ ...state }); }
 
 function download() {
   if (!autoUpdater || state.status === 'downloading' || state.status === 'ready') return;
@@ -65,6 +50,7 @@ function check(manual = false) {
 function init(opts) {
   onChange = opts.onChange || onChange;
   beforeInstall = opts.beforeInstall || beforeInstall;
+  onAvailable = opts.onAvailable || onAvailable;
   if (!autoUpdater) return;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;

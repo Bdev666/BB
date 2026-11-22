@@ -12,6 +12,7 @@ const icons = require('./icons');
 const { BinderTownAdapter, SNAPSHOT_JS, encodeInput, POTIONS, KNOWN_BUILDS, MARKET_FILTER, rarityOf, baseOf, pretty } = require('./game-adapter');
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
+const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const updater = require('./updater');
 const log = require('./logger');
 
@@ -171,6 +172,7 @@ function openGame(id, opts = {}) {
   g.adapter.reset();
 
   const win = new BrowserWindow({
+    icon: APP_ICON,
     width: 1280,
     height: 800,
     show: false,
@@ -526,7 +528,7 @@ function requestPrice(id, itemId, force = false) {
 
 async function gameCommand(id, cmd, arg) {
   const r = await runCommand(id, cmd, arg);
-  if (!r.ok || !['sell', 'sellEtc', 'chat', 'buy', 'salvage'].includes(cmd)) return r;
+  if (!r.ok || !['sell', 'sellEtc', 'chat', 'salvage'].includes(cmd)) return r;
   // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
   const g = rt(id);
   const sentAt = Date.now();
@@ -623,8 +625,29 @@ async function runCommand(id, cmd, arg) {
       const p = POTIONS.find((x) => x.id === arg.itemId);
       const qty = Math.max(1, Math.min(999, Math.floor(Number(arg.qty) || 0)));
       if (!p) return { ok: false, error: 'ซื้อได้เฉพาะยาจากร้าน NPC' };
-      ok = await sendInput(id, { type: 'vendorBuy', itemId: p.id, qty });
-      break;
+      // the shop takes at most 99 per purchase: buy in rounds and count what really arrived in the bag
+      const have = () => (g.adapter.inv ? g.adapter.inv.get(p.id) || 0 : 0);
+      const start = have();
+      let left = qty; let reason = '';
+      while (left > 0) {
+        const n = Math.min(99, left);
+        const before = have(); const sentAt = Date.now();
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await sendInput(id, { type: 'vendorBuy', itemId: p.id, qty: n }))) { reason = 'เกมยังไม่พร้อม'; break; }
+        let got = 0;
+        for (let i = 0; i < 25 && !got; i++) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, 120));
+          got = have() - before;
+          if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
+        }
+        if (got <= 0) { reason = reason || 'ร้านไม่ขายเพิ่ม (Silver ไม่พอ / กระเป๋าหนักเกิน / ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; break; }
+        left -= got;
+        if (got < n) { reason = 'ได้ไม่ครบรอบนี้ (Silver หรือน้ำหนักกระเป๋าไม่พอ)'; break; }
+      }
+      const bought = have() - start;
+      log.info(`acc ${id}: buy ${p.id} x${qty} -> got ${bought}${reason ? ' (' + reason + ')' : ''}`);
+      return bought > 0 ? { ok: true, bought, asked: qty, note: reason } : { ok: false, error: reason || 'ซื้อไม่สำเร็จ' };
     }
     case 'salvage': {
       // one or more gear pieces from the bag; locked ones are skipped like in the game
@@ -1174,6 +1197,7 @@ function tick() {
 function createDashboard() {
   if (dashboard && !dashboard.isDestroyed()) { dashboard.show(); dashboard.focus(); return; }
   dashboard = new BrowserWindow({
+    icon: APP_ICON,
     width: 1440,
     height: 900,
     minWidth: 900,
@@ -1209,6 +1233,7 @@ function openSettings(tab) {
     return;
   }
   settingsWin = new BrowserWindow({
+    icon: APP_ICON,
     width: 860,
     height: 680,
     minWidth: 640,
@@ -1442,6 +1467,7 @@ function registerIpc() {
   handle('open-settings', (tab) => openSettings(tab));
   handle('update-check', () => updater.check(true));
   handle('update-now', () => { const u = updater.state(); if (u.status === 'available') updater.download(); else updater.check(true); });
+  handle('open-release', () => shell.openExternal('https://github.com/Bdev666/BB/releases/latest'));
   handle('open-hidden', (id) => openGame(id, { hidden: true }));
   handle('app-info', () => ({
     name: 'BinderDash',
@@ -1500,6 +1526,7 @@ app.whenReady().then(() => {
   toOpen.forEach((id, i) => setTimeout(() => openGame(id, { hidden: !!reopen }), i * 2000)); // staggered: smoother start
   updater.init({
     onChange: () => pushState(),
+    onAvailable: () => { createDashboard(); pushState(); }, // the dashboard shows its update card
     beforeInstall: () => {
       store.data.reopenAfterUpdate = openGames().map(([id]) => id);
       store.save();

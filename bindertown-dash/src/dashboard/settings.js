@@ -112,3 +112,5 @@ dash.onState(render);
   urlNote(info.activeGameUrl);
   render(await dash.invoke('state'));
 })();
+
+const gh = document.getElementById('open-gh'); if (gh) gh.addEventListener('click', () => dash.invoke('open-release'));
