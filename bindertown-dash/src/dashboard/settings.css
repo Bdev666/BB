@@ -68,3 +68,12 @@ button.primary { background: linear-gradient(180deg, #8a6dff, #6a48f5); border-c
 @media (max-width: 640px) { .st-row { grid-template-columns: 24px 1fr; } .st-row em, .st-row small { grid-column: 2; text-align: left; } }
 
 .w60 { width: 60px; } .w70 { width: 70px; } .w100 { width: 100px; }
+
+/* 1.0: bigger text and controls */
+body { font-size: 15px; }
+button { min-height: 38px; font-size: 14.5px; }
+input, select { min-height: 36px; font-size: 14.5px; }
+.row p { font-size: 13.5px; }
+.row b { font-size: 15px; }
+.nav a { font-size: 15px; padding: 11px 14px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent, #7c6cff); outline-offset: 2px; }

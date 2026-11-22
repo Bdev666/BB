@@ -182,8 +182,20 @@ function renderProfile(a) {
   const attrs = ['str', 'agi', 'vit', 'int', 'dex', 'luk'].filter((k) => s[k] != null);
   $('#d-attrs').replaceChildren(...attrs.map((k) => el('div', { class: 'attr' }, el('span', {}, k.toUpperCase()), el('b', {}, String(s[k])))));
   const now = Date.now();
-  $('#d-buffs').replaceChildren(...(d.buffs || []).map((b) => el('div', { class: 'buff' }, b.name,
-    b.until ? el('small', {}, dur(b.until - now)) : b.stacks ? el('small', {}, '×' + b.stacks) : null)));
+  // one chip per kind of buff (the game can stack the same one several times), with an icon and what it does
+  const BUFF = { Power: ['⚔', 'พลังโจมตีเพิ่ม'], Guard: ['🛡', 'ป้องกันเพิ่ม'], Shield: ['🔰', 'โล่ดูดซับดาเมจ'], Haste: ['💨', 'เร็วขึ้น (โจมตี/เคลื่อนที่)'], Focus: ['🎯', 'สมาธิ: คริ/ความแม่นเพิ่ม'], Item: ['🧪', 'บัฟจากไอเทม'], Xpup: ['📈', 'EXP เพิ่ม'], Regen: ['💚', 'ฟื้น HP'], Mana: ['💧', 'ฟื้น SP'] };
+  const merged = new Map();
+  for (const b of d.buffs || []) {
+    const m = merged.get(b.name) || { name: b.name, n: 0, until: 0, stacks: 0 };
+    m.n++; m.until = Math.max(m.until, b.until || 0); m.stacks += b.stacks || 0; merged.set(b.name, m);
+  }
+  $('#d-buffs').replaceChildren(...[...merged.values()].map((b) => {
+    const [ic, what] = BUFF[b.name] || ['✨', 'บัฟ'];
+    const left = b.until && b.until > now ? dur(b.until - now) : '';
+    const count = b.n > 1 ? b.n : b.stacks > 1 ? b.stacks : 0;
+    return el('div', { class: 'buff', title: `${b.name}: ${what}${count ? ` · ซ้อน ${count}` : ''}${left ? ` · เหลือ ${left}` : ''}` },
+      el('span', { class: 'bi' }, ic), b.name, count ? el('b', { class: 'bn' }, '×' + count) : null, left ? el('small', {}, left) : null);
+  }));
 
   const tiles = [
     ['เวลาเล่น', dur(r.playMs), '', 'นับตั้งแต่เปิดเกมในบัญชีนี้'],
@@ -1188,21 +1200,23 @@ function renderControls(a) {
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
   const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour]);
   rebuild($('#d-controls'), key, () => (live ? [
-    el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
-    el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
-    s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
-    el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
-    a.autoRespawn ? el('span', { class: 'ctl-chip' + (a.autoRespawn.on ? ' on' : ''), title: a.autoRespawn.on ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมเปิดอยู่ · ตายตอน AUTO ในแมพฟิลด์ = ลุกที่เดิม' : 'เปิดตัวเลือกของเกมไม่ได้' }, a.autoRespawn.on ? `↺ เกิดที่เดิม: เปิด${a.autoRespawn.count ? ` (${a.autoRespawn.count} ครั้ง)` : ''}` : (a.autoRespawn.why === 'premium' ? '↺ เกิดที่เดิม: ต้อง Premium' : '↺ เกิดที่เดิม: -')) : null,
-    el('button', { class: 'ctl' + (a.bounty && a.bounty.on ? ' on' : ''), title: 'ทำค่าหัวรายวันเอง: เดินทางไปแมพของแต่ละใบ (ปุ่มเดินทางของเกม) ยืนข้างมอนแล้วเปิด AUTO ครบ 40 ตัวรับรางวัลแล้วไปใบต่อไป · ข้ามใบที่มอนเลเวลสูงกว่าตัวละคร', onclick: () => dash.invoke('bounty', a.id, !(a.bounty && a.bounty.on)) }, a.bounty && a.bounty.on ? '■ หยุดทำค่าหัว' : '📜 ทำค่าหัวอัตโนมัติ'),
-    a.deaths && a.deaths.perHour >= 5 ? el('span', { class: 'ctl-chip' + (a.deaths.feePerHour > a.deaths.silverPerHour * 0.1 ? ' warn' : ''), title: 'ตายบ่อยในแมพนี้: ทุกครั้งที่ตายเสียเวลาตี และเกิดที่เดิมในแมพฟิลด์เสีย 5,000 G ต่อครั้ง · ถ้าค่าเกิดเกิน 10% ของรายได้ ลองเพิ่ม HP/VIT หรือย้ายไปแมพที่มอนเบาลง' }, `☠ ตาย ${a.deaths.perHour}/ชม. · ค่าเกิด ~${num(a.deaths.feePerHour)} G/ชม.${a.deaths.silverPerHour ? ` (${Math.round(a.deaths.feePerHour / a.deaths.silverPerHour * 100)}% ของรายได้)` : ''}`) : null,
-    a.bounty && (a.bounty.on || a.bounty.note) ? el('span', { class: 'ctl-chip' + (a.bounty.on ? ' on' : ''), title: 'ค่าหัวรายวัน' }, `📜 ${a.bounty.note || a.bounty.phase}${a.bounty.done ? ` · รับแล้ว ${a.bounty.done}` : ''}`) : null,
-    el('button', { class: 'ctl', title: 'รับของในจดหมาย ภารกิจรายวัน/รายสัปดาห์ของ Pass และรางวัล Tier ของ Pass ที่พร้อมรับ (เหมือนกดปุ่มรับในเกม)', onclick: async (e) => { e.target.disabled = true; const r = await dash.invoke('claim-rewards', a.id); showBanner(r && r.ok ? `🎁 รับแล้ว: จดหมาย ${r.mail} · ภารกิจ ${r.daily + r.weekly} · Tier ของ Pass` : (r && r.error) || 'รับของไม่สำเร็จ'); setTimeout(() => { $('#banner').hidden = true; }, 3000); e.target.disabled = false; } }, '🎁 รับของทั้งหมด'),
-    el('button', { class: 'ctl', title: 'วิเคราะห์บิลด์ของตัวละครนี้: ดาเมจตอนนี้จากเกียร์+การ์ดที่ใส่ แล้วหาชุดสกิลและการ์ดที่แรงที่สุด', onclick: () => openLab({ id: a.id, auto: true }) }, '🧪 วิเคราะห์บิลด์'),
-    el('button', { class: 'ctl', disabled: tradableGear().length ? null : '', title: 'ลงขายอุปกรณ์ในตลาดกลาง ดูราคาตลาดตามชนิด+เกรดก่อน', onclick: () => openMarketSell() }, `🏪 ลงขายตลาดกลาง (${tradableGear().length})`),
-    el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
-    el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
+    el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '▶ การเล่น'), el('div', { class: 'ctl-row' },
+      el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
+      el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
+      s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
+      a.autoRespawn ? el('span', { class: 'ctl-chip' + (a.autoRespawn.on ? ' on' : ''), title: a.autoRespawn.on ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมเปิดอยู่ · ตายตอน AUTO ในแมพฟิลด์ = ลุกที่เดิม' : 'เปิดตัวเลือกของเกมไม่ได้' }, a.autoRespawn.on ? `↺ เกิดที่เดิม: เปิด${a.autoRespawn.count ? ` (${a.autoRespawn.count} ครั้ง)` : ''}` : (a.autoRespawn.why === 'premium' ? '↺ เกิดที่เดิม: ต้อง Premium' : '↺ เกิดที่เดิม: -')) : null,
+      el('button', { class: 'ctl' + (a.bounty && a.bounty.on ? ' on' : ''), title: 'ทำค่าหัวรายวันเอง: เดินทางไปแมพของแต่ละใบ (ปุ่มเดินทางของเกม) ยืนข้างมอนแล้วเปิด AUTO ครบ 40 ตัวรับรางวัลแล้วไปใบต่อไป · ข้ามใบที่มอนเลเวลสูงกว่าตัวละคร', onclick: () => dash.invoke('bounty', a.id, !(a.bounty && a.bounty.on)) }, a.bounty && a.bounty.on ? '■ หยุดทำค่าหัว' : '📜 ทำค่าหัวอัตโนมัติ'),
+      el('button', { class: 'ctl', title: 'รับของในจดหมาย ภารกิจรายวัน/รายสัปดาห์ของ Pass และรางวัล Tier ของ Pass ที่พร้อมรับ (เหมือนกดปุ่มรับในเกม)', onclick: async (e) => { e.target.disabled = true; const r = await dash.invoke('claim-rewards', a.id); showBanner(r && r.ok ? `🎁 รับแล้ว: จดหมาย ${r.mail} · ภารกิจ ${r.daily + r.weekly} · Tier ของ Pass` : (r && r.error) || 'รับของไม่สำเร็จ'); setTimeout(() => { $('#banner').hidden = true; }, 3000); e.target.disabled = false; } }, '🎁 รับของทั้งหมด'))),
+    el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '💰 ของและเงิน'), el('div', { class: 'ctl-row' },
+      el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
+      el('button', { class: 'ctl', disabled: tradableGear().length ? null : '', title: 'ลงขายอุปกรณ์ในตลาดกลาง ดูราคาตลาดตามชนิด+เกรดก่อน', onclick: () => openMarketSell() }, `🏪 ลงขายตลาดกลาง (${tradableGear().length})`),
+      el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
+      el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
       if (confirm(`ขายของดรอปทั้งหมด ${num(etcQty)} ชิ้นให้ NPC?`)) cmd('sellEtc', {}, 'กำลังขายของดรอป…');
-    } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`),
+    } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`))),
+    el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '🧪 บิลด์'), el('div', { class: 'ctl-row' },
+      el('button', { class: 'ctl', title: 'วิเคราะห์บิลด์ของตัวละครนี้: ดาเมจตอนนี้จากเกียร์+การ์ดที่ใส่ แล้วหาชุดสกิลและการ์ดที่แรงที่สุด', onclick: () => openLab({ id: a.id, auto: true }) }, '🧪 วิเคราะห์บิลด์'))),
+    (a.deaths && a.deaths.perHour >= 5) || (a.bounty && (a.bounty.on || a.bounty.note)) ? el('div', { class: 'ctl-status' }, a.deaths && a.deaths.perHour >= 5 ? el('span', { class: 'ctl-chip' + (a.deaths.feePerHour > a.deaths.silverPerHour * 0.1 ? ' warn' : ''), title: 'ตายบ่อยในแมพนี้: ทุกครั้งที่ตายเสียเวลาตี และเกิดที่เดิมในแมพฟิลด์เสีย 5,000 G ต่อครั้ง · ถ้าค่าเกิดเกิน 10% ของรายได้ ลองเพิ่ม HP/VIT หรือย้ายไปแมพที่มอนเบาลง' }, `☠ ตาย ${a.deaths.perHour}/ชม. · ค่าเกิด ~${num(a.deaths.feePerHour)} G/ชม.${a.deaths.silverPerHour ? ` (${Math.round(a.deaths.feePerHour / a.deaths.silverPerHour * 100)}% ของรายได้)` : ''}`) : null, a.bounty && (a.bounty.on || a.bounty.note) ? el('span', { class: 'ctl-chip' + (a.bounty.on ? ' on' : ''), title: 'ค่าหัวรายวัน' }, `📜 ${a.bounty.note || a.bounty.phase}${a.bounty.done ? ` · รับแล้ว ${a.bounty.done}` : ''}`) : null) : null,
   ] : [el('span', { class: 'hint' }, a.status === 'closed' ? 'เปิดเกมเพื่อใช้ปุ่มควบคุม' : 'ปุ่มควบคุมใช้ได้เมื่อเข้าเกมแล้ว')]));
 }
 
