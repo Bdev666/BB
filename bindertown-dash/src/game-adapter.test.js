@@ -132,6 +132,18 @@ assert.strictEqual(d5.bagRows(1)[0].usedPerHour, 0);
 d5.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 20, supply: true }], t: 5 });
 d5.ingest({ type: 'sold', item: 'โพชั่น', qty: 10, silver: 20, t: 6 });
 assert.strictEqual(d5.bagRows(1)[0].usedPerHour, 0);
+// hotbar potions: every quality grade of one potion is one stock; buying plain ones adds to it
+const d6 = new AccountData(); d6.startedAt = 1;
+const bagOf = (a, b) => ({ type: 'bag', items: [{ name: 'ไฮโพชั่น (ดี)', qty: a, supply: true, ids: [{ id: 'hi_potion~2', qty: a }] }, ...(b ? [{ name: 'ไฮโพชั่น', qty: b, supply: true, ids: [{ id: 'hi_potion', qty: b }] }] : [])] });
+d6.ingest({ ...bagOf(100), t: 2 });
+d6.ingest({ ...bagOf(40), t: 3600 * 1000 }); // 60 used in an hour
+assert.strictEqual(Math.round(d6.supplyClock('hi_potion', 3600 * 1000).minutesLeft), 40);
+d6.ingest({ ...bagOf(40, 99), t: 3600 * 1000 + 5 }); // bought 99 plain: same stock, more minutes
+assert.strictEqual(d6.supplyClock('hi_potion', 3600 * 1000 + 5).qty, 139);
+assert.strictEqual(Math.round(d6.supplyClock('hi_potion', 3600 * 1000 + 5).minutesLeft), 139);
+d6.ingest({ ...bagOf(40, 89), t: 3600 * 1000 + 6 });
+d6.ingest({ type: 'sold', id: 'hi_potion', item: 'ไฮโพชั่น', qty: 10, t: 3600 * 1000 + 7 }); // selling is not use
+assert.strictEqual(Math.round(d6.supplyClock('hi_potion', 3600 * 1000 + 7).perHour), 60);
 // buying 99 more does not hide the use: still 60/h, now 129 left -> ~129 minutes
 d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 129, supply: true }], t: 3600 * 1000 + 1 });
 assert.strictEqual(Math.round(d4.bagRows(1)[0].minutesLeft), 129);

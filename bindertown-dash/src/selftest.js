@@ -119,11 +119,13 @@ function create(deps) {
     });
 
     await step(out, 'ยาและอัตราใช้', async () => {
-      const rows = g.data.detail(Date.now()).bag.filter((r) => r.minutesLeft != null || /potion|elixir/.test(JSON.stringify(r.ids || [])));
+      const belt = (g.belt || []).filter(Boolean);
+      const rows = belt.map((b) => { const c = g.data.supplyClock(b) || { qty: 0, perHour: 0, minutesLeft: null }; return { name: b, qty: c.qty, usedPerHour: c.perHour, minutesLeft: c.minutesLeft, ids: [{ id: b }] }; });
       const ab = S().autoBuy || {};
       const c = counters.get(id) || {};
-      const txt = rows.map((r) => `${r.name} ${r.qty}${r.usedPerHour ? ` (ใช้ ~${Math.round(r.usedPerHour)}/ชม.${r.minutesLeft != null ? `, หมดใน ~${Math.round(r.minutesLeft)} นาที` : ''})` : ''}`).join(' · ') || 'ไม่มียาในกระเป๋า';
-      return { detail: `${txt} · ซื้ออัตโนมัติ${ab.on ? `เปิด ${ab.rounds}×99 เก็บ ${Number(ab.keepSilver ?? 5000).toLocaleString('en-US')} Silver` : 'ปิด'}${c.autoBuy ? ` · ซื้อเองแล้ว ${c.autoBuy} ครั้ง (${c.autoBuyQty || 0} ขวด, ไม่สำเร็จ ${c.autoBuyFail || 0})` : ''}`, data: { rows: rows.map((r) => ({ id: (r.ids && r.ids[0] && r.ids[0].id) || '', qty: r.qty, perHour: Math.round(r.usedPerHour || 0), minutesLeft: r.minutesLeft })), autoBuy: ab, counters: { n: c.autoBuy || 0, qty: c.autoBuyQty || 0, fail: c.autoBuyFail || 0 } } };
+      const txt = rows.map((r) => `${r.name} ${r.qty}${r.usedPerHour ? ` (ใช้ ~${Math.round(r.usedPerHour)}/ชม.${r.minutesLeft != null ? `, หมดใน ~${Math.round(r.minutesLeft)} นาที` : ''})` : ''}`).join(' · ') || 'อ่านช่องลัดไม่ได้';
+      const beltTxt = `ช่องลัด: ${belt.join(', ') || '(ว่าง)'} · `;
+      return { detail: `${beltTxt}${txt} · ซื้ออัตโนมัติ${ab.on ? `เปิด ${ab.rounds}×99 เก็บ ${Number(ab.keepSilver ?? 5000).toLocaleString('en-US')} Silver` : 'ปิด'}${c.autoBuy ? ` · ซื้อเองแล้ว ${c.autoBuy} ครั้ง (${c.autoBuyQty || 0} ขวด, ไม่สำเร็จ ${c.autoBuyFail || 0})` : ''}`, data: { rows: rows.map((r) => ({ id: (r.ids && r.ids[0] && r.ids[0].id) || '', qty: r.qty, perHour: Math.round(r.usedPerHour || 0), minutesLeft: r.minutesLeft })), autoBuy: ab, counters: { n: c.autoBuy || 0, qty: c.autoBuyQty || 0, fail: c.autoBuyFail || 0 }, belt } };
     });
 
     await step(out, 'Build Lab เทียบดาเมจจริง', async () => {

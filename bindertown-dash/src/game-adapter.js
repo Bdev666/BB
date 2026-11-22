@@ -151,18 +151,19 @@ function marketPrice(guide, now = Date.now()) {
 // The NPC shop's potions (from the client's vendor table, Silver, before the economy index)
 const NAMES_POT = (id) => NAMES.items[id] || id;
 const POTIONS = [
-  { id: 'potion', name: NAMES_POT('potion'), kind: 'hp', price: 12 },
-  { id: 'hi_potion', name: NAMES_POT('hi_potion'), kind: 'hp', price: 32 },
-  { id: 'mega_potion', name: NAMES_POT('mega_potion'), kind: 'hp', price: 75 },
-  { id: 'elixir', name: NAMES_POT('elixir'), kind: 'hp', price: 150 },
-  { id: 'grand_elixir', name: NAMES_POT('grand_elixir'), kind: 'hp', price: 260 },
-  { id: 'pearl_elixir', name: NAMES_POT('pearl_elixir'), kind: 'hp', price: 400 },
-  { id: 'sovereign_elixir', name: NAMES_POT('sovereign_elixir'), kind: 'hp', price: 560 },
-  { id: 'mana_potion', name: NAMES_POT('mana_potion'), kind: 'mp', price: 16 },
-  { id: 'ether', name: NAMES_POT('ether'), kind: 'mp', price: 40 },
-  { id: 'high_ether', name: NAMES_POT('high_ether'), kind: 'mp', price: 100 },
-  { id: 'pearl_ether', name: NAMES_POT('pearl_ether'), kind: 'mp', price: 150 },
-  { id: 'sovereign_ether', name: NAMES_POT('sovereign_ether'), kind: 'mp', price: 210 },
+  // lv = the level the shop starts selling it (the client's potion table)
+  { id: 'potion', name: NAMES_POT('potion'), kind: 'hp', price: 12, lv: 1 },
+  { id: 'hi_potion', name: NAMES_POT('hi_potion'), kind: 'hp', price: 32, lv: 15 },
+  { id: 'mega_potion', name: NAMES_POT('mega_potion'), kind: 'hp', price: 75, lv: 30 },
+  { id: 'elixir', name: NAMES_POT('elixir'), kind: 'hp', price: 150, lv: 45 },
+  { id: 'grand_elixir', name: NAMES_POT('grand_elixir'), kind: 'hp', price: 260, lv: 60 },
+  { id: 'pearl_elixir', name: NAMES_POT('pearl_elixir'), kind: 'hp', price: 400, lv: 80 },
+  { id: 'sovereign_elixir', name: NAMES_POT('sovereign_elixir'), kind: 'hp', price: 560, lv: 95 },
+  { id: 'mana_potion', name: NAMES_POT('mana_potion'), kind: 'mp', price: 16, lv: 1 },
+  { id: 'ether', name: NAMES_POT('ether'), kind: 'mp', price: 40, lv: 30 },
+  { id: 'high_ether', name: NAMES_POT('high_ether'), kind: 'mp', price: 100, lv: 55 },
+  { id: 'pearl_ether', name: NAMES_POT('pearl_ether'), kind: 'mp', price: 150, lv: 80 },
+  { id: 'sovereign_ether', name: NAMES_POT('sovereign_ether'), kind: 'mp', price: 210, lv: 95 },
 ];
 
 // Items that are everyday supplies, not loot worth a market check
@@ -416,7 +417,7 @@ class BinderTownAdapter {
         out.push({ type: 'sold', item: pretty(e.itemId), qty: e.qty || 1, auto: true, forged: true, t: at });
         break;
       case 'sold':
-        out.push({ type: 'sold', item: e.itemId === '*' ? 'ของหลายชิ้น' : pretty(e.itemId), qty: e.qty, silver: e.silver, t: at });
+        out.push({ type: 'sold', id: e.itemId === '*' ? '' : String(e.itemId || ''), item: e.itemId === '*' ? 'ของหลายชิ้น' : pretty(e.itemId), qty: e.qty, silver: e.silver, t: at });
         break;
       case 'marketItem': {
         // the market board's own row for this item kind + grade: "cheapest now" is what the board shows

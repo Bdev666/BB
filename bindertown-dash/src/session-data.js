@@ -26,6 +26,8 @@ const MAX_EVENTS = 300;
 const MAX_CHAT = 200;
 const HOUR = 3600 * 1000;
 
+const baseId = (id) => String(id || '').replace(/^cash:/, '').split(/[|#+^*~@]/)[0];
+
 class AccountData {
   constructor() { this.reset(); }
 
@@ -103,6 +105,7 @@ class AccountData {
         break;
       }
       case 'bag': {
+        this.ingestBase(ev.items || [], t);
         const seen = new Set();
         for (const it of ev.items || []) {
           const b = this.bagItem(it.name, t);
@@ -120,7 +123,8 @@ class AccountData {
       }
       case 'sold': {
         const b = this.bag.get(ev.item);
-        if (b) { b.sold += ev.qty || 0; b.useLog.push([t, -(ev.qty || 0)]); } // a sale is not use (it may come before or after the bag drops)
+        if (b) { b.sold += ev.qty || 0; b.useLog.push([t, -(ev.qty || 0)]); }
+        if (ev.id) { const s = this.baseItem(baseId(ev.id)); s.useLog.push([t, -(ev.qty || 0)]); } // a sale is not use (it may come before or after the bag drops)
         this.soldSilver += ev.silver || 0;
         this.log(ev.auto ? 'other' : 'loot', `${ev.forged ? 'หลอมอัตโนมัติ' : ev.auto ? 'ขายอัตโนมัติ' : 'ขาย'} ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
         break;
@@ -151,6 +155,34 @@ class AccountData {
       case 'party': this.log('other', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`, t); break;
       default: break;
     }
+  }
+
+  // per base id ("hi_potion" = hi_potion + hi_potion~1 + hi_potion~2): what the game's hotbar uses up
+  baseItem(id) {
+    this.base = this.base || new Map();
+    let s = this.base.get(id);
+    if (!s) { s = { qty: null, useLog: [] }; this.base.set(id, s); }
+    return s;
+  }
+  ingestBase(items, t) {
+    const sum = new Map();
+    for (const it of items) for (const x of it.ids || []) { const b = baseId(x.id); sum.set(b, (sum.get(b) || 0) + (x.qty || 0)); }
+    for (const [b, s] of this.base || []) if (!sum.has(b)) sum.set(b, 0);
+    for (const [b, q] of sum) {
+      const s = this.baseItem(b);
+      if (s.qty !== null && q < s.qty) s.useLog.push([t, s.qty - q]);
+      s.qty = q;
+      if (s.useLog.length > 400) { const old = s.useLog.splice(0, 200); s.useLog.unshift([old[old.length - 1][0], old.reduce((n, [, x]) => n + x, 0)]); }
+    }
+  }
+  // stock and "runs out in" for one base id at the current pace (at least 10 minutes counted)
+  supplyClock(id, now = Date.now()) {
+    const s = this.base && this.base.get(id);
+    if (!s || s.qty === null) return null;
+    const hours = (now - this.startedAt) / HOUR;
+    const used = Math.max(0, s.useLog.reduce((n, [, x]) => n + x, 0));
+    const perHour = hours > 0 ? used / Math.max(hours, 1 / 6) : 0;
+    return { qty: s.qty, perHour, minutesLeft: perHour > 0 && (hours > 0.08 || used >= 10) ? (s.qty / perHour) * 60 : null };
   }
 
   bagRows(hours) {

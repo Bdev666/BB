@@ -665,7 +665,8 @@ async function runCommand(id, cmd, arg) {
       const qty = Math.max(1, Math.min(999, Math.floor(Number(arg.qty) || 0)));
       if (!p) return { ok: false, error: 'ซื้อได้เฉพาะยาจากร้าน NPC' };
       // the shop takes at most 99 per purchase: buy in rounds and count what really arrived in the bag
-      const have = () => (g.adapter.inv ? g.adapter.inv.get(p.id) || 0 : 0);
+      // every quality grade of this potion (potion, potion~1, potion~2): what the hotbar draws from
+      const have = () => { let n = 0; if (g.adapter.inv) for (const [k, q] of g.adapter.inv) if (baseOf(k) === p.id) n += q || 0; return n; };
       const start = have();
       let left = qty; let reason = '';
       // keepSilver: never spend below this (auto-buy); the unit price is learned from the first round
@@ -1100,19 +1101,32 @@ function onFieldBosses(list) {
 
 // ---------- buy potions by themselves when they are about to run out ----------
 // rounds x 99 (the shop sells 99 at a time), at most once every 10 minutes per potion; HUD buying is Premium
-async function autoBuyPotion(id, g, row) {
+// the game's hotbar (belt): base ids per slot, kept by the game page in its local storage
+function readBelt(id, g) {
+  if (!g.win || g.win.isDestroyed() || (g.beltAt && Date.now() - g.beltAt < 60000)) return;
+  g.beltAt = Date.now();
+  g.win.webContents.executeJavaScript(`(() => { const out = []; for (const k of Object.keys(localStorage)) if (/\\.pref\\.belt$/.test(k)) { try { for (const x of JSON.parse(localStorage.getItem(k)) || []) if (x && !out.includes(x)) out.push(String(x)); } catch {} } return out; })()`, true)
+    .then((b) => { const list = (b || []).map((x) => baseOf(x)); if (String(list) !== String(g.belt || [])) log.info(`acc ${id}: hotbar ${list.join(', ') || '(empty)'}`); g.belt = list; })
+    .catch(() => {});
+}
+async function autoBuyPotion(id, g, p) {
   const ab = store.data.settings.autoBuy || {};
-  if (!ab.on || g.demo || !g.inGame) return;
-  const pid = (row.ids || []).map((x) => x.id).find((x) => POTIONS.some((p) => p.id === x));
-  if (!pid) return;
+  if (!ab.on || g.demo || !g.inGame || !p) return;
+  const pid = p.id;
+  const row = { name: p.name };
   g.autoBuyAt = g.autoBuyAt || {};
   if (g.autoBuyAt[pid] && Date.now() - g.autoBuyAt[pid] < 10 * 60 * 1000) return;
   g.autoBuyAt[pid] = Date.now();
+  const lv = Number(g.data.stats.level) || 0;
+  if (p.lv && lv && lv < p.lv) {
+    if (!g.autoBuyLvWarned) { g.autoBuyLvWarned = true; notify(id, 'potion', `🧪 ร้านยังไม่ขาย ${p.name} ที่ Lv ${lv} (ขายตั้งแต่ Lv ${p.lv}) · ยานี้ต้องคราฟต์หรือซื้อจากตลาด`); }
+    return;
+  }
   const qty = 99 * Math.max(1, Math.min(10, Number(ab.rounds) || 3));
   const r = await runCommand(id, 'buy', { itemId: pid, qty, keepSilver: Math.max(0, Number(ab.keepSilver ?? 5000)) });
   log.info(`acc ${id}: auto-buy ${pid} x${qty} -> ${r.ok ? 'got ' + r.bought : r.error}`);
   selftest.count(id, r.ok ? 'autoBuy' : 'autoBuyFail'); if (r.ok) selftest.count(id, 'autoBuyQty', r.bought);
-  if (r.ok) { setAlert(id, 'potion:' + row.name, false); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
+  if (r.ok) { setAlert(id, 'potion:' + pid, false); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
   else if (!g.autoBuyFailAt || Date.now() - g.autoBuyFailAt > 60 * 60 * 1000) { g.autoBuyFailAt = Date.now(); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`); } // at most once an hour
 }
 
@@ -1400,7 +1414,23 @@ function tick() {
   for (const [id, g] of [...openGames(), ...[...games].filter(([, x]) => x.demo)]) {
     // supplies about to run out at the current rate (potions, arrows ...)
     const low = new Set();
+    // potions: what is on the game's hotbar (belt), counted over every quality grade
+    readBelt(id, g);
+    const potionIds = new Set(POTIONS.map((p) => p.id));
+    const belt = (g.belt || []).filter((b) => potionIds.has(b));
+    const watch = belt.length ? belt : [...new Set([...(g.adapter.inv ? g.adapter.inv.keys() : [])].map(baseOf).filter((b) => potionIds.has(b)))];
+    for (const pid of watch) {
+      const c = g.data.supplyClock(pid, now);
+      const p = POTIONS.find((x) => x.id === pid);
+      const key = 'potion:' + pid;
+      if (c && c.minutesLeft != null && c.minutesLeft < s.potionMinutes) {
+        low.add(key);
+        if (!g.alerts.has(key)) setAlert(id, key, true, `${p.name}${belt.includes(pid) ? ' (ช่องลัด)' : ''} จะหมดในอีก ~${Math.max(1, Math.round(c.minutesLeft))} นาที (เหลือ ${c.qty})`);
+        autoBuyPotion(id, g, p);
+      }
+    }
     for (const row of g.data.detail(now).bag) {
+      if ((row.ids || []).some((x) => potionIds.has(baseOf(x.id)))) continue; // potions: done above
       const key = 'potion:' + row.name;
       if (row.minutesLeft != null && row.minutesLeft < s.potionMinutes) {
         low.add(key);
