@@ -101,7 +101,7 @@ function publicState() {
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: bountyStatus(g),
-        deaths: deathCost(id, g),
+        deaths: deathCost(a.id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
