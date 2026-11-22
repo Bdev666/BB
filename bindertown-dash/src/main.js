@@ -520,6 +520,7 @@ function handleEvents(id, events) {
         break;
       }
       case 'worldBoss': onWorldBoss(ev); break;
+      case 'channels': g.channels = { counts: ev.counts, lockMs: ev.lockMs, at: Date.now() }; break;
       case 'hunt': g.hunt = { day: ev.day, prog: ev.progById || {}, claimed: ev.claimedIds || [], at: Date.now() }; break;
       case 'market': {
         let askedId = ev.id;
@@ -1345,6 +1346,62 @@ function fightTimes() {
   return { fights: out, world: store.data.worldLen || {} };
 }
 
+// ---------- crowded spot: move to the quietest channel of the same map, back to the same spot, AUTO on ----------
+// Off by default. Counts other players inside the AUTO circle; N or more for M minutes while AUTO farms =
+// ask the game for the players per channel (its own channel list), switch to the quietest normal one
+// (never the PvP channel), walk back to where the character stood, AUTO on again. 10 minutes apart at least.
+const PVP_CH = 10;
+const CROWD_JS = `(() => { try { const g = window.__game; const me = g.me(); const st = g.state(); if (!me || !st) return null;
+  const on = document.querySelector('#au-farm [data-farm].on'); const R = on ? Number(on.dataset.farm) || 0 : 16;
+  let near = 0; st.players.forEach((p, id) => { if (p === me || (p.name && p.name === me.name)) return; if (R === 0 || Math.hypot(p.x - me.x, p.y - me.y) <= R) near++; });
+  const ch = parseInt(((document.getElementById('chbtn') || {}).textContent || '').replace(/[^0-9]+/g, ' ').trim(), 10) || 0;
+  return { near, R, ch, x: Math.round(me.x), y: Math.round(me.y), map: g.mapId() }; } catch (e) { return null; } })()`;
+async function crowdCheck(id, g) {
+  const s = store.data.settings;
+  if (!s.crowdSwitch || !g.inGame || g.demo || g.status !== 'online' || !g.win || g.win.isDestroyed() || g.crowdBusy) return;
+  if ((g.bounty && g.bounty.on) || g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { g.crowdSince = 0; return; }
+  if (!(await liveUi(id)).auto) { g.crowdSince = 0; return; } // only while AUTO farms
+  let c; try { c = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { c = null; }
+  if (!c || !c.ch || c.ch === PVP_CH) { g.crowdSince = 0; return; }
+  const need = Math.max(1, Number(s.crowdPlayers) || 3);
+  if (c.near < need) { g.crowdSince = 0; return; }
+  if (!g.crowdSince) { g.crowdSince = Date.now(); log.info(`acc ${id}: ${c.near} other player(s) in the AUTO circle (CH ${c.ch})`); }
+  if (Date.now() - g.crowdSince < Math.max(1, Number(s.crowdMinutes) || 2) * 60000) return;
+  if (g.crowdMovedAt && Date.now() - g.crowdMovedAt < 10 * 60000) return;
+  g.crowdBusy = true;
+  try {
+    const asked = Date.now();
+    await sendInput(id, { type: 'channelQuery' });
+    for (let i = 0; i < 20 && !(g.channels && g.channels.at >= asked); i++) await new Promise((r) => setTimeout(r, 250)); // eslint-disable-line no-await-in-loop
+    const counts = (g.channels && g.channels.at >= asked && g.channels.counts) || [];
+    if (!counts.length) { log.info(`acc ${id}: crowded, but the channel list did not come`); return; }
+    if (g.channels.lockMs > 30000) { log.info(`acc ${id}: crowded, channel change locked for ${Math.ceil(g.channels.lockMs / 1000)} s`); return; }
+    if (g.channels.lockMs > 0) await new Promise((r) => setTimeout(r, g.channels.lockMs + 600)); // the game's short lock after arriving
+    const here = counts[c.ch - 1] ?? 999;
+    let best = 0;
+    for (let ch = 1; ch <= counts.length; ch++) { if (ch === c.ch || ch === PVP_CH) continue; if (!best || (counts[ch - 1] ?? 999) < (counts[best - 1] ?? 999)) best = ch; }
+    if (!best || (counts[best - 1] ?? 999) > here - 2) { log.info(`acc ${id}: crowded, but no quieter channel (here ${here}, quietest CH ${best} ${counts[best - 1]})`); g.crowdMovedAt = Date.now(); return; }
+    g.crowdMovedAt = Date.now(); g.crowdSince = 0;
+    log.info(`acc ${id}: crowded (${c.near} in the circle, CH ${c.ch} ${here} players) -> CH ${best} (${counts[best - 1]} players), back to ${c.x},${c.y}`);
+    await sendInput(id, { type: 'switchChannel', channel: best });
+    // wait for the new channel, then walk back to the same spot and fight there again
+    let now = null;
+    for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 1000)); try { now = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { now = null; } if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
+    if (!now || now.ch !== best) { log.info(`acc ${id}: channel did not change (still CH ${now && now.ch})`); return; }
+    if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // off while walking back (it would fight on the way)
+    for (let i = 0; i < 15; i++) { // eslint-disable-line no-await-in-loop
+      let p; try { p = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { p = null; } // eslint-disable-line no-await-in-loop
+      if (!p || Math.hypot(p.x - c.x, p.y - c.y) <= 3) break;
+      await sendInput(id, { type: 'moveTo', x: c.x, y: c.y }); // eslint-disable-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+    }
+    if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+    selftest.count(id, 'crowdMoves');
+    notify(id, 'crowd', `👥 คนเยอะ (${c.near} คนในวง) · ย้าย CH ${c.ch} → CH ${best} (${counts[best - 1]} คน) กลับจุดเดิมแล้วเปิด AUTO`);
+  } catch (err) { log.warn(`acc ${id}: crowd move: ${err.message}`); } finally { g.crowdBusy = false; }
+}
+function crowdTick() { for (const [id, g] of games) crowdCheck(id, g).catch(() => {}); }
+
 // ---------- daily bounties (ค่าหัว): claim what is done, then go and hunt the next one ----------
 // Everything goes through the game's own hunt window: its list (map, monster, progress), its
 // "go to map" button and the world map's "travel" button (the game walks there by itself),
@@ -1978,7 +2035,9 @@ function registerIpc() {
     const s = store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget', 'crowdSwitch']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.crowdPlayers !== undefined) s.crowdPlayers = Math.max(1, Math.min(30, Number(patch.crowdPlayers) || 3));
+    if (patch.crowdMinutes !== undefined) s.crowdMinutes = Math.max(1, Math.min(30, Number(patch.crowdMinutes) || 2));
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
@@ -2280,6 +2339,7 @@ app.whenReady().then(() => {
   setInterval(marketWatchTick, 1000);
   setInterval(autoRespawnTick, 15000);
   setInterval(bountyTick, 20000);
+  setInterval(crowdTick, 20000);
   applyStartWithWindows();
   syncRemote();
 });

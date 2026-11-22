@@ -178,3 +178,10 @@ if (dash.platform === 'darwin') {
     try { const r = await dash.invoke('log-bundle'); o.textContent = r && r.ok ? `✓ บันทึกแล้ว (${r.kb} KB): ${r.file}` : `❌ ${(r && r.error) || 'รวม log ไม่ได้'}`; }
     catch (err) { o.textContent = '❌ ' + err.message; } finally { b.disabled = false; }
   }); }
+
+{ const cp = document.getElementById('crowdPlayers'); const cm = document.getElementById('crowdMinutes');
+  if (cp && cm) {
+    dash.invoke('state').then((st) => { cp.value = st.settings.crowdPlayers || 3; cm.value = st.settings.crowdMinutes || 2; }).catch(() => {});
+    cp.addEventListener('change', () => dash.invoke('settings', { crowdPlayers: Number(cp.value) || 3 }));
+    cm.addEventListener('change', () => dash.invoke('settings', { crowdMinutes: Number(cm.value) || 2 }));
+  } }

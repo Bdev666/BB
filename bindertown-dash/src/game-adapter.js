@@ -469,6 +469,10 @@ class BinderTownAdapter {
           out.push({ type: 'mail', t: at, gifts: gifts.length, titles: gifts.slice(0, 5).map((m) => String(m.title || '').slice(0, 60)), unread: e.list.filter((m) => !m.read).length });
         }
         break;
+      case 'channels':
+        // players per channel on this map (index = channel - 1) and the switch cooldown
+        out.push({ type: 'channels', t: at, counts: Array.isArray(e.counts) ? e.counts : [], lockMs: (e.lock && Number(e.lock.ms)) || 0 });
+        break;
       case 'hunt': {
         const b = (e.view && e.view.bounty) || {};
         out.push({ type: 'hunt', t: at, claimed: (b.claimed || []).length, active: Object.keys(b.prog || {}).length,
