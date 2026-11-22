@@ -623,8 +623,16 @@ async function openLab(opt = {}) {
   const jlv = num_(me && me.job === myJob ? Math.min(50, me.jobLevel) : 50, 1, 50);
   const c2i = (me && me.c2info) || {};
   const c2SkillPts = me && me.c2 ? Object.entries(me.skills).filter(([k]) => k.startsWith(me.c2 + '_')).reduce((t, [, v]) => t + v, 0) : 0;
-  const c2lv = num_(c2i.jobLevel || 50, 1, 50);
-  const c2pts = num_(me && me.c2 ? c2SkillPts + (c2i.points || 0) : 40, 0, 200);
+  // class 2: Job Lv 50 and all 70 points by default, so every result is compared on a full class 2
+  const c2lv = num_(50, 1, 50);
+  const c2pts = num_(70, 0, 70);
+  const c2Full = el('input', { type: 'checkbox', checked: '' });
+  const c2Real = me && me.c2 ? { lv: c2i.jobLevel || 0, pts: c2SkillPts + (c2i.points || 0) } : null;
+  const c2Sync = () => {
+    c2lv.disabled = c2pts.disabled = c2Full.checked;
+    if (c2Full.checked) { c2lv.value = '50'; c2pts.value = '70'; } else if (c2Real) { c2lv.value = String(c2Real.lv || 50); c2pts.value = String(c2Real.pts || 0); }
+  };
+  c2Full.addEventListener('change', c2Sync); c2Sync();
   const owned = (me && me.ownedCards) || [];
   const st = {}; for (const k of ['str', 'agi', 'vit', 'int', 'dex', 'luk']) st[k] = num_(me && me.stats ? me.stats[k] || 1 : 1, 0, 999);
   const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'), el('option', { value: 'farm' }, '🌾 ฟาร์มมอน (ตีหลายตัว)'));
@@ -716,7 +724,8 @@ async function openLab(opt = {}) {
       el('label', { title: 'ตัวละครที่ออนไลน์อยู่ · อ่านเลเวล สเตตัส สกิล คลาส 2 เกียร์ และการ์ดจากเกม' }, '👤 ตัวละคร ', accSel),
       me && !jobs.some((j) => j.id === me.job) ? el('small', { class: 'hint' }, `(${labPretty(me.job)} ยังไม่มีอาชีพคลาส 1 · เลือกอาชีพเพื่อจำลอง)`) : null,
       el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', {}, 'Job Lv ', jlv),
-      el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: 'แต้มคลาส 2 ทั้งหมด (ที่ใช้ไปแล้ว + ที่เหลือ) · ถ้ามีคลาส 2 อยู่แล้วจะอ่านจากตัวละคร' }, 'แต้มคลาส 2 ', c2pts),
+      el('label', { title: 'ตามเกม: Job คลาส 2 สูงสุด 50 ได้แต้มรวม 70 (ใช้ร่วมกันทั้งสองสาย)' }, c2Full, ' คลาส 2 Job เต็ม (Lv 50 · 70 แต้ม)'),
+      el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
       el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
       el('label', {}, 'โหมด ', mode), bossRow, packRow,
       me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null,
@@ -725,7 +734,7 @@ async function openLab(opt = {}) {
       me ? el('small', { class: 'hint' }, ` · มีการ์ด ${owned.length} ชนิด${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)}` : ''}`) : null),
     me ? measureBox(accId, me, () => ({ ...labParams(), job: me.job, level: me.level, jobLevel: me.jobLevel, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 } })) : null,
     el('div', { class: 'lab-row' }, go, full, el('small', { class: 'hint' }, ' ดาวการ์ด (โหมดแข่ง ถ้าไม่ใช้เฉพาะที่มี) '), fullStars, comboBtn), res,
-    el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · แต้มคลาส 2 เกมไม่ได้บอกสูตร ถ้ายังไม่มีคลาส 2 ให้ใส่เอง'),
+    el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · คลาส 2 คิดแบบ Job เต็ม (Lv 50 · 70 แต้ม ตามเกม) ถ้าอยากใช้ค่าจริงของตัวละครให้เอาติ๊กออก'),
   ].filter(Boolean));
   if (opt.auto && me) go.click();
 }

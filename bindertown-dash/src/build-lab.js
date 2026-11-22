@@ -82,7 +82,8 @@ function dummyAdj(b, r) {
 }
 
 // ---- rules (the game's own numbers) ----
-const MAX_JOB = 50;
+const MAX_JOB = 50;      // class 1 and class 2 job levels both stop at 50
+const C2_POINTS = 70;    // class 2 skill points at class 2 Job Lv 50 (shared by both paths)
 const ptsAt = (lv) => (lv <= 1 ? 0 : lv <= 40 ? 1 : lv <= 48 ? 2 : 3);
 const TRAIT_AT = 10; // line points for a class 1 / class 2 line trait
 const maxLv = (sid) => (G.skills[sid] && G.skills[sid].maxLevel) || 5;
@@ -790,7 +791,7 @@ L.run = async (p) => {
   const t0 = performance.now();
   const target = pickTarget(p.mode, p.level, p.target);
   const tmob = G.mobs && G.mobs[target];
-  const base = { ...p, target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
+  const base = { ...p, target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), c2Points: Math.max(0, Math.min(C2_POINTS, p.c2Points == null ? C2_POINTS : p.c2Points)), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
   const paths = p.paths && p.paths.length ? p.paths : ['', ...(G.c2opts[p.job] || [])];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   // fight length used to score builds (boss mode): set by the player, recorded from real fights,
