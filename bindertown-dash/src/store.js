@@ -23,8 +23,9 @@ const DEFAULTS = {
       disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
       crash: true, maintenance: true, sound: true,
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
-      fieldBoss: true, worldBoss: true, event: true, daily: true,
+      fieldBoss: true, worldBoss: true, event: true, daily: true, marketWatch: true,
     },
+    marketWatchMin: 2,        // refresh each watched market item every N minutes
     salvageByPrice: true,     // salvage only gear the central market says is worth little
     salvageMaxPrice: 1000000, // ... under this many Gold (or no price at all)
     salvageKeepVol: 3,        // ... and never what sold this many times or more in the last 7 days

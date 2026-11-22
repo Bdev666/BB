@@ -476,6 +476,7 @@ function handleEvents(id, events) {
       case 'market': {
         // prices are the same for every account on the server
         for (const [, other] of games) if (other !== g) other.data.ingest(ev);
+        marketWatchSeen(ev);
         const wait = g.valuableWait.get(ev.id);
         if (wait) {
           g.valuableWait.delete(ev.id);
@@ -1042,6 +1043,64 @@ function onFieldBosses(list) {
   pushState();
 }
 
+// ---------- real-time market watch: items followed on the central market, refreshed in the background ----------
+// One online account asks the market about one watched item every few seconds (like browsing the board).
+// A watched item is "base id + grade": gear grade comes from how many affixes the asked id carries
+// (the server counts them: 1-2 = Magic, 3 = Rare, 4 = Epic), stackables and cards are asked as they are.
+const GRADE_SUFFIX = { normal: '', magic: '|str:1:1', rare: '|str:1:1,agi:1:1,vit:1:1', epic: '|str:1:1,agi:1:1,vit:1:1,int:1:1' };
+const marketLive = new Map(); // key -> latest view
+let mwLastAsk = 0;
+const mwList = () => store.data.marketWatch || (store.data.marketWatch = []);
+const mwHist = () => store.data.marketHist || (store.data.marketHist = {});
+function marketWatchSeen(ev) {
+  const watch = mwList(); if (!watch.length) return;
+  const hit = watch.filter((w) => w.key === ev.key || w.itemId === ev.id); if (!hit.length) return;
+  const now = Date.now();
+  for (const w of hit) {
+    if (!w.key && ev.key) w.key = ev.key;
+    const k = w.key || w.itemId;
+    const prev = marketLive.get(k);
+    const view = { low: ev.price != null && ev.basis === 'listed' ? ev.price : 0, last: ev.last || 0, stock: ev.stock || 0, vol7: ev.vol7 || 0, at: now, prevLow: prev ? prev.low : null, prevLast: prev ? prev.last : null };
+    marketLive.set(k, view);
+    w.at = now;
+    const h = mwHist(); const list = h[k] || (h[k] = []);
+    const lastPt = list[list.length - 1];
+    if (!lastPt || now - lastPt[0] > 60000 || lastPt[1] !== view.low || lastPt[2] !== view.last) { list.push([now, view.low, view.last, view.stock, view.vol7]); if (list.length > 500) list.splice(0, list.length - 500); }
+    // alerts: lowest listing at or under "below", or at or over "above" (once per crossing)
+    const price = view.low || view.last;
+    if (w.below && price && price <= w.below && !w.belowSent) { w.belowSent = true; notify(null, 'marketWatch', `📉 ${w.name}: ตลาดกลาง${view.low ? 'ถูกสุด' : 'ขายล่าสุด'} ${Math.round(price).toLocaleString('en-US')} G (≤ ${Math.round(w.below).toLocaleString('en-US')})`); }
+    if (w.below && price > w.below) w.belowSent = false;
+    if (w.above && price && price >= w.above && !w.aboveSent) { w.aboveSent = true; notify(null, 'marketWatch', `📈 ${w.name}: ตลาดกลาง ${Math.round(price).toLocaleString('en-US')} G (≥ ${Math.round(w.above).toLocaleString('en-US')})`); }
+    if (w.above && price < w.above) w.aboveSent = false;
+  }
+  store.save();
+  pushState();
+}
+function marketWatchTick() {
+  const watch = mwList(); if (!watch.length) return;
+  const every = Math.max(1, Number(store.data.settings.marketWatchMin) || 2) * 60000;
+  if (Date.now() - mwLastAsk < 3000) return;
+  const acc = openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo);
+  if (!acc) return;
+  const due = watch.filter((w) => !w.at || Date.now() - w.at >= every).sort((a, b) => (a.at || 0) - (b.at || 0))[0];
+  if (!due) return;
+  mwLastAsk = Date.now();
+  if (!due.at) due.at = 0;
+  due.askedAt = Date.now();
+  requestPrice(acc[0], due.itemId, true);
+}
+function mwSearch(q) {
+  const N = require('./game-names');
+  const t = String(q || '').trim().toLowerCase(); if (t.length < 2) return [];
+  const out = [];
+  for (const [id, name] of Object.entries(N.items)) {
+    if (id.startsWith('cash') || id.startsWith('drop_')) continue;
+    if (id.toLowerCase().includes(t) || String(name).toLowerCase().includes(t)) out.push({ id, name });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
 // ---------- real boss fights: how long they take (Build Lab scores builds over that time) ----------
 const { MOBS: MOB_ROLES } = require('./mob-table');
 const WORLD_TYPES = { vale: 'wraithroot_colossus', nacreon: 'pearlheart_titan' };
@@ -1497,6 +1556,33 @@ function registerIpc() {
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
   handle('lab-predict', (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`));
   handle('fight-times', () => fightTimes());
+  handle('mw-list', () => ({ watch: mwList(), live: Object.fromEntries(marketLive), hist: mwHist(), every: store.data.settings.marketWatchMin || 2, online: !!openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo) }));
+  handle('mw-search', (q) => mwSearch(q));
+  handle('mw-add', (o) => {
+    const base = String(o.id || '').split(/[|#]/)[0]; if (!base) return { ok: false };
+    const grade = GRADE_SUFFIX[o.grade] != null ? o.grade : 'normal';
+    const itemId = base + (o.gear === false ? '' : GRADE_SUFFIX[grade]);
+    const watch = mwList();
+    if (watch.some((w) => w.itemId === itemId)) return { ok: false, error: 'ติดตามอยู่แล้ว' };
+    if (watch.length >= 40) return { ok: false, error: 'ติดตามได้สูงสุด 40 รายการ' };
+    watch.push({ itemId, base, grade, name: (o.name || base) + (grade !== 'normal' && o.gear !== false ? ` (${grade[0].toUpperCase() + grade.slice(1)})` : ''), key: '', at: 0, below: 0, above: 0 });
+    store.save(); return { ok: true };
+  });
+  handle('mw-remove', (itemId) => { const w = mwList(); const i = w.findIndex((x) => x.itemId === itemId); if (i >= 0) { const k = w[i].key; w.splice(i, 1); if (k) { delete mwHist()[k]; marketLive.delete(k); } store.save(); } return true; });
+  handle('mw-set', (itemId, patch) => { const w = mwList().find((x) => x.itemId === itemId); if (w) { if (patch.below !== undefined) { w.below = Math.max(0, Number(patch.below) || 0); w.belowSent = false; } if (patch.above !== undefined) { w.above = Math.max(0, Number(patch.above) || 0); w.aboveSent = false; } store.save(); } return true; });
+  handle('mw-every', (min) => { store.data.settings.marketWatchMin = Math.max(1, Math.min(60, Number(min) || 2)); store.save(); return true; });
+  handle('mw-now', (itemId) => { const w = mwList().find((x) => x.itemId === itemId); if (w) w.at = 0; mwLastAsk = 0; return true; });
+  // check one item now (not watched): ask through an online account and wait for the answer
+  handle('mw-check', async (o) => {
+    const acc = openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo);
+    if (!acc) return { ok: false, error: 'ต้องมีบัญชีที่ออนไลน์อยู่อย่างน้อย 1 บัญชี' };
+    const base = String(o.id || '').split(/[|#]/)[0];
+    const itemId = base + (o.gear === false ? '' : (GRADE_SUFFIX[o.grade] || ''));
+    const g = acc[1]; const t0 = Date.now();
+    await requestPrice(acc[0], itemId, true);
+    for (let i = 0; i < 30; i++) { await new Promise((r) => setTimeout(r, 150)); const p = g.data.itemPrices.get(itemId); if (p && p.at >= t0 - 1000) return { ok: true, itemId, ...p }; } // eslint-disable-line no-await-in-loop
+    return { ok: false, error: 'ตลาดไม่ตอบ' };
+  });
   handle('lab-combos', () => labCall('window.__bdLab.combos()'));
   handle('lab-full', (p) => labCall(`window.__bdLab.full(${JSON.stringify(p)})`));
   handle('lab-maps', (p) => labCall(`window.__bdLab.maps(${JSON.stringify(p)})`));
@@ -1620,6 +1706,7 @@ app.whenReady().then(() => {
   setInterval(reconnectTick, 5000);
   setInterval(marketTick, 15 * 1000);
   setInterval(fightTick, 5000);
+  setInterval(marketWatchTick, 1000);
   applyStartWithWindows();
   syncRemote();
 });
