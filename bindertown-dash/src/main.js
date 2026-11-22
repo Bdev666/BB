@@ -43,7 +43,15 @@ const selftest = require('./selftest').create({
   runCommand: (...a) => runCommand(...a), MARKET_FILTER, labMe: (id) => (labMeRef ? labMeRef(id) : null),
   labPredict: (p) => labCall(`window.__bdLab.predict(${JSON.stringify(p)})`),
   // per character: real hit / formula hit (median over skills), eased in over time
-  saveCalib: (id, c) => { const all = store.data.calib || (store.data.calib = {}); const old = all[id]; all[id] = old && old.job === c.job ? { ...c, k: +(old.k * 0.6 + c.k * 0.4).toFixed(3), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 }; store.save(); },
+  // kept apart for world bosses and everything else (the world boss takes damage differently from what the formula says)
+  saveCalib: (id, c) => {
+    const all = store.data.calib || (store.data.calib = {}); const key = `${id}:${c.kind || 'field'}`; const old = all[key];
+    if (c.k < 0.2 || c.k > 8) { log.info(`calib acc ${id} ${c.kind}: x${c.k} ignored (out of range)`); return; }
+    const ease = (a, b) => (a && b ? +(a * 0.6 + b * 0.4).toFixed(3) : b || a || null);
+    if (c.d != null && (c.d < 0.2 || c.d > 20)) c.d = null; // whole-DPS ratio: real / formula (hits per second, focus, splash included)
+    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
+    store.save();
+  },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
 });
 
@@ -1844,8 +1852,9 @@ function registerIpc() {
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(p)})`));
   handle('lab-predict', async (p) => {
     const r = await labCall(`window.__bdLab.predict(${JSON.stringify(p)})`);
-    const c = p && p.acc != null && (store.data.calib || {})[p.acc];
-    if (r && c && c.job === p.job) r.calib = { k: c.k, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.withCombos || r.dps) * c.k), dps: Math.round(r.dps * c.k) };
+    const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test((p && p.target) || '') ? 'world' : 'field';
+    const c = p && p.acc != null && (store.data.calib || {})[`${p.acc}:${kind}`];
+    if (r && c && c.job === p.job) { const m = c.d || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
     return r;
   });
   handle('fight-times', () => fightTimes());
@@ -2006,6 +2015,7 @@ app.whenReady().then(() => {
   log.init(app.getPath('userData'));
   log.info(`BinderDash ${app.getVersion()} start · Electron ${process.versions.electron} · ${process.platform} ${require('os').release()}`);
   store = new Store(app.getPath('userData'));
+  if (store.data.calib && Object.keys(store.data.calib).some((k) => !k.includes(':'))) { store.data.calib = {}; store.save(); } // 0.37 compared without crits: start over
   if (store.loadError) log.warn(`settings: ${store.loadError}${store.loadedFrom ? ' -> loaded the backup ' + path.basename(store.loadedFrom) : ' -> started with defaults'}`);
   gameUrl = store.data.settings.gameUrl || DEFAULT_GAME_URL;
   registerIpc();

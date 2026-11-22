@@ -23,7 +23,7 @@ function create(deps) {
   }
 
   // the Build Lab's own query for the character as it is (same as the "this character" button)
-  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target, guild: me.guildLevel || 0,
+  const predictFor = (me, target) => deps.labPredict({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50,
     loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } });
 
   // ---------- real combat, per skill, kept with the build and the simulator's answer ----------
@@ -66,16 +66,21 @@ function create(deps) {
             const pred = p.withCombos || p.dps;
             rec.ratio = pred ? +(rec.realDps / pred).toFixed(3) : null;
             // one hit, real against the formula, per skill (non-crit hits; 20+ hits): which skills are off and by how much
+            // one hit, real against the formula, per skill (20+ hits). Compared with the formula's EXPECTED hit,
+            // crits included: magic hits always carry the crit multiplier in this game but never show as a crit
             rec.hitCheck = {};
             for (const h of p.perHit || []) {
-              const real = rec.skills[h.sid]; const sim = h.hit && h.hit.vsTarget;
-              if (!real || !sim || real.hits < 20 || !real.avgNonCrit) continue;
-              rec.hitCheck[h.sid] = { real: real.avgNonCrit, sim: Math.round(sim), x: +(real.avgNonCrit / sim).toFixed(3) };
+              const real = rec.skills[h.sid]; const hit = h.hit;
+              if (!real || !hit || !hit.vsTarget || real.hits < 20 || !real.avg) continue;
+              const cc = Math.min(1, Math.max(0, hit.critChance || 0)); const cm = hit.critMult || 1;
+              const expect = hit.vsTarget * (1 + cc * (cm - 1));
+              rec.hitCheck[h.sid] = { real: real.avg, sim: Math.round(expect), x: +(real.avg / expect).toFixed(3), realCrit: real.critRate, simCrit: +cc.toFixed(3) };
             }
             const xs = Object.values(rec.hitCheck).map((v) => v.x).sort((a, b2) => a - b2);
+            rec.targetKind = /^(wraithroot_colossus|pearlheart_titan)$/.test(rec.mainMob || '') ? 'world' : 'field';
             if (xs.length >= 3) {
               rec.calib = +xs[Math.floor(xs.length / 2)].toFixed(3);
-              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, n: xs.length, job: me.job, c2: me.c2, at: Date.now() });
+              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));
@@ -206,7 +211,9 @@ function create(deps) {
       if (lc && lc.sim) {
         const ratio = lc.ratio;
         const bc = lc.basicCheck;
-        return { warn: ratio != null && Math.abs(ratio - 1) > 0.15, detail: `ตีจริง ${lc.mainMob}: ${lc.realDps.toLocaleString('en-US')} DPS (ช่วงที่ตีอยู่ ${lc.activeSec} วิ, ${lc.hits} ครั้ง) · Simulator คาด ${(lc.sim.withCombos || lc.sim.dps).toLocaleString('en-US')} · จริง/คาด ${ratio != null ? Math.round(ratio * 100) + '%' : '-'}${bc ? ` · ตีปกติต่อครั้ง จริง ${bc.realAvgNonCrit} / คาด ${bc.simPerHit} · ครั้ง/วิ จริง ${bc.realPerSec} / คาด ${bc.simPerSec}` : ''}`, data: { job: me.job, level: me.level, predicted: lc.sim.withCombos || lc.sim.dps, measured: lc.realDps, ratio, mob: lc.mainMob } };
+        const hc = Object.entries(lc.hitCheck || {}).sort((a, b2) => Math.abs(b2[1].x - 1) - Math.abs(a[1].x - 1));
+        const hitTxt = lc.calib ? ` · ดาเมจต่อฮิตจริง/สูตร ×${lc.calib} (${hc.length} สกิล${hc.length ? `, ต่างสุด ${hc[0][0]} ×${hc[0][1].x}` : ''})` : '';
+        return { warn: lc.calib != null ? Math.abs(lc.calib - 1) > 0.25 : (ratio != null && Math.abs(ratio - 1) > 0.15), detail: `ตีจริง ${lc.mainMob}${hitTxt} · ${lc.realDps.toLocaleString('en-US')} DPS (ช่วงที่ตีอยู่ ${lc.activeSec} วิ, ${lc.hits} ครั้ง) · Simulator คาด ${(lc.sim.withCombos || lc.sim.dps).toLocaleString('en-US')} · จริง/คาด ${ratio != null ? Math.round(ratio * 100) + '%' : '-'}${bc ? ` · ตีปกติต่อครั้ง จริง ${bc.realAvgNonCrit} / คาด ${bc.simPerHit} · ครั้ง/วิ จริง ${bc.realPerSec} / คาด ${bc.simPerSec}` : ''}`, data: { job: me.job, level: me.level, predicted: lc.sim.withCombos || lc.sim.dps, measured: lc.realDps, ratio, hitRatio: lc.calib, mob: lc.mainMob, kind: lc.targetKind, hitCheck: lc.hitCheck } };
       }
       const p = await predictFor(me, 'training_dummy');
       const pred = p && (p.withCombos || p.dps);
@@ -249,7 +256,8 @@ function create(deps) {
     if (d && d.data && !d.data.knownBuild) out.push(`เกมเวอร์ชันใหม่ (${d.data.build}): ควรตรวจว่าทุกระบบยังอ่านข้อมูลถูก`);
     if (d && !d.ok) out.push('ถอดข้อความจากเกมมีปัญหา: ต้องอัปเดตตัวอ่านข้อมูล');
     const b = by['Build Lab เทียบดาเมจจริง'];
-    if (b && b.data && b.data.ratio != null && Math.abs(b.data.ratio - 1) > 0.15) out.push(`DPS ที่คาดต่างจากจริง ${Math.round((b.data.ratio - 1) * 100)}%: ควรปรับสูตรของอาชีพ ${b.data.job}`);
+    if (b && b.data && b.data.hitRatio != null && Math.abs(b.data.hitRatio - 1) > 0.25) out.push(`ดาเมจต่อฮิตจริงต่างจากสูตร ×${b.data.hitRatio} (${b.data.kind === 'world' ? 'บอสโลก' : 'มอนทั่วไป'}): Build Lab แท็บ "สด" ปรับให้ตามจริงแล้ว · ส่ง log ให้ผู้พัฒนาเพื่อแก้สูตรของ ${b.data.job}`);
+    else if (b && b.data && b.data.hitRatio == null && b.data.ratio != null && Math.abs(b.data.ratio - 1) > 0.15) out.push(`DPS ที่คาดต่างจากจริง ${Math.round((b.data.ratio - 1) * 100)}%: ควรปรับสูตรของอาชีพ ${b.data.job}`);
     const y = by['ยาและอัตราใช้'];
     if (y && y.data && y.data.counters.fail) out.push(`ซื้อยาอัตโนมัติไม่สำเร็จ ${y.data.counters.fail} ครั้ง: ดูเหตุผลใน log`);
     const r = by['เกิดที่เดิม'];
