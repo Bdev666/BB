@@ -123,6 +123,9 @@ d4.ingest({ type: 'market', item: 'โพชั่น', price: 7, t: 3 });
 const pot = d4.bagRows(1)[0];
 assert.strictEqual(Math.round(pot.minutesLeft), 30);
 assert.strictEqual(pot.market, 7);
+// buying 99 more does not hide the use: still 60/h, now 129 left -> ~129 minutes
+d4.ingest({ type: 'bag', items: [{ name: 'โพชั่น', qty: 129, supply: true }], t: 3600 * 1000 + 1 });
+assert.strictEqual(Math.round(d4.bagRows(1)[0].minutesLeft), 129);
 assert.deepStrictEqual(det.net, { ping: 70, online: 7211 });
 assert.strictEqual(d.kills, 1);
 // level ETA from EXP % growth: 10% -> 20% in 1h, at 20% => 8h left
@@ -158,8 +161,11 @@ d3.startedAt = 1;
 d3.ingest({ type: 'self', silver: 100, t: 1 });
 d3.ingest({ type: 'loot', item: 'X', qty: 3, value: 12, t: 2 });
 d3.ingest({ type: 'card', mob: 'Sprout', level: 2, t: 3 });
-d3.ingest({ type: 'self', silver: 160, t: 3600 * 1000 + 1 });
+d3.ingest({ type: 'kill', target: 'Sprout', exp: 1, silver: 60, t: 4 });
+d3.ingest({ type: 'self', silver: 20, t: 3600 * 1000 + 1 }); // spent on potions: income stays what the kills paid
 const r3 = d3.rates(3600 * 1000 + 1);
+assert.strictEqual(r3.silverToday, 60, 'silver from kills only');
+assert.strictEqual(r3.silverNet, -80, 'net change still known');
 assert.strictEqual(Math.round(r3.dropValuePerHour), 12);
 assert.strictEqual(r3.cards, 1);
 assert.strictEqual(Math.round(r3.incomePerHour), 72, '60 silver + 12 drop value in an hour');
@@ -236,6 +242,16 @@ assert.strictEqual(ev[1].price, 300);
 {
   const ml = new BinderTownAdapter().incoming(frame('server', { type: 'market', mine: [7], listings: [{ id: 7, itemId: 'robe#a', qty: 1, price: 5 }, { id: 8, itemId: 'x', qty: 1, price: 1 }] })).find((e) => e.type === 'myListings');
   assert.deepStrictEqual(ml.list, [{ id: 7, itemId: 'robe#a', qty: 1, price: 5 }], 'own listings picked out of the board');
+}
+
+{
+  // the game lists locks by the item's "#uuid" part: a locked piece must show as locked
+  const a = new BinderTownAdapter();
+  const ev2 = a.incoming(frame('server', { type: 'inv', items: [{ id: 'cat_ears#abc', qty: 1 }, { id: 'beanie#def', qty: 1 }], locks: ['#abc'], bound: ['#def'] }));
+  const bag = ev2.find((e) => e.type === 'bag');
+  const ids = bag.items.flatMap((i) => i.ids);
+  assert.deepStrictEqual(ids.map((x) => [x.id, x.locked, x.bound]), [['cat_ears#abc', true, false], ['beanie#def', false, true]], 'locks/bound by #uuid');
+  assert.ok(a.locks.has('cat_ears#abc') && !a.locks.has('beanie#def'));
 }
 
 console.log('game-adapter tests passed');

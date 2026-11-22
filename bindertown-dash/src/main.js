@@ -441,7 +441,7 @@ function handleEvents(id, events) {
         backupRespawn(id);
         break;
       case 'revive':
-        setAlert(id, 'death', false);
+        setAlert(id, 'death', false); g.respawnTries = 0;
         if (ev.here) { g.autoRespawns = (g.autoRespawns || 0) + 1; log.info(`acc ${id}: respawned in place by the game's Auto Respawn (-${ev.fee} G)`); }
         break;
       case 'chat':
@@ -481,12 +481,24 @@ function handleEvents(id, events) {
       }
       case 'worldBoss': onWorldBoss(ev); break;
       case 'market': {
+        let askedId = ev.id;
+        if (ev.fromBoard && g.priceAsks && g.priceAsks.length) {
+          // answers come back in the order asked: tie this answer to the bag piece that was asked
+          const i = g.priceAsks.findIndex((a) => a.id === ev.id);
+          const ask = i >= 0 ? g.priceAsks.splice(i, 1)[0] : g.priceAsks.shift();
+          if (ask && ask.id !== ev.id && Date.now() - ask.at < 8000) {
+            askedId = ask.id;
+            const copy = { ...ev, id: ask.id };
+            for (const [, o] of games) o.data.ingest(copy);
+          }
+        }
         // prices are the same for every account on the server
         for (const [, other] of games) if (other !== g) other.data.ingest(ev);
         marketWatchSeen(ev);
-        const wait = g.valuableWait.get(ev.id);
+        const wKey = g.valuableWait.has(ev.id) ? ev.id : askedId;
+        const wait = g.valuableWait.get(wKey);
         if (wait) {
-          g.valuableWait.delete(ev.id);
+          g.valuableWait.delete(wKey);
           // the central market's price for this kind + grade (cheapest listing now, like the board),
           // never NPC prices; only from the threshold up (default 1,000,000 Gold)
           const G = (n) => Math.round(n).toLocaleString('en-US');
@@ -532,6 +544,8 @@ function requestPrice(id, itemId, force = false) {
   const last = priceAsked.get(itemId) || 0;
   if (!force && Date.now() - last < 10 * 60 * 1000) return Promise.resolve(true);
   priceAsked.set(itemId, Date.now());
+  // remember what was asked: the board may answer with its own id for the kind + grade (not the bag piece's id)
+  const g = rt(id); g.priceAsks = (g.priceAsks || []).filter((a) => Date.now() - a.at < 8000); g.priceAsks.push({ id: itemId, at: Date.now() });
   // the market board's item view (kind + grade): what the game's market window asks for
   return sendInput(id, { ...MARKET_FILTER, type: 'marketItem', itemId, loff: 0 });
 }
@@ -569,7 +583,8 @@ async function runCommand(id, cmd, arg) {
     }
     case 'respawn':
       // prefer the "here / in place" button, then any respawn button on the death screen
-      ok = await js(`(() => { const bs = [...document.querySelectorAll('#deathoverlay button')].filter((b) => !b.disabled); const b = bs.find((x) => /ที่เดิม|ตรงนี้|ที่นี่|here/i.test(x.textContent)) || bs[0]; if (!b) return false; b.click(); return true; })()`);
+      // the game's death screen: #drespawnhere = up on the spot (Gold fee), the other button = back to town
+      ok = await js(`(() => { const o = document.getElementById('deathoverlay'); if (!o || getComputedStyle(o).display === 'none') return false; const h = document.getElementById('drespawnhere'); if (h && !h.disabled) { h.click(); return true; } if (${arg.hereOnly ? 'true' : 'false'}) return false; const bs = [...o.querySelectorAll('button')].filter((b) => !b.disabled && b.id !== 'drespawnhere'); if (!bs[0]) return false; bs[0].click(); return true; })()`);
       break;
     case 'sell': {
       const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
@@ -858,12 +873,12 @@ function salvageable(g, rarities, opt) {
 // salvage only what the central market says is worth little: no price, or under the limit, and not a steady seller
 function salvageOpts(o) {
   const s = store.data.settings;
-  return { byPrice: o && o.byPrice != null ? !!o.byPrice : s.salvageByPrice !== false, maxPrice: Number((o && o.maxPrice) ?? s.salvageMaxPrice ?? 1000000), keepVol: Number((o && o.keepVol) ?? s.salvageKeepVol ?? 3) };
+  return { byPrice: o && o.byPrice != null ? !!o.byPrice : s.salvageByPrice !== false, maxPrice: Number((o && o.maxPrice) ?? s.salvageMaxPrice ?? 1000000), keepVol: Number((o && o.keepVol) ?? s.salvageKeepVol ?? 3), unknownOk: o && o.unknownOk != null ? !!o.unknownOk : !!s.salvageUnknownOk };
 }
 function salvageVerdict(g, id, opt) {
   if (g.adapter.bound.has(id)) return { salvage: true, why: 'ผูกตัว ขายในตลาดไม่ได้' };
   const p = g.data.itemPrices.get(id);
-  if (!p) return { salvage: false, why: 'ยังไม่รู้ราคาตลาด (เก็บไว้ก่อน)' };
+  if (!p) return opt.unknownOk ? { salvage: true, why: 'ตลาดไม่ตอบราคา (ตั้งให้ถือว่าไม่มีราคา)' } : { salvage: false, why: 'ตลาดไม่ตอบราคา (เก็บไว้ก่อน)' };
   if (p.vol7 >= opt.keepVol && opt.keepVol > 0) return { salvage: false, why: `ขายออกบ่อย ${p.vol7} ชิ้นใน 7 วัน`, price: p.price, vol7: p.vol7 };
   if (p.price && p.price >= opt.maxPrice) return { salvage: false, why: `ราคาตลาด ${Math.round(p.price).toLocaleString()} G`, price: p.price, vol7: p.vol7 };
   return { salvage: true, why: p.price ? `ราคาต่ำ ${Math.round(p.price).toLocaleString()} G` : 'ไม่มีราคาในตลาด', price: p.price || 0, vol7: p.vol7 || 0 };
@@ -872,8 +887,15 @@ function salvageVerdict(g, id, opt) {
 async function priceGear(id, ids) {
   const g = rt(id);
   const todo = ids.filter((x) => !g.adapter.bound.has(x) && (!g.data.itemPrices.has(x) || Date.now() - g.data.itemPrices.get(x).at > 30 * 60 * 1000));
-  for (const x of todo) { await requestPrice(id, x, true); await new Promise((r) => setTimeout(r, 350)); } // eslint-disable-line no-await-in-loop
-  if (todo.length) await new Promise((r) => setTimeout(r, 1500));
+  // ask, wait, and ask again for the pieces the market did not answer (it can skip quick repeated asks)
+  const t0 = Date.now();
+  let missing = todo;
+  for (let round = 0; round < 3 && missing.length; round++) {
+    for (const x of missing) { await requestPrice(id, x, true); await new Promise((r) => setTimeout(r, round ? 800 : 450)); } // eslint-disable-line no-await-in-loop
+    await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
+    missing = missing.filter((x) => !g.data.itemPrices.has(x) || g.data.itemPrices.get(x).at < t0 - 1000);
+  }
+  if (missing.length) log.info(`acc ${id}: market gave no price for ${missing.length} piece(s) after 3 tries`);
   return todo.length;
 }
 
@@ -1053,6 +1075,23 @@ function onFieldBosses(list) {
   pushState();
 }
 
+// ---------- buy potions by themselves when they are about to run out ----------
+// rounds x 99 (the shop sells 99 at a time), at most once every 10 minutes per potion; HUD buying is Premium
+async function autoBuyPotion(id, g, row) {
+  const ab = store.data.settings.autoBuy || {};
+  if (!ab.on || g.demo || !g.inGame) return;
+  const pid = (row.ids || []).map((x) => x.id).find((x) => POTIONS.some((p) => p.id === x));
+  if (!pid) return;
+  g.autoBuyAt = g.autoBuyAt || {};
+  if (g.autoBuyAt[pid] && Date.now() - g.autoBuyAt[pid] < 10 * 60 * 1000) return;
+  g.autoBuyAt[pid] = Date.now();
+  const qty = 99 * Math.max(1, Math.min(10, Number(ab.rounds) || 3));
+  const r = await runCommand(id, 'buy', { itemId: pid, qty });
+  log.info(`acc ${id}: auto-buy ${pid} x${qty} -> ${r.ok ? 'got ' + r.bought : r.error}`);
+  if (r.ok) { setAlert(id, 'potion:' + row.name, false); notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
+  else notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`);
+}
+
 // ---------- respawn in place when dead while hidden (Premium) ----------
 // The game has its own "Auto Respawn" option (AUTO settings, Premium): dying in a field map with AUTO on
 // = up again on the spot for a Gold fee. BinderDash ticks that option for every account (through the
@@ -1073,23 +1112,33 @@ async function ensureAutoRespawn(id) {
   if (!r.ok && r.why === 'premium' && !g.autoRespawnWarned) { g.autoRespawnWarned = true; log.info(`acc ${id}: Auto Respawn needs Premium`); }
   if (before !== r.on) pushState();
 }
-function backupRespawn(id) {
+function backupRespawn(id, delay = 4000) {
   if (store.data.settings.autoRespawnHere === false) return;
-  const g = games.get(id); if (!g || g.demo) return;
+  const g = games.get(id); if (!g || g.demo || g.respawnPending) return;
+  g.respawnPending = true;
   setTimeout(async () => {
-    if (!g.win || g.win.isDestroyed() || g.win.isVisible()) return; // only when the game window is hidden
+    g.respawnPending = false;
+    if (!g.win || g.win.isDestroyed()) return;
     if (!(await liveDead(id))) return; // the game's own Auto Respawn already got it up
-    const r = await gameCommand(id, 'respawn', {});
-    log.info(`acc ${id}: hidden and still dead after 4 s -> pressed respawn (${r.ok ? 'ok' : r.error})`);
-  }, 4000);
+    const r = await gameCommand(id, 'respawn', { hereOnly: true });
+    log.info(`acc ${id}: still dead after ${delay / 1000} s -> pressed respawn here (${r.ok ? 'ok' : r.error})`);
+    g.respawnTries = (g.respawnTries || 0) + 1;
+    if (g.respawnTries < 4) backupRespawn(id, 3000); // check again: the button can be busy for 2 s
+    else g.respawnTries = 0;
+  }, delay);
 }
 async function liveDead(id) {
   const g = games.get(id);
-  try { return await g.win.webContents.executeJavaScript(`(() => { try { const m = window.__game && window.__game.me(); return !!(m && (m.state === 'dead' || m.hp <= 0)) || !!(document.getElementById('deathoverlay') && document.getElementById('deathoverlay').offsetParent); } catch { return false; } })()`, true); } catch { return false; }
+  try { return await g.win.webContents.executeJavaScript(`(() => { try { const o = document.getElementById('deathoverlay'); if (o && getComputedStyle(o).display !== 'none') return true; const m = window.__game && window.__game.me(); return !!(m && (m.state === 'dead' || m.hp <= 0)); } catch { return false; } })()`, true); } catch { return false; }
 }
 function autoRespawnTick() {
   if (store.data.settings.autoRespawnHere === false) return;
-  for (const [id, g] of games) if (g.inGame && !g.demo) ensureAutoRespawn(id);
+  for (const [id, g] of games) {
+    if (!g.inGame || g.demo) continue;
+    ensureAutoRespawn(id);
+    // a death the event stream missed: look at the screen too
+    liveDead(id).then((dead) => { if (dead) backupRespawn(id, 1000); else g.respawnTries = 0; });
+  }
 }
 
 // ---------- real-time market watch: items followed on the central market, refreshed in the background ----------
@@ -1325,12 +1374,17 @@ function tick() {
   const now = Date.now();
   for (const [id, g] of [...openGames(), ...[...games].filter(([, x]) => x.demo)]) {
     // supplies about to run out at the current rate (potions, arrows ...)
+    const low = new Set();
     for (const row of g.data.detail(now).bag) {
       const key = 'potion:' + row.name;
       if (row.minutesLeft != null && row.minutesLeft < s.potionMinutes) {
+        low.add(key);
         if (!g.alerts.has(key)) setAlert(id, key, true, `${row.name} จะหมดในอีก ~${Math.max(1, Math.round(row.minutesLeft))} นาที (เหลือ ${row.qty})`);
+        autoBuyPotion(id, g, row);
       } else if (g.alerts.has(key)) setAlert(id, key, false);
     }
+    // an alert for a supply that is no longer in the bag (or renamed) must not stay forever
+    for (const key of [...g.alerts]) if (key.startsWith('potion:') && !low.has(key)) setAlert(id, key, false);
     // Premium running out
     const until = g.data.premiumUntil;
     const left = until ? until - now : 0;
@@ -1523,9 +1577,11 @@ function registerIpc() {
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
     for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)) };
     if (patch.autoRespawnHere !== undefined) s.autoRespawnHere = !!patch.autoRespawnHere;
     if (patch.salvageByPrice !== undefined) s.salvageByPrice = !!patch.salvageByPrice;
     if (patch.salvageMaxPrice !== undefined) s.salvageMaxPrice = Math.max(0, Number(patch.salvageMaxPrice) || 0);
+    if (patch.salvageUnknownOk !== undefined) s.salvageUnknownOk = !!patch.salvageUnknownOk;
     if (patch.salvageKeepVol !== undefined) s.salvageKeepVol = Math.max(0, Number(patch.salvageKeepVol) || 0);
     if (patch.highValueGold !== undefined) s.highValueGold = Math.max(0, Number(patch.highValueGold) || 0);
     if (patch.valuableMinGold !== undefined) s.valuableMinGold = Math.max(0, Number(patch.valuableMinGold) || 0);
@@ -1608,6 +1664,24 @@ function registerIpc() {
   handle('fight-times', () => fightTimes());
   handle('mw-list', () => ({ watch: mwList(), live: Object.fromEntries(marketLive), hist: mwHist(), every: store.data.settings.marketWatchMin || 2, online: !!openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo) }));
   handle('mw-search', (q) => mwSearch(q));
+  // which accounts hold each watched item (same kind + grade), not locked or bound: those can be listed for sale
+  handle('mw-holders', () => {
+    const out = {};
+    for (const w of mwList()) {
+      const want = w.key || (w.base + (GRADE_SUFFIX[w.grade] != null && w.itemId.includes('|') ? '|' + w.grade : ''));
+      const list = [];
+      for (const [id, g] of openGames()) {
+        if (!g.inGame || g.demo || !g.adapter.inv) continue;
+        for (const [itemId, qty] of g.adapter.inv) {
+          if (!qty || g.adapter.locks.has(itemId) || g.adapter.bound.has(itemId)) continue;
+          const key = itemId.includes('#') ? `${baseOf(itemId)}|${rarityOf(itemId)}` : baseOf(itemId);
+          if (key === want || (!itemId.includes('#') && baseOf(itemId) === w.base && !w.itemId.includes('|'))) list.push({ acc: id, name: g.data.stats.name || (account(id) || {}).name, itemId, qty });
+        }
+      }
+      out[w.itemId] = list;
+    }
+    return out;
+  });
   handle('mw-add', (o) => {
     const base = String(o.id || '').split(/[|#]/)[0]; if (!base) return { ok: false };
     const grade = GRADE_SUFFIX[o.grade] != null ? o.grade : 'normal';

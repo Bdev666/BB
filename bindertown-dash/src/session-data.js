@@ -43,6 +43,7 @@ class AccountData {
     this.startedAt = Date.now();
     this.kills = 0;
     this.silverStart = null;
+    this.killSilver = 0; // Silver from killing monsters only (spending never counts against it)
     this.dmgWindow = [];      // [{ t, dmg }] last 60s of damage dealt
     this.dmgTotal = 0;
     this.hits = 0;
@@ -62,6 +63,7 @@ class AccountData {
 
   ingest(ev) {
     const t = ev.t || Date.now();
+    if (!this.lastT || t > this.lastT) this.lastT = t;
     switch (ev.type) {
       case 'self': {
         const { type, t: _t, ...rest } = ev;
@@ -90,6 +92,7 @@ class AccountData {
       case 'hurt': this.log('hurt', `โดน ${ev.from} ${fmt(ev.dmg)}`, t); break;
       case 'kill':
         this.kills++;
+        this.killSilver += Number(ev.silver) || 0;
         this.log('exp', `ล้ม ${ev.target}${ev.exp ? ` +${fmt(ev.exp)} EXP` : ''}${ev.job != null ? ` · +${fmt(ev.job)} Job` : ''}${ev.silver ? ` · +${fmt(ev.silver)} Silver` : ''}`, t);
         break;
       case 'loot': {
@@ -104,18 +107,20 @@ class AccountData {
         for (const it of ev.items || []) {
           const b = this.bagItem(it.name, t);
           if (b.firstQty === null) b.firstQty = Math.max(0, it.qty - b.gained); // loot already counted
+          else if (it.qty < b.qty) b.useLog.push([t, b.qty - it.qty]); // used up (sales are taken back out below)
           b.qty = it.qty;
           if (it.ids) b.ids = it.ids;
           b.supply = !!it.supply;
           if (it.icon) b.icon = it.icon;
           seen.add(it.name);
         }
-        for (const [name, b] of this.bag) if (!seen.has(name)) { b.qty = 0; b.ids = []; } // all gone (used up / sold)
+        for (const [name, b] of this.bag) if (!seen.has(name)) { if (b.qty > 0) b.useLog.push([t, b.qty]); b.qty = 0; b.ids = []; } // all gone (used up / sold)
+        for (const b of this.bag.values()) if (b.useLog.length > 400) { const old = b.useLog.splice(0, 200); b.useLog.unshift([old[old.length - 1][0], old.reduce((n, [, q]) => n + q, 0)]); }
         break;
       }
       case 'sold': {
         const b = this.bag.get(ev.item);
-        if (b) b.sold += ev.qty || 0;
+        if (b) { b.sold += ev.qty || 0; if (b.useLog.length) b.useLog.push([t, -(ev.qty || 0)]); }
         this.soldSilver += ev.silver || 0;
         this.log(ev.auto ? 'other' : 'loot', `${ev.forged ? 'หลอมอัตโนมัติ' : ev.auto ? 'ขายอัตโนมัติ' : 'ขาย'} ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
         break;
@@ -150,7 +155,9 @@ class AccountData {
 
   bagRows(hours) {
     return [...this.bag.entries()].filter(([, b]) => b.qty > 0).map(([name, b]) => {
-      const usedPerHour = b.firstQty !== null ? Math.max(0, (b.firstQty + b.gained - b.qty - b.sold) / hours) : 0;
+      // use rate from how much LEFT the stack: buying or picking up more never hides use
+      const used = b.useLog.reduce((t, [, n]) => t + n, 0);
+      const usedPerHour = hours > 0 ? Math.max(0, used / hours) : 0;
       const p = this.prices.get(name);
       return {
         name, qty: b.qty, icon: b.icon, ids: b.ids, gainedPerHour: b.gained / hours, usedPerHour,
@@ -164,7 +171,7 @@ class AccountData {
 
   bagItem(name, t) {
     let b = this.bag.get(name);
-    if (!b) { b = { qty: 0, firstQty: null, firstAt: t, gained: 0, sold: 0, ids: [], watchBelow: null }; this.bag.set(name, b); }
+    if (!b) { b = { qty: 0, firstQty: null, firstAt: t, gained: 0, sold: 0, ids: [], watchBelow: null, useLog: [] }; this.bag.set(name, b); }
     return b;
   }
 
@@ -177,15 +184,17 @@ class AccountData {
       ...this.levelEta(),
       expPerHour: this.expTracker.perHour(),
       killsPerHour: this.kills / hours,
-      silverPerHour: typeof silver === 'number' && this.silverStart !== null ? (silver - this.silverStart) / hours : null,
-      silverToday: typeof silver === 'number' && this.silverStart !== null ? silver - this.silverStart : null,
+      // earned from monsters only, like the game's sleep-mode summary (buying potions etc. never makes it negative)
+      silverPerHour: this.killSilver / hours,
+      silverToday: this.killSilver,
+      silverNet: typeof silver === 'number' && this.silverStart !== null ? silver - this.silverStart : null,
       dpsNow: this.dmgWindow.reduce((s, d) => s + d.dmg, 0) / 60,
       dropValue: this.dropValue,
       dropValuePerHour: this.dropValue / hours,
       cards: this.cards.length,
       cardsPerHour: this.cards.length / hours,
       // everything earned: silver from kills + what the drops sell for
-      incomePerHour: (typeof silver === 'number' && this.silverStart !== null ? (silver - this.silverStart) / hours : 0) + this.dropValue / hours,
+      incomePerHour: this.killSilver / hours + this.dropValue / hours,
       avgHit: this.hits ? this.dmgTotal / this.hits : null,
     };
   }

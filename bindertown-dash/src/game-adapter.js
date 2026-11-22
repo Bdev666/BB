@@ -183,6 +183,11 @@ function rarityOf(id) {
 }
 const RARITY_LABEL = { normal: 'Normal', magic: 'Magic', rare: 'Rare', epic: 'Epic' };
 // what the market's item view asks for (the game sends its board filter along)
+// The game keeps item locks (and bound items) by the item's "#uuid" part, not the whole id:
+// a set that answers for either form, so a locked piece is never offered for salvage or sale.
+class ItemKeySet extends Set {
+  has(k) { if (super.has(k)) return true; const s = String(k || ''); const i = s.indexOf('#'); return i >= 0 && super.has(s.slice(i)); }
+}
 const MARKET_FILTER = { q: '', field: 'all', rarity: '', cat: 'all', sub: 'all', lvMin: 0, lvMax: 0, affix: '', tierMin: 0, lines: 0, mark: '', refMin: 0, qual: 0, job: '', hand: '', codexNew: 0 };
 
 // Server payload -> list of plain events (mirrors the client's onServer)
@@ -273,8 +278,8 @@ class BinderTownAdapter {
     this.inv = null;             // Map itemId -> qty
     this.pings = new Map();      // t -> sentAt
     this.mobLevels = new Map();  // mobType -> level seen on the map
-    this.locks = new Set();      // item ids the player locked in the game
-    this.bound = new Set();      // item ids bound to the character (no market)
+    this.locks = new ItemKeySet();      // item ids the player locked in the game
+    this.bound = new ItemKeySet();      // item ids bound to the character (no market)
     this.loadout = { equip: {}, album: {}, refineStacks: {} }; // worn gear + cards, for the Build Lab
     this.build = '';             // the game's build (from pong)
     this.econIndex = 1;           // server economy index (NPC prices follow it)
@@ -420,7 +425,7 @@ class BinderTownAdapter {
         const gear = String(v.itemId).includes('|') || String(v.itemId).includes('#');
         const price = v.low > 0 ? v.low : v.vol7 > 0 && v.last > 0 ? v.last : null;
         out.push({
-          type: 'market', id: v.itemId, key: v.key || '', t: at,
+          type: 'market', id: v.itemId, key: v.key || '', fromBoard: true, t: at,
           item: gear ? `${pretty(v.itemId)} (${RARITY_LABEL[rarityOf(v.itemId)]})` : pretty(v.itemId),
           bagName: pretty(v.itemId),
           price, basis: v.low > 0 ? 'listed' : price ? 'sales' : null, last: v.last || 0, vol7: v.vol7 || 0, stock: v.stock || 0,
@@ -547,8 +552,8 @@ class BinderTownAdapter {
 
   inventory(e, at, out) {
     const items = Array.isArray(e.items) ? e.items : [];
-    if (Array.isArray(e.locks)) this.locks = new Set(e.locks);
-    if (Array.isArray(e.bound)) this.bound = new Set(e.bound); // bound to the character: can't be traded
+    if (Array.isArray(e.locks)) this.locks = new ItemKeySet(e.locks);
+    if (Array.isArray(e.bound)) this.bound = new ItemKeySet(e.bound); // bound to the character: can't be traded
     if (e.equip && typeof e.equip === 'object') this.loadout.equip = { ...e.equip };
     if (e.album && typeof e.album === 'object') this.loadout.album = { ...e.album };
     if (e.refineStacks && typeof e.refineStacks === 'object') this.loadout.refineStacks = { ...e.refineStacks };

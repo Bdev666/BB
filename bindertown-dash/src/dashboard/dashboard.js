@@ -540,13 +540,15 @@ function salvageOptsUi(onChange) {
   const by = el('input', { type: 'checkbox', checked: st.salvageByPrice !== false ? '' : null });
   const max = el('input', { type: 'number', min: '0', step: '100000', value: String(st.salvageMaxPrice ?? 1000000), style: 'width:110px' });
   const vol = el('input', { type: 'number', min: '0', max: '999', value: String(st.salvageKeepVol ?? 3), style: 'width:56px' });
-  const save = () => { dash.invoke('settings', { salvageByPrice: by.checked, salvageMaxPrice: +max.value || 0, salvageKeepVol: +vol.value || 0 }); if (onChange) onChange(); };
-  for (const x of [by, max, vol]) x.addEventListener('change', save);
-  return { get: () => ({ byPrice: by.checked, maxPrice: +max.value || 0, keepVol: +vol.value || 0 }),
+  const unk = el('input', { type: 'checkbox', checked: st.salvageUnknownOk ? '' : null });
+  const save = () => { dash.invoke('settings', { salvageByPrice: by.checked, salvageMaxPrice: +max.value || 0, salvageKeepVol: +vol.value || 0, salvageUnknownOk: unk.checked }); if (onChange) onChange(); };
+  for (const x of [by, max, vol, unk]) x.addEventListener('change', save);
+  return { get: () => ({ byPrice: by.checked, maxPrice: +max.value || 0, keepVol: +vol.value || 0, unknownOk: unk.checked }),
     node: el('div', { class: 'salv-opts' },
       el('label', {}, by, ' ย่อยเฉพาะของที่ไม่มีราคา หรือราคาตลาดกลางต่ำกว่า ', max, ' G'),
       el('label', {}, 'และไม่ย่อยของที่ขายออกบ่อย: ขายจริงใน 7 วัน ≥ ', vol, ' ชิ้น'),
-      el('small', { class: 'hint' }, 'ของที่ยังไม่รู้ราคาจะเก็บไว้ (โปรแกรมถามราคาตลาดให้ก่อนทุกครั้ง) · ของผูกตัวขายไม่ได้ ย่อยได้ตามปกติ')) };
+      el('label', {}, unk, ' ของที่ตลาดไม่ตอบราคา (ถามแล้ว 3 รอบ) ให้ถือว่าไม่มีราคา → ย่อยได้'),
+      el('small', { class: 'hint' }, 'โปรแกรมถามราคาตลาดให้ทุกชิ้นก่อนเสมอ · ของที่ล็อกในเกมไม่แสดงและไม่ถูกย่อย · ของผูกตัวขายไม่ได้ ย่อยได้ตามปกติ')) };
 }
 function gearList() {
   return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked).map((x) => ({ ...x, name: b.name, market: b.market })));
@@ -568,9 +570,8 @@ async function openSalvage() {
   const judge = (g) => {
     const o = ui.get(); const v = verdicts && verdicts[g.id];
     if (!o.byPrice) return { salvage: true, why: v && v.price ? `ตลาด ~${short(v.price)} G` : '' };
-    if (!v) return { salvage: false, why: 'ยังไม่รู้ราคาตลาด (เก็บไว้ก่อน)' };
-    if (/ผูกตัว/.test(v.why || '')) return { salvage: true, why: v.why };
-    if (v.price == null && /ยังไม่รู้/.test(v.why || '')) return { salvage: false, why: v.why };
+    if (/ผูกตัว/.test((v && v.why) || '')) return { salvage: true, why: v.why };
+    if (!v || (v.price == null && /ไม่ตอบราคา/.test(v.why || ''))) return o.unknownOk ? { salvage: true, why: 'ตลาดไม่ตอบราคา → ถือว่าไม่มีราคา' } : { salvage: false, why: 'ตลาดไม่ตอบราคา (เก็บไว้ก่อน)' };
     if (o.keepVol > 0 && (v.vol7 || 0) >= o.keepVol) return { salvage: false, why: `ขายออกบ่อย ${v.vol7} ชิ้นใน 7 วัน` };
     if (v.price && v.price >= o.maxPrice) return { salvage: false, why: `ราคาตลาด ${short(v.price)} G` };
     return { salvage: true, why: v.price ? `ราคาต่ำ ${short(v.price)} G` : 'ไม่มีราคาในตลาด' };
@@ -1294,6 +1295,26 @@ function spark(points) {
   pl.setAttribute('points', pts); pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', up ? '#3ccf91' : '#ff6b81'); pl.setAttribute('stroke-width', '1.8');
   svg.append(pl); return svg;
 }
+// list a watched item for sale from whichever account holds it (one piece / one stack per press)
+function sellCell(w, v, list) {
+  if (!list.length) return el('span', { class: 'hint' }, '-');
+  const total = list.reduce((t, x) => t + x.qty, 0);
+  const pick = list[0];
+  const suggest = v && v.low ? Math.max(1, v.low - 1) : v && v.last ? v.last : 0;
+  const price = el('input', { type: 'number', min: '1', value: suggest ? String(suggest) : '', placeholder: 'ราคา/ชิ้น', style: 'width:96px' });
+  const qty = el('input', { type: 'number', min: '1', max: String(pick.qty), value: String(pick.qty), style: 'width:56px', title: 'จำนวน (ของซ้อนได้)' });
+  const res = el('small', {});
+  const go = el('button', { class: 'tiny', onclick: async () => {
+    const unit = Math.floor(+price.value || 0); const n = Math.max(1, Math.min(pick.qty, Math.floor(+qty.value || 1)));
+    if (unit < 1) { res.textContent = ' ใส่ราคาก่อน'; return; }
+    if (!confirm(`ลงขาย ${w.name} x${n} ราคา ${num(unit)} G/ชิ้น (รวม ${num(unit * n)} G) จาก ${pick.name}?\nภาษีตลาดตามกฎเกม · ตลาดใช้ราว 5 นาทีกว่าประกาศจะขึ้น`)) return;
+    go.disabled = true; res.textContent = ' กำลังลงขาย…';
+    const r = await dash.invoke('game-cmd', pick.acc, 'marketList', { itemId: pick.itemId, qty: n, unitPrice: unit });
+    res.textContent = r && r.ok ? ' ✔ ส่งลงขายแล้ว (ขึ้นตลาดใน ~5 นาที)' : ` ✖ ${(r && r.error) || 'ไม่สำเร็จ'}`;
+    go.disabled = false;
+  } }, 'ขาย');
+  return el('div', { class: 'mw-sell' }, el('div', { class: 'hint' }, `${num(total)} ชิ้น · ${[...new Set(list.map((x) => x.name))].join(', ')}`), price, pick.itemId.includes('#') ? null : qty, go, res);
+}
 async function openMarketWatch() {
   const q = el('input', { type: 'text', placeholder: 'ค้นชื่อไอเทม (ไทย/อังกฤษ) เช่น ไฮโพชั่น, robe_t10, sky_sentinel', style: 'width:440px;max-width:60vw' });
   const grade = el('select', {}, ...[['normal', 'Normal'], ['magic', 'Magic'], ['rare', 'Rare'], ['epic', 'Epic'], ['stack', 'ของซ้อนได้ / การ์ด']].map(([v, l]) => el('option', { value: v }, l)));
@@ -1321,13 +1342,14 @@ async function openMarketWatch() {
   const fromBag = bagGear.length ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, 'จากกระเป๋า: '), ...bagGear.map((g) => el('button', { class: 'tiny', onclick: async () => { const r = await dash.invoke('mw-add', { id: g.id, name: g.name, grade: g.rarity || 'normal', gear: true }); if (r && !r.ok && r.error) showBanner(r.error); load(); } }, `${g.name} (${(RARITIES.find((x) => x[0] === (g.rarity || 'normal')) || RARITIES[0])[1]})`))) : null;
   const load = async () => {
     const d = await dash.invoke('mw-list');
+    let holders = {}; try { holders = await dash.invoke('mw-holders'); } catch { /* none */ }
     if (document.activeElement !== every) every.value = String(d.every);
     status.textContent = d.online ? `อัปเดตทุก ${d.every} นาที ทีละรายการ ผ่านบัญชีที่ออนไลน์` : '⚠ ไม่มีบัญชีออนไลน์ ราคาจะไม่อัปเดตจนกว่าจะเปิดเกมอย่างน้อย 1 บัญชี';
     if (!d.watch.length) { table.replaceChildren(el('p', { class: 'hint' }, 'ยังไม่ได้ติดตามอะไร · ค้นชื่อไอเทมด้านบนแล้วกด "+ ติดตาม"')); return; }
     const active = document.activeElement && document.activeElement.closest && document.activeElement.closest('.mw-table');
     if (active) return; // don't rebuild while typing a price
     table.replaceChildren(el('table', { class: 'lab-maps mw-table' },
-      el('tr', {}, ...['ไอเทม', 'ถูกสุดตอนนี้', 'เปลี่ยน', 'ขายล่าสุด', 'วางขาย', 'ขาย 7 วัน', 'กราฟ', 'เตือนเมื่อ ≤', 'เตือนเมื่อ ≥', 'อัปเดต', ''].map((h) => el('th', {}, h))),
+      el('tr', {}, ...['ไอเทม', 'ถูกสุดตอนนี้', 'เปลี่ยน', 'ขายล่าสุด', 'วางขาย', 'ขาย 7 วัน', 'กราฟ', 'เตือนเมื่อ ≤', 'เตือนเมื่อ ≥', 'ในกระเป๋า', 'อัปเดต', ''].map((h) => el('th', {}, h))),
       ...d.watch.map((w) => {
         const k = w.key || w.itemId; const v = d.live[k]; const h = d.hist[k] || [];
         const prev = h.length > 1 ? h[h.length - 2] : null;
@@ -1344,6 +1366,7 @@ async function openMarketWatch() {
           el('td', { class: ch == null ? '' : ch > 0 ? 'pos' : ch < 0 ? 'neg' : '' }, ch == null ? '-' : `${ch > 0 ? '▲' : ch < 0 ? '▼' : '='} ${Math.abs(ch).toFixed(1)}%`),
           el('td', {}, v ? G(v.last) : '…'), el('td', {}, v ? num(v.stock) : '…'), el('td', {}, v ? num(v.vol7) : '…'),
           el('td', {}, spark(h.slice(-60))), el('td', {}, below), el('td', {}, above),
+          el('td', {}, sellCell(w, v, holders[w.itemId] || [])),
           el('td', { class: 'hint' }, ago == null ? 'รอ' : ago < 60 ? `${ago} วิ` : `${Math.round(ago / 60)} นาที`),
           el('td', {}, el('button', { class: 'tiny', title: 'อัปเดตตอนนี้', onclick: () => { dash.invoke('mw-now', w.itemId); } }, '⟳'), el('button', { class: 'tiny', title: 'เลิกติดตาม', onclick: async () => { await dash.invoke('mw-remove', w.itemId); load(); } }, '✕')));
       })));
