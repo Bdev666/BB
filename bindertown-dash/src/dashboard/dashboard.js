@@ -848,6 +848,19 @@ function cardBox(x) {
     out);
 }
 
+// every stat the game computes for this build, and which stat adds the most damage
+function statBox(sh, w) {
+  if (!sh) return null;
+  const chip = (label, v, unit = '') => (v == null ? null : el('span', { class: 'chip' }, `${label} ${typeof v === 'number' ? (Number.isInteger(v) ? num(v) : v) : v}${unit}`));
+  return el('details', { class: 'lab-order' },
+    el('summary', {}, `📈 ค่าสเตตัส และค่าที่คุ้มที่สุด${w && w.length && w[0].gain != null ? ` · ${w[0].label} = DPS +${w[0].gain}%` : ''}`),
+    el('div', { class: 'lab-row' }, ...[chip('ATK', sh.atk), chip('MATK', sh.matk), chip('Spell Amp', sh.spellAmp, '%'), chip('ลดคูลดาวน์', sh.cdr, '%'), chip('ร่ายเร็ว', sh.castSpd, '%'),
+      chip('คริ', sh.crit, '%'), chip('ดาเมจคริ', sh.critDmg, '%'), chip('ความเร็วโจมตี', sh.aspd), chip('เจาะเกราะ', sh.armorPen, '%'), chip('HIT', sh.hit), chip('HP', sh.maxHp)].filter(Boolean)),
+    w && w.length ? el('table', { class: 'lab-maps' }, el('tr', {}, el('th', {}, 'ถ้าเพิ่ม'), el('th', {}, 'DPS'), el('th', {}, '')),
+      ...w.map((x) => el('tr', {}, el('td', {}, x.label), el('td', { class: 'gold' }, x.gain == null ? '-' : (x.gain > 0 ? '+' : '') + x.gain + '%'), el('td', { class: 'hint' }, x.note || '')))) : null,
+    el('p', { class: 'hint' }, 'ค่าจากเครื่องคิดเลขของเกม (รวมเกียร์ การ์ด ตีบวก และสกิลพาสซีฟ) · ตาราง = ใส่ค่านั้นเพิ่มเข้าไปจริงแล้วคำนวณใหม่ทั้งบิลด์ (รวมคอมโบ) · สเตตัสหลัก +10 แต้ม · ค่า % ตามที่เขียน'));
+}
+
 // combo conditions counted in the score: target under status, Hunter's Mark, Chill -> Shatter
 function comboBox(parts) {
   if (!parts || !parts.length) return null;
@@ -857,6 +870,10 @@ function comboBox(parts) {
       : `🧊 เป้าติดสถานะ ${c.up}% ของเวลา (จาก ${c.skills.join(', ')}) · ยังไม่มีเกียร์/การ์ด/สกิลที่แรงขึ้นใส่เป้าติดสถานะ (เช่น affix "ดาเมจใส่เป้าติดดีบัฟ", การ์ด Bramble Pact)`;
     if (c.k === 'mark') return `🎯 Hunter's Mark ค้างได้ ${c.stacks}/${c.cap} สแตก${c.apex ? ' · Apex ทั้งปาร์ตี้ +30%' : ''} → ดาเมจ +${c.gain}%`;
     if (c.k === 'shatter') return c.boss ? `❄️ Chill → Shatter: บอส/มินิบอสไม่แข็ง จึงไม่มี Shatter (ได้แค่สโลว์จาก ${c.skills.join(', ')})` : `❄️ Chill → Shatter ~${c.perMin} ครั้ง/นาที ต่อมอน 1 ตัว (จาก ${c.skills.join(', ')}) → ดาเมจ +${c.gain}% (ไม่นับระเบิดรอบตัว 30%)`;
+    if (c.k === 'res') {
+      const bits = [c.stacks != null ? `ค้าง ${c.stacks}/${c.cap}` : '', c.perMin != null ? `${c.perMin} ครั้ง/นาที` : '', c.up != null ? `ติด ${c.up}% ของเวลา` : '', c.spend ? 'มีสกิลใช้สแตก' : ''].filter(Boolean).join(' · ');
+      return `⚡ ${c.name}${bits ? ' ' + bits : ''} → ดาเมจ +${c.gain}%`;
+    }
     return c.name;
   };
   return el('div', { class: 'lab-crit' }, el('b', {}, '🔗 คอมโบที่นับในคะแนน'), ...parts.map((c) => el('div', {}, line(c))));
@@ -924,6 +941,7 @@ function renderLab(box, r) {
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
     comboBox(x.combos),
+    statBox(x.sheet, x.weights),
     orderBox(x.order),
     cardBox(x),
     mapBox(x),

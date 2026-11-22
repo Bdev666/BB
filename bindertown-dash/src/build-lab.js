@@ -67,10 +67,10 @@ function detect(mod) {
 // real basic levels (the lab window is ours alone, so the table is set for the call and put back).
 function calc(b) {
   const bas = b && b.basics;
-  if (!bas || !G.jobs.novice) return G.calc(b);
+  if (!bas || !G.jobs.novice) return G.calc(b, (b && b.__opts) || {});
   const saved = [];
   for (const sid of G.jobs.novice.skills) { const d = G.skills[sid]; if (!d) continue; saved.push([d, d.maxLevel]); d.maxLevel = bas[sid] || 0; }
-  try { return G.calc(b); } finally { for (const [d, m] of saved) d.maxLevel = m; }
+  try { return G.calc(b, (b && b.__opts) || {}); } finally { for (const [d, m] of saved) d.maxLevel = m; }
 }
 
 // training dummies: the server does not give the level-gap bonus on them (measured: Lv 13 vs the Lv 1
@@ -241,6 +241,76 @@ function comboOf(b, p, r) {
       mult *= m;
       parts.push({ k: 'shatter', name: 'Chill → Shatter', perMin: Math.round(freezes * 60), skills: chillers, gain: Math.round((m - 1) * 1000) / 10 });
     }
+  }
+  // 4) class 2 path resources and class 1 mechanics (numbers from the game's own guide text)
+  const dps0 = rot.total / secs; if (!dps0) return { mult, parts };
+  const dummy = String((b.calc || {}).target || '').startsWith('training_dummy');
+  const basicRate = rate('basic');
+  const hitRate = rot.ae.reduce((t, x) => t + rate(x.sid) * Math.max(1, x.perCast || 1), 0) + basicRate;
+  const castAll = rot.ae.reduce((t, x) => t + rate(x.sid), 0);
+  const pBase = ((r.basic || {}).avg || 0) * (r.factorTotal || 1) * dummyAdj(b, r); // a 100% hit, no armor, no crit
+  const sh = r.sheet || {};
+  const basicShare = rot.total ? ((rot.per.basic || {}).dmg || 0) / rot.total : 0;
+  const critEdge = (dc) => { const c = Math.min(1, sh.crit || 0); const cd = sh.critDmg || 1.5; return dc * (cd - 1) / (1 + c * (cd - 1)); }; // per +1.0 crit chance
+  const c2d = b.c2 && G.c2defs[b.c2]; const res = c2d && c2d.res;
+  const c2sk = rot.ae.filter((x) => { const c = (G.skills[x.sid] || {}).c2; return c && c.path === b.c2; });
+  const fmt = (x) => Math.round(x * 1000) / 10;
+  const steady = (gainPerSec, ms, max) => Math.min(max, gainPerSec * ms / 1000 >= 1 ? max : gainPerSec * ms / 1000);
+  if (res && res.on === 'self' && (res.dmg || res.crit || res.aspd)) {
+    // stacks on yourself: Null Charge from every hit; Focus / Souls from class 2 skills (1 per cast unless the skill says more)
+    const gain = res.name === 'Null Charge' ? hitRate : c2sk.reduce((t, x) => t + rate(x.sid) * (((G.skills[x.sid] || {}).c2 || {}).gain || 1), 0);
+    const spenders = c2sk.filter((x) => ((G.skills[x.sid] || {}).c2 || {}).spend);
+    const spendRate = spenders.reduce((t, x) => t + rate(x.sid), 0);
+    let avg;
+    if (spendRate > 0 && gain > 0) { const T = 1 / spendRate; const fill = res.max / gain; avg = fill < T ? (res.max * (T - fill) + res.max / 2 * fill) / T : gain * T / 2; }
+    else avg = gain > 0 ? steady(gain, res.keepMs || 12000, res.max) : 0;
+    if (res.loseHalfOnHit && !dummy) avg *= 0.6; // hit by the target now and then
+    let m = 1 + avg * (res.dmg || 0);
+    if (res.crit) m *= 1 + critEdge(avg * res.crit) * 0.5; // crit helps the hits that can crit (about half of them)
+    if (res.aspd) m *= 1 + basicShare * avg * res.aspd;
+    mult *= m;
+    parts.push({ k: 'res', name: res.name, stacks: Math.round(avg * 10) / 10, cap: res.max, gain: fmt(m - 1), spend: spenders.length > 0 });
+  }
+  if (b.c2 === 'venomblade' && res && res.dot) {
+    const gain = basicRate + c2sk.reduce((t, x) => t + rate(x.sid) * (((G.skills[x.sid] || {}).c2 || {}).st || 1), 0);
+    const st = steady(gain, res.ms || 8000, res.max);
+    const add = st * res.dot * pBase;
+    mult *= 1 + add / dps0;
+    parts.push({ k: 'res', name: 'Poison', stacks: Math.round(st * 10) / 10, cap: res.max, gain: fmt(add / dps0) });
+  }
+  if (b.c2 === 'inquisitor' && res && res.vuln) {
+    const gain = c2sk.reduce((t, x) => t + rate(x.sid) * (((G.skills[x.sid] || {}).c2 || {}).st || 1), 0);
+    const st = steady(gain, res.ms || 10000, res.max);
+    let m = 1 + st * res.vuln; if (st >= res.max && res.fullDot) m += res.fullDot * pBase / dps0;
+    mult *= m;
+    parts.push({ k: 'res', name: 'Sin', stacks: Math.round(st * 10) / 10, cap: res.max, gain: fmt(m - 1) });
+  }
+  if ((b.c2 === 'stormcaller' || b.c2 === 'scribe') && res && res.pop) {
+    const gain = c2sk.reduce((t, x) => t + rate(x.sid) * (((G.skills[x.sid] || {}).c2 || {}).st || (b.c2 === 'stormcaller' ? 1 : 0)), 0);
+    if (gain > 0) { const add = gain / res.max * res.pop * pBase; mult *= 1 + add / dps0; parts.push({ k: 'res', name: 'Static', perMin: Math.round(gain / res.max * 60), gain: fmt(add / dps0) }); }
+  }
+  if (b.c2 === 'trapper') {
+    // every skill drops a trap: 500% when the target steps on it (counted for half of them: a boss doesn't walk over all)
+    const add = castAll * 0.5 * 5 * pBase; mult *= 1 + add / dps0;
+    parts.push({ k: 'res', name: 'กับดัก', perMin: Math.round(castAll * 30), gain: fmt(add / dps0) });
+  }
+  if (b.c2 === 'dusk') {
+    // Combo to 8 -> Dusk 4 s: every hit crits, +50% damage
+    const gain = basicRate + castAll; const cycle = gain > 0 ? 8 / gain + 4 : 0;
+    if (cycle) { const up = 4 / cycle; const m = 1 + up * (0.5 + critEdge(1 - Math.min(1, sh.crit || 0))); mult *= m; parts.push({ k: 'res', name: 'Dusk', up: Math.round(up * 100), gain: fmt(m - 1) }); }
+  }
+  if (b.job === 'warrior') {
+    // Sunder: warrior skill hits take 4% DEF / MDEF per stack off the target (5 stacks, 6 s)
+    const skillHits = hitRate - basicRate; const st = steady(skillHits, 6000, 5);
+    // what lower DEF/MDEF is worth: let the calculator take st x 4% armor pierce (same effect on its armor step)
+    let m = 1;
+    if (st > 0.05 && !p.__inner) { const q = { ...p, combos: false, __inner: true }; const v0 = score(b, q).v; const v1 = withExtra(b, 'armorPen', st * 4, (nb) => score(nb, q).v); m = v0 ? v1 / v0 : 1; }
+    if (m > 1.0005) { mult *= m; parts.push({ k: 'res', name: 'Sunder', stacks: Math.round(st * 10) / 10, cap: 5, gain: fmt(m - 1) }); }
+  }
+  if (b.job === 'rogue') {
+    // Execute: +30% on targets under 35% HP (half on bosses) - that part of every kill
+    const m = 1 + 0.35 * 0.3 * (boss ? 0.5 : 1); mult *= m;
+    parts.push({ k: 'res', name: 'Execute', gain: fmt(m - 1) });
   }
   return { mult, parts };
 }
@@ -416,6 +486,45 @@ function stillValid(b, p, c2map) {
   return true;
 }
 
+// ---------- every stat: the sheet the game computes, and what each stat is worth for this build ----------
+// Base stats go in through the calculator's own "add stats" option. Bonus stats (Spell Amp, cooldown, cast
+// speed, crit, ...) go in as an extra effect on one card for the call, so the game's own sheet adds them
+// exactly as it adds a real card's effect (the lab window is ours; the card table is put back after).
+const STAT_TRY = [
+  ['str', 'STR', 10, 'stat'], ['agi', 'AGI', 10, 'stat'], ['vit', 'VIT', 10, 'stat'], ['int', 'INT', 10, 'stat'], ['dex', 'DEX', 10, 'stat'], ['luk', 'LUK', 10, 'stat'],
+  ['atkPct', 'ATK %', 5], ['matkPct', 'MATK %', 5], ['spellAmp', 'Spell Amp %', 5], ['cdr', 'ลดคูลดาวน์ %', 5], ['castSpd', 'ร่ายเร็ว %', 5],
+  ['crit', 'โอกาสคริ %', 5], ['critDmg', 'ดาเมจคริ %', 10], ['aspd', 'ความเร็วโจมตี %', 5], ['armorPen', 'เจาะเกราะ %', 5], ['boss', 'ดาเมจใส่บอส %', 10],
+];
+function withExtra(b, key, val, fn) {
+  const host = (b.cards && b.cards[0]) || Object.keys(G.cardDefs || {}).find((id) => G.mobs[id]);
+  const def = G.cardDefs && G.cardDefs[host]; if (!def) return fn(b);
+  const saved = def.fx; const nb = b.cards && b.cards.length ? b : { ...b, cards: [host], cardStars: [5] };
+  def.fx = [...saved, { k: key, v: [val, val] }];
+  try { return fn(nb); } finally { def.fx = saved; }
+}
+function statWeights(b, p) {
+  const base = score(b, p).v; if (!base) return [];
+  return STAT_TRY.map(([k, label, n, kind]) => {
+    let v;
+    if (kind === 'stat') v = score({ ...b, __opts: { addStats: { [k]: n } } }, p).v;
+    else if (k === 'castSpd') {
+      // cast speed only comes from a face / mouth gear affix: compare the same face piece with and without it
+      // same face piece with a 4% and a 6% cast-speed affix (same grade either way), scaled to +n%
+      // (tier 3 rolls 4-6%: the game drops an affix whose value is outside its tier)
+      const face = (b.gear && b.gear.face) || { id: 'glasses', affixes: [], refine: 0 };
+      const withCs = (x) => score({ ...b, gear: { ...(b.gear || {}), face: { ...face, affixes: [...(face.affixes || []), 'castspd:3:' + x] } } }, p).v;
+      const v4 = withCs(4); const v6 = withCs(6);
+      const g = v4 ? Math.round((v6 / v4 - 1) / 2 * n * 1000) / 10 : 0;
+      return { key: k, label: '+' + n + ' ' + label, gain: g, note: g <= 0 ? 'เครื่องคิดเลขของเกม: ร่ายเร็วขึ้นไม่เพิ่มดาเมจบิลด์นี้ (จังหวะกดสกิลเปลี่ยน) / สายไม่มีแถบร่าย' : '' };
+    } else v = withExtra(b, k, n, (nb) => score(nb, p).v);
+    return { key: k, label: '+' + n + ' ' + label, gain: Math.round((v / base - 1) * 1000) / 10 };
+  }).sort((a, c) => (c.gain == null ? -1e9 : c.gain) - (a.gain == null ? -1e9 : a.gain));
+}
+function sheetOf(r) {
+  const c = (r && r.sheet) || {}; const pc = (x) => (x == null ? null : Math.round(x * 1000) / 10);
+  return { atk: c.atk, matk: c.matk, spellAmp: pc(c.spellAmp), cdr: pc(c.cdr), castSpd: pc(c.castSpd), crit: pc(c.crit), critDmg: pc(c.critDmg), aspd: c.aspd, armorPen: pc(c.armorPen), hit: c.hit, maxHp: c.maxHp };
+}
+
 // ---------- skill order: replay the game's own rotation (same loop as its calculator) ----------
 // every 50 ms over 60 s: if not busy casting, cast the first hotbar skill that is ready (charges, cooldown),
 // otherwise swing a basic attack when its timer allows. Repeat charges hit for 50%.
@@ -529,6 +638,8 @@ function describe(b, p) {
     build: { skills: b.skills, evo: b.evo, traits: b.traits, c2tr: b.c2tr, hotbar: b.hotbar, c2: b.c2 },
     order: (() => { try { return skillOrder(b, p, r); } catch (e) { return null; } })(),
     combos: (() => { try { return comboOf(b, p, r).parts; } catch { return []; } })(),
+    sheet: sheetOf(r),
+    weights: (() => { try { return statWeights(b, p); } catch { return []; } })(),
   };
 }
 
