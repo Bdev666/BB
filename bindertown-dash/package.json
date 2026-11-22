@@ -1,14 +1,15 @@
 {
   "name": "bindertown-dash",
   "productName": "BinderDash",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "description": "Fan-made multi-account launcher and dashboard for Binder Town (unofficial)",
   "main": "src/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "check": "node --check src/main.js && node --check src/preload-game.js && node --check src/preload-dashboard.js && node --check src/game-adapter.js && node --check src/store.js && node --check src/telegram.js && node --check src/session-data.js && node --check src/demo.js && node --check src/updater.js && node --check src/logger.js && node --check src/build-lab.js && node --check src/dashboard/dashboard.js && node --check src/dashboard/settings.js && node src/game-adapter.test.js",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "dist:mac": "electron-builder --mac --universal"
   },
   "devDependencies": {
     "electron": "33.2.1",
@@ -41,7 +42,32 @@
         "repo": "BB",
         "releaseType": "release"
       }
-    ]
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.games",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "artifactName": "BinderDash-${version}-mac.${ext}",
+      "title": "BinderDash ${version}"
+    },
+    "afterPack": "build/adhoc-sign.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.9",

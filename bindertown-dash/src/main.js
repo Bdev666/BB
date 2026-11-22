@@ -263,9 +263,9 @@ function openGame(id, opts = {}) {
   });
   wc.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
-    if (input.control && input.shift && input.key.toLowerCase() === 'd') { toggleDashboard(); e.preventDefault(); }
+    if ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'd') { toggleDashboard(); e.preventDefault(); }
     else if (input.key === 'F11') { win.setFullScreen(!win.isFullScreen()); e.preventDefault(); }
-    else if ((input.control && input.key.toLowerCase() === 'r') || input.key === 'F5') { wc.reload(); e.preventDefault(); }
+    else if (((input.control || input.meta) && input.key.toLowerCase() === 'r') || input.key === 'F5') { wc.reload(); e.preventDefault(); }
   });
   wc.on('did-navigate', (_e, _url, code) => {
     if (code === 503) {
@@ -1466,7 +1466,7 @@ function createDashboard() {
   });
   dashboard.loadFile(path.join(__dirname, 'dashboard', 'index.html'));
   dashboard.webContents.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'd') {
+    if (input.type === 'keyDown' && (input.control || input.meta) && input.shift && input.key.toLowerCase() === 'd') {
       toggleDashboard(); e.preventDefault();
     }
   });
@@ -1505,7 +1505,7 @@ function openSettings(tab) {
 function updateTray() {
   if (!tray) return;
   const anyAlert = [...games.values()].some((g) => g.alerts.size > 0);
-  tray.setImage(nativeImage.createFromDataURL(anyAlert ? icons.alert : icons.normal));
+  tray.setImage(trayImg(anyAlert ? icons.alert : icons.normal));
   const open = openGames().length;
   tray.setToolTip(`BinderDash · เปิดอยู่ ${open} บัญชี${anyAlert ? ' · มีเรื่องต้องดู' : ''}`);
 }
@@ -1514,8 +1514,10 @@ function toggleAllGames() {
   const anyVisible = open.some(([, g]) => g.win.isVisible());
   for (const [id] of open) anyVisible ? hideGame(id) : showGame(id);
 }
+// macOS menu bar wants a small icon (about 18 pt); Windows takes the 32 px one as it is
+const trayImg = (url) => { const img = nativeImage.createFromDataURL(url); return process.platform === 'darwin' ? img.resize({ width: 18, height: 18 }) : img; };
 function createTray() {
-  tray = new Tray(nativeImage.createFromDataURL(icons.normal));
+  tray = new Tray(trayImg(icons.normal));
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Dashboard', click: createDashboard },
     { label: 'ตั้งค่า', click: () => openSettings() },
@@ -1837,6 +1839,14 @@ app.whenReady().then(() => {
   store = new Store(app.getPath('userData'));
   gameUrl = store.data.settings.gameUrl || DEFAULT_GAME_URL;
   registerIpc();
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { label: 'BinderDash', submenu: [{ label: 'Dashboard', accelerator: 'Cmd+Shift+D', click: () => toggleDashboard() }, { label: 'ตั้งค่า…', accelerator: 'Cmd+,', click: () => openSettings() }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { type: 'separator' }, { role: 'quit', label: 'ออกจาก BinderDash' }] },
+      { role: 'editMenu' },
+      { role: 'windowMenu' },
+    ]));
+    app.on('activate', () => createDashboard()); // click on the Dock icon
+  }
   createTray();
   if (store.data.settings.openDashboardOnStart) createDashboard();
   // accounts open before an update come back by themselves; otherwise "open all on start"

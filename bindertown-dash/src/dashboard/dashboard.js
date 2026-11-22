@@ -1228,6 +1228,7 @@ function renderUpdate(u) {
   $('#upd-status').textContent = u.status === 'downloading' ? `กำลังดาวน์โหลด ${u.percent || 0}%…` : u.status === 'ready' ? 'ดาวน์โหลดเสร็จ · กำลังติดตั้งและเปิดใหม่…' : 'อัปเดตแล้วโปรแกรมจะติดตั้งและเปิดใหม่เองในราว 1 นาที · บัญชีที่เปิดอยู่จะเปิดกลับให้';
   $('#upd-go').disabled = busy; $('#upd-later').disabled = busy;
   $('#upd-go').textContent = busy ? 'กำลังอัปเดต…' : 'อัปเดตตอนนี้';
+  if (u.manualOnly) { $('#upd-status').textContent = 'macOS: กดแล้วจะเปิดหน้าดาวน์โหลด · โหลดไฟล์ .dmg ใหม่ ปิดโปรแกรม แล้วลาก BinderDash ทับของเดิมในโฟลเดอร์ Applications'; $('#upd-go').textContent = 'ดาวน์โหลด .dmg ใหม่'; }
 }
 $('#upd-go').addEventListener('click', () => dash.invoke('update-now'));
 $('#upd-later').addEventListener('click', () => { const v = state && state.update && state.update.version; updSkip = v || ''; try { localStorage.setItem('upd-skip', updSkip); } catch { /* */ } $('#upd').hidden = true; });
@@ -1251,7 +1252,7 @@ $('#accounts').addEventListener('dblclick', (e) => {
 });
 // Ctrl+1..9: pick an account
 addEventListener('keydown', (e) => {
-  if (!e.ctrlKey || e.shiftKey || !/^[1-9]$/.test(e.key) || !state) return;
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || !/^[1-9]$/.test(e.key) || !state) return;
   const a = state.accounts[Number(e.key) - 1];
   if (a) { selected = a.id; detail = null; render(); refreshDetail(); e.preventDefault(); }
 });

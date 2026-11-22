@@ -6,7 +6,7 @@ const { app } = require('electron');
 let autoUpdater = null;
 try { ({ autoUpdater } = require('electron-updater')); } catch { /* dev without the module */ }
 
-const state = { status: 'idle', version: null, notes: '', percent: 0, error: '', checkedAt: null };
+const state = { manualOnly: process.platform === 'darwin', status: 'idle', version: null, notes: '', percent: 0, error: '', checkedAt: null };
 let onChange = () => {};
 let beforeInstall = () => {};
 
@@ -30,7 +30,11 @@ function notesText(info) {
 let onAvailable = () => {};
 function askToDownload() { onAvailable({ ...state }); }
 
+// macOS: the app is not signed with an Apple Developer ID, and macOS only lets a signed app replace
+// itself; there the update card opens the release page to download the new .dmg instead
+const manualOnly = process.platform === 'darwin';
 function download() {
+  if (manualOnly) { require('electron').shell.openExternal('https://github.com/Bdev666/BB/releases/latest'); set({ status: 'manual' }); return; }
   if (!autoUpdater || state.status === 'downloading' || state.status === 'ready') return;
   set({ status: 'downloading', percent: 0 });
   autoUpdater.downloadUpdate().catch((err) => set({ status: 'error', error: String(err.message || err) }));
