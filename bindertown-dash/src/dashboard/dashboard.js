@@ -807,25 +807,27 @@ async function openLab(opt = {}) {
     const cBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value }, o.textContent)));
     const cMine = el('input', { type: 'checkbox', checked: owned.length ? '' : null, disabled: owned.length ? null : '' });
     const cNoCrit = el('input', { type: 'checkbox' });
+    const cDup = el('input', { type: 'checkbox' });
     const cStars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
     const cOut = el('div', {});
     const cGo = el('button', { class: 'primary' }, owned.length ? `🃏 จัดการ์ดจาก ${owned.length} ชนิดที่มี` : '🃏 จัดการ์ด');
     cGo.onclick = async () => {
       cGo.disabled = true; cOut.replaceChildren(el('p', { class: 'hint' }, 'กำลังอ่านตัวละครล่าสุดและลองการ์ดทุกคอมโบ…'));
       const meNow = (await dash.invoke('lab-me', accId)) || me;
-      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: 50, c2Points: 70, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4,
+      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4,
         target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true,
         loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
         build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: {}, hotbar: [], c2: meNow.c2 || '' } };
       if (cMine.checked && meNow.ownedCards && meNow.ownedCards.length) q.owned = meNow.ownedCards;
       if (cNoCrit.checked) q.noCrit = true;
+      if (cDup.checked) q.allowDup = true;
       try { cOut.replaceChildren(...cardsView(await dash.invoke('lab-cards', q), q.goal)); } catch (e) { cOut.replaceChildren(el('p', {}, '✖ ' + e.message)); }
       cGo.disabled = false;
     };
     cardPane.append(
       el('p', { class: 'hint' }, 'จัดการ์ดให้บิลด์สกิลที่ตัวละครใช้อยู่ตอนนี้ (อ่านจากเกมทุกครั้งที่กด) · ใช้เฉพาะการ์ดที่มีจริง (ที่ใส่อยู่ + ในกระเป๋า) จำนวนและดาวตามจริง · รวมเกียร์และ affix ที่ใส่อยู่'),
       el('div', { class: 'lab-form' }, el('label', {}, 'เป้าหมาย ', cGoal), el('label', {}, 'เป้า ', cBoss),
-        el('label', {}, cMine, ` เฉพาะการ์ดที่มี (${owned.length} ชนิด)`), el('label', {}, cNoCrit, ' ไม่เอาการ์ดคริ'), el('label', {}, 'ดาว (ถ้าใช้ทุกใบในเกม) ', cStars)),
+        el('label', {}, cMine, ` เฉพาะการ์ดที่มี (${owned.length} ชนิด)`), el('label', {}, cNoCrit, ' ไม่เอาการ์ดคริ'), el('label', { title: 'เกมนับการ์ดใบเดียวกัน ใบที่ 2 ได้ 50% ใบที่ 3 ได้ 25% ใบที่ 4 ไม่ได้อะไร และไม่นับเข้าเซ็ต' }, cDup, ' ใส่การ์ดซ้ำได้'), el('label', {}, 'ดาว (ถ้าใช้ทุกใบในเกม) ', cStars)),
       cGo, cOut);
 
     // ---- tab: the character as it is right now, re-read every 10 s ----
@@ -934,6 +936,7 @@ function cardBox(x) {
   const hasOwned = !!(lastLab && lastLab.owned && lastLab.owned.length);
   const onlyMine = el('input', { type: 'checkbox', checked: hasOwned ? '' : null, disabled: hasOwned ? null : '' });
   const noCrit = el('input', { type: 'checkbox' });
+  const allowDup = el('input', { type: 'checkbox' });
   const run = async (goal, btn) => {
     for (const b of out.parentNode.querySelectorAll('.lab-cardbtn')) b.disabled = true;
     out.replaceChildren(el('p', { class: 'hint' }, 'กำลังลองการ์ดทุกใบในเกม ตามช่องที่เปิดและ Spirit Load…'));
@@ -941,6 +944,7 @@ function cardBox(x) {
       const q = { ...lastLab, build: x.build, goal, stars: +stars.value };
       if (!onlyMine.checked) delete q.owned;
       if (noCrit.checked) q.noCrit = true;
+      if (allowDup.checked) q.allowDup = true;
       const r = await dash.invoke('lab-cards', q);
       out.replaceChildren(...cardsView(r, goal));
       // magic build that got crit cards: say why, and work out the same search without them to compare
@@ -966,6 +970,7 @@ function cardBox(x) {
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'farm', onclick: (e) => run('farm', e.target) }, '🌾 DPS ฟาร์ม'),
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'gold', onclick: (e) => run('gold', e.target) }, '💰 ฟาร์มเงิน'),
       el('label', { class: 'hint', title: 'ไม่ใช้การ์ดที่ค่าหลักเป็นโอกาสคริ / ดาเมจคริ (สายเวทปกติไม่คริ)' }, noCrit, ' ไม่เอาการ์ดคริ'),
+      el('label', { class: 'hint', title: 'เกมนับการ์ดใบเดียวกัน ใบที่ 2 ได้ 50% ใบที่ 3 ได้ 25% ใบที่ 4 ไม่ได้อะไร และไม่นับเข้าเซ็ต · ปกติไม่ใส่ซ้ำ' }, allowDup, ' ใส่การ์ดซ้ำได้'),
       el('label', { class: 'hint', title: hasOwned ? 'จัดจากการ์ดที่ตัวละครมี (ใส่อยู่ + ในกระเป๋า) จำนวนและดาวตามจริง' : 'ต้องวิเคราะห์จากตัวละครที่ออนไลน์อยู่' }, onlyMine, ' เฉพาะการ์ดที่มี'),
       el('small', { class: 'hint' }, ' · ดาว (ถ้าใช้ทุกใบ) '), stars),
     out);

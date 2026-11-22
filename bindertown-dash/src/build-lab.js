@@ -738,7 +738,11 @@ L.cards = async (p) => {
   const isCritCard = (id) => { const fx = (G.cardDefs[id] || {}).fx || []; return !!fx.length && (fx[0].k === 'crit' || fx[0].k === 'critDmg'); };
   const pool = Object.keys(G.cardDefs).filter((id) => G.mobs[id] && cardLoad(id) <= cap && (!owned || owned[id]) && !(p.noCrit && isCritCard(id)));
   const starOf = (id) => (owned && owned[id] ? Math.max(1, Math.min(5, owned[id].stars || 1)) : star);
-  const haveLeft = (id) => !owned || b.cards.filter((c) => c === id).length < (owned[id].n || 1);
+  // the game counts copies of one card (its "true" form included) at 100% / 50% / 25% / 0%, and a copy adds
+  // nothing to region / kin / colour sets: by default a card goes in once (p.allowDup lets copies in)
+  const grp = (id) => ((G.cardDefs[id] || {}).trueOf) || String(id).replace(/^true_/, ''); // True Wraithroot = Wraithroot (the game's trueOf)
+  const copies = (id) => b.cards.filter((c) => grp(c) === grp(id)).length;
+  const haveLeft = (id) => (p.allowDup ? true : copies(id) === 0) && (!owned || b.cards.filter((c) => c === id).length < (owned[id].n || 1));
   const used = () => b.cards.reduce((t, c) => t + cardLoad(c), 0);
   const sc = () => cardScore(b, q).v;
   const base = cardScore(b, q);
@@ -789,7 +793,8 @@ L.cards = async (p) => {
         for (const id of list) {
           if (id === old || used() - cardLoad(old) + cardLoad(id) > cap) continue;
           b.cards[i] = id; b.cardStars[i] = starOf(id);
-          if (haveLeft(id) || b.cards.filter((c) => c === id).length <= ((owned && owned[id] && owned[id].n) || 99)) { const nv = sc(); if (nv > v * 1.0005 && (!best || nv > best.v)) best = { id, v: nv }; }
+          const okDup = p.allowDup || b.cards.filter((c, j) => j !== i && grp(c) === grp(id)).length === 0;
+          if (okDup && (haveLeft(id) || b.cards.filter((c) => c === id).length <= ((owned && owned[id] && owned[id].n) || 99))) { const nv = sc(); if (nv > v * 1.0005 && (!best || nv > best.v)) best = { id, v: nv }; }
           b.cards[i] = old; b.cardStars[i] = oldStar;
         }
         if (best) { b.cards[i] = best.id; b.cardStars[i] = starOf(best.id); v = best.v; moved = true; }
