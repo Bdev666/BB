@@ -204,8 +204,8 @@ function renderProfile(a) {
     ['ดาเมจ/วิ', short(r.dpsNow), '', `ดาเมจที่ตีได้ใน 1 นาทีล่าสุด · เฉลี่ยต่อครั้ง ${short(r.avgHit)}`],
     ['Silver/ชม.', short(r.silverPerHour), 'pos', 'Silver ที่ได้จากการล้มมอน'],
     ['ขายดรอป/ชม.', short(r.dropValuePerHour), 'pos', `มูลค่าของดรอปถ้าขาย NPC (คำนวณแบบเดียวกับเกม) · รวม ${num(r.dropValue)}`],
-    ['รายได้รวม/ชม.', short(r.incomePerHour), 'gold', 'Silver/ชม. + ขายดรอป/ชม.'],
-    ['กำไรฟาร์ม/ชม.', a.farmNow ? short(a.farmNow.netHr) : '-', 'gold', a.farmNow ? `แมพนี้ ${a.farmNow.minutes} นาทีที่ฟาร์มจริงใน 1 ชม.ล่าสุด · Silver จากมอน (รวมคอมโบ/การ์ด Gold แล้ว) + ขาย/หลอมอัตโนมัติ Normal/Magic + ETC ราคา NPC − ยาที่ซื้อ · ไม่นับราคาตลาด` : 'ต้องฟาร์มด้วย AUTO สักพักก่อน (นับเฉพาะนาทีที่ล้มมอน)'],
+    ['มอน+ETC/ชม.', short(r.incomePerHour), 'gold', 'Silver จากล้มมอน + ETC ที่เก็บ (ราคา NPC) เฉลี่ยตั้งแต่เปิดเกม (รวมช่วงไม่ได้ฟาร์ม) · ไม่รวมเงินขาย/หลอมอัตโนมัติ · ดูเงินที่ได้จริงที่ "กำไรฟาร์ม/ชม."'],
+    ['กำไรฟาร์ม/ชม.', a.farmNow ? short(a.farmNow.netHr) : '-', 'gold', a.farmNow ? `Silver ในตัวที่เพิ่มจริง (แบบเดียวกับหน้าพักจอของเกม) + ETC ราคา NPC − ยาที่ซื้อ · เฉลี่ย ${a.farmNow.minutes} นาทีที่ฟาร์มแมพนี้ใน 1 ชม.ล่าสุด · หน้าพักจอของเกมนับแค่ช่วงสั้น ๆ ตั้งแต่เข้าพักจอ ตัวเลขจึงแกว่งกว่า · ไม่นับราคาตลาด` : 'ต้องฟาร์มด้วย AUTO สักพักก่อน (นับเฉพาะนาทีที่ล้มมอน)'],
     ['การ์ด', r.cards ? `${num(r.cards)} · ${r.cardsPerHour.toFixed(1)}/ชม.` : '0', 'card', (d.cards || []).slice(-5).map((c) => c.mob).join(', ') || 'ยังไม่ได้การ์ด'],
   ];
   // update text in place (no DOM rebuild every second)

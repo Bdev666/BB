@@ -1471,7 +1471,7 @@ function farmBalance(g) {
 }
 function farmClose(L) {
   if (L.dirty || !L.kills || !L.map || WORLD_ARENAS.has(L.map) || !L.id) return;
-  if (L.bal - L.kill > 50000) return; // something else paid in (a claim the dashboard did not see)
+  if (L.bal - L.kill > 20000000) { log.info(`farm ledger acc ${L.id}: +${L.bal} Silver in one minute on ${L.map} (not from kills or sales?) -> left out`); return; } // a claim / trade the dashboard did not see
   const all = store.data.farm || (store.data.farm = {});
   const key = `${L.id}:${L.map}`;
   const rows = all[key] || (all[key] = []);
@@ -1488,10 +1488,9 @@ function farmSummary(accId, level, sinceMin = 0) {
     if (Number(a) !== accId) continue;
     const r = rows.filter((x) => x[0] >= sinceMin && (!level || !x[1] || Math.abs(x[1] - level) <= 5));
     if (!r.length) continue;
-    const net = r.map((x) => x[2]).sort((p, q) => p - q);
-    const mid = net.length % 2 ? net[net.length >> 1] : (net[net.length / 2 - 1] + net[net.length / 2]) / 2;
-    const mean = net.reduce((t, x) => t + x, 0) / net.length;
-    out.push({ map, name: mapName(map), minutes: r.length, netHr: Math.round((mid * 0.5 + mean * 0.5) * 60), killSilverHr: Math.round(r.reduce((t, x) => t + x[3], 0) / r.length * 60), killsHr: Math.round(r.reduce((t, x) => t + x[4], 0) / r.length * 60), last: r[r.length - 1][0] * 60000 });
+    // the plain average: sales come in lumps, a median would leave them out
+    const mean = r.reduce((t, x) => t + x[2], 0) / r.length;
+    out.push({ map, name: mapName(map), minutes: r.length, netHr: Math.round(mean * 60), killSilverHr: Math.round(r.reduce((t, x) => t + x[3], 0) / r.length * 60), killsHr: Math.round(r.reduce((t, x) => t + x[4], 0) / r.length * 60), last: r[r.length - 1][0] * 60000 });
   }
   return out.sort((p, q) => q.netHr - p.netHr);
 }
