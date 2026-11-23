@@ -1213,9 +1213,10 @@ async function autoBuyPotion(id, g, p) {
 // = up again on the spot for a Gold fee. BinderDash ticks that option for every account (through the
 // game's own checkbox, so the game saves it and tells the server), and as a backup presses the game's
 // respawn button when a hidden character still lies dead (other maps, AUTO off).
-const AUTO_RESPAWN_JS = `(() => { const c = document.getElementById('au-respawn'); if (!c) return { ok: false, why: 'none' };
-  if (c.checked) return { ok: true, on: true }; if (c.disabled) return { ok: false, why: 'premium' };
-  c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, on: c.checked, changed: true }; })()`;
+const AUTO_RESPAWN_JS = (premium) => `(() => { const c = document.getElementById('au-respawn'); if (!c) return { ok: false, why: 'none' };
+  if (c.checked) return { ok: true, on: true };
+  let unlocked = false; if (c.disabled) { if (!${premium ? 'true' : 'false'}) return { ok: false, why: 'premium' }; c.disabled = false; unlocked = true; }
+  c.checked = true; c.dispatchEvent(new Event('change', { bubbles: true })); return { ok: true, on: c.checked, changed: true, unlocked }; })()`;
 // death loop: up on the spot, killed again, again (seen: 8 deaths in a minute, 5,000 G each).
 // 4 deaths within 2 minutes = turn the game's "respawn in place" off for this account for 10 minutes,
 // so the next death goes back to town like normal, and say so
@@ -1244,10 +1245,11 @@ async function ensureAutoRespawn(id) {
   if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause
   if (g.autoRespawnAt && Date.now() - g.autoRespawnAt < 60000) return;
   g.autoRespawnAt = Date.now();
-  let r; try { r = await g.win.webContents.executeJavaScript(AUTO_RESPAWN_JS, true); } catch { return; }
+  const premium = g.data.stats.premium === true || (g.data.premiumUntil && g.data.premiumUntil > Date.now());
+  let r; try { r = await g.win.webContents.executeJavaScript(AUTO_RESPAWN_JS(premium), true); } catch { return; }
   const before = g.autoRespawn && g.autoRespawn.on;
   g.autoRespawn = r;
-  if (r.changed) log.info(`acc ${id}: turned on the game's Auto Respawn (respawn in place)`);
+  if (r.changed) { log.info(`acc ${id}: turned on the game's Auto Respawn (respawn in place)${r.unlocked ? ' · its box was greyed out by the game (drawn before Premium was known)' : ''}`); g.data.log('other', '↺ เปิด "เกิดที่เดิมอัตโนมัติ" ของเกมคืนให้แล้ว'); }
   if (!r.ok && r.why === 'premium' && !g.autoRespawnWarned) { g.autoRespawnWarned = true; log.info(`acc ${id}: Auto Respawn needs Premium`); }
   if (before !== r.on) pushState();
 }
@@ -1584,12 +1586,17 @@ async function loopBackCheck(id, g) {
     }
     if (L.x != null) {
       if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {});
-      for (let i = 0; i < 20; i++) { // eslint-disable-line no-await-in-loop
+      // up to ~3 minutes: the spot can be across a big map from where the warp lands
+      let left = null;
+      for (let i = 0; i < 70; i++) { // eslint-disable-line no-await-in-loop
         const st = (g.data.world && g.data.world.self) || {};
-        if (st.x == null || Math.hypot(st.x - L.x, st.y - L.y) <= 3) break;
+        if (st.x == null) { await new Promise((r) => setTimeout(r, 1500)); continue; } // eslint-disable-line no-await-in-loop
+        left = Math.hypot(st.x - L.x, st.y - L.y);
+        if (left <= 3 || mapOf(g) !== L.map) break;
         await sendInput(id, { type: 'moveTo', x: L.x, y: L.y }); // eslint-disable-line no-await-in-loop
         await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
       }
+      log.info(`acc ${id}: walked back to ${Math.round(L.x)},${Math.round(L.y)} on ${L.map}${left != null ? ` (${Math.round(left)} tiles left)` : ' (position unknown)'}`);
     }
     if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
     g.autoSeenOffAt = Date.now();
@@ -1802,14 +1809,20 @@ const CROWD_JS = `(() => { try { const g = window.__game; const me = g.me(); con
 async function crowdCheck(id, g) {
   const s = store.data.settings;
   if (!s.crowdSwitch || !g.inGame || g.demo || g.status !== 'online' || !g.win || g.win.isDestroyed() || g.crowdBusy) return;
-  if ((g.bounty && g.bounty.on) || g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { g.crowdSince = 0; return; }
-  if (!(await liveUi(id)).auto) { g.crowdSince = 0; return; } // only while AUTO farms
+  if ((g.bounty && g.bounty.on) || g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { g.crowdSince = 0; g.crowdHist = []; return; }
+  if (!(await liveUi(id)).auto) { g.crowdSince = 0; g.crowdHist = []; return; } // only while AUTO farms
   let c; try { c = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { c = null; }
-  if (!c || !c.ch || c.ch === PVP_CH) { g.crowdSince = 0; return; }
+  if (!c || !c.ch || c.ch === PVP_CH) { g.crowdSince = 0; g.crowdHist = []; return; }
   const need = Math.max(1, Number(s.crowdPlayers) || 3);
-  if (c.near < need) { g.crowdSince = 0; return; }
-  if (!g.crowdSince) { g.crowdSince = Date.now(); log.info(`acc ${id}: ${c.near} other player(s) in the AUTO circle (CH ${c.ch})`); }
-  if (Date.now() - g.crowdSince < Math.max(1, Number(s.crowdMinutes) || 2) * 60000) return;
+  // most of the last N minutes, not every check: players walk in and out of the circle all the time, and one
+  // quiet check used to start the count over (a log showed 4 players around for minutes and no move)
+  const win = Math.max(1, Number(s.crowdMinutes) || 2) * 60000; const now0 = Date.now();
+  const H = (g.crowdHist = (g.crowdHist || []).filter(([t]) => now0 - t <= win)); H.push([now0, c.near, c.ch]);
+  if (H.some(([, , ch]) => ch !== c.ch)) { g.crowdHist = [[now0, c.near, c.ch]]; return; } // changed channel meanwhile
+  const busy = H.filter(([, n]) => n >= need).length;
+  if (c.near >= need && (!g.crowdLogAt || now0 - g.crowdLogAt > 60000)) { g.crowdLogAt = now0; log.info(`acc ${id}: ${c.near} other player(s) in the AUTO circle (CH ${c.ch}) · crowded ${busy}/${H.length} checks in the last ${Math.round((now0 - H[0][0]) / 60000)} min`); }
+  if (now0 - H[0][0] < win * 0.85 || busy / H.length < 0.7 || c.near < need) return;
+  g.crowdSince = H[0][0];
   if (g.crowdMovedAt && Date.now() - g.crowdMovedAt < 10 * 60000) return;
   g.crowdBusy = true;
   try {
@@ -1824,7 +1837,7 @@ async function crowdCheck(id, g) {
     let best = 0;
     for (let ch = 1; ch <= counts.length; ch++) { if (ch === c.ch || ch === PVP_CH) continue; if (!best || (counts[ch - 1] ?? 999) < (counts[best - 1] ?? 999)) best = ch; }
     if (!best || (counts[best - 1] ?? 999) > here - 2) { log.info(`acc ${id}: crowded, but no quieter channel (here ${here}, quietest CH ${best} ${counts[best - 1]})`); g.crowdMovedAt = Date.now(); return; }
-    g.crowdMovedAt = Date.now(); g.crowdSince = 0;
+    g.crowdMovedAt = Date.now(); g.crowdSince = 0; g.crowdHist = [];
     log.info(`acc ${id}: crowded (${c.near} in the circle, CH ${c.ch} ${here} players) -> CH ${best} (${counts[best - 1]} players), back to ${c.x},${c.y}`);
     await sendInput(id, { type: 'switchChannel', channel: best });
     // wait for the new channel, then walk back to the same spot and fight there again
