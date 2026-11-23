@@ -486,6 +486,7 @@ function handleEvents(id, events) {
       case 'revive':
         if (g.respawnTries) selftest.count(id, 'respawnOk');
         g.respawnClicked = false; g.respawnWhy = false;
+        if (g.bossTrip && WORLD_ARENAS.has(mapOf(g)) && !g.bossWalking) { g.bossWalking = true; setTimeout(() => walkToBossThenAuto(id, g.bossTrip ? g.bossTrip.kind : '', true).catch(() => {}).finally(() => { g.bossWalking = false; }), 1200); }
         if (g.deadSince) { const ms = Date.now() - g.deadSince; selftest.count(id, 'revives'); selftest.count(id, 'deadMs', ms); log.info(`acc ${id}: up again after ${(ms / 1000).toFixed(1)} s${ev.here ? ' (the game\'s own)' : ''}`); g.deadSince = 0; } // how long it lay dead
         clearTimeout(g.deathAlertTimer);
         if (g.alerts.has('death')) setAlert(id, 'death', false);
@@ -1512,11 +1513,12 @@ async function loopBackCheck(id, g) {
   if (!L || L.done || L.busy || !g.inGame || g.demo || g.status !== 'online' || !L.map) return;
   if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return;
   if (L.giveUp) { L.done = true; notify(id, 'death', `☠ ตายวนซ้ำอีกรอบใน 1 ชม. ที่ ${mapName(L.map)} · ไม่พากลับแล้ว รอคุณดู (ลองแมพที่มอนเบาลง หรือเช็คยา/อุปกรณ์)`); log.info(`acc ${id}: death loop again at ${L.map} -> not going back`); return; }
+  if (WORLD_ARENAS.has(mapOf(g)) && !g.bossTrip && Date.now() - L.at < 3 * 60000) return; // still leaving the arena
   if (g.bossTrip || g.travelling || (g.bounty && g.bounty.on) || (g.finder && g.finder.on) || WORLD_ARENAS.has(mapOf(g))) { L.done = true; return; } // something else runs this character
   L.busy = true;
   try {
     if (mapOf(g) !== L.map) {
-      log.info(`acc ${id}: death-loop pause over, in ${mapOf(g)} -> back to ${L.map}`);
+      log.info(`acc ${id}: ${L.why === 'boss' ? 'world boss done' : 'death-loop pause over'}, in ${mapOf(g)} -> back to ${L.map}`);
       const r = await travelTo(id, g, L.map);
       if (!r.ok) { L.done = true; log.info(`acc ${id}: back to farm: ${r.error}`); return; }
       if (!r.here && !(await arrive(id, g, L.map, 6 * 60000, true))) { L.done = true; log.info(`acc ${id}: back to farm: did not arrive`); return; }
@@ -1533,8 +1535,8 @@ async function loopBackCheck(id, g) {
     if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
     g.autoSeenOffAt = Date.now();
     L.done = true;
-    log.info(`acc ${id}: back at the farming spot on ${L.map}, AUTO on`);
-    g.data.log('other', `↩ กลับจุดฟาร์มหลังพักเกิดที่เดิม 10 นาที · ${mapName(L.map)} · เปิด AUTO`);
+    log.info(`acc ${id}: back at the farming spot on ${L.map}${L.why === 'boss' ? ' after the world boss' : ''}, AUTO on`);
+    g.data.log('other', `↩ กลับจุดฟาร์ม${L.why === 'boss' ? 'หลังตีบอสโลก' : 'หลังพักเกิดที่เดิม 10 นาที'} · ${mapName(L.map)} · เปิด AUTO`);
   } finally { L.busy = false; }
 }
 
@@ -1959,7 +1961,8 @@ async function worldBossGo(kind, reason = 'ปุ่ม') {
     if (!g.inGame || g.demo || g.status !== 'online') continue;
     const name = g.data.stats.name || account(id).name;
     const before = mapOf(g);
-    g.bossTrip = { kind, from: before, at: Date.now() };
+    const me = (g.data.world && g.data.world.self) || {};
+    g.bossTrip = { kind, from: before, x: me.x, y: me.y, at: Date.now() };
     await sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
     out.push({ id, name, from: before });
     await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
@@ -1969,16 +1972,19 @@ async function worldBossGo(kind, reason = 'ปุ่ม') {
   // and the arena's warp-in point is farther than that), then AUTO on; say who did not get in
   // a log showed 2 of 3 accounts still loading the arena at 7 s: they were taken as "did not get in",
   // so nobody walked them to the boss or took them back after (one stood idle 16 minutes in the arena)
-  setTimeout(async () => {
-    const missed = [];
-    for (let i = 0; i < 19 && out.some((o) => { const g = games.get(o.id); return g && g.bossTrip && mapOf(g) === o.from; }); i++) await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
-    for (const o of out) {
-      const g = games.get(o.id); if (!g || !g.bossTrip) continue;
-      if (mapOf(g) === o.from) { missed.push(o.name); g.bossTrip = null; continue; }
+  // each account on its own: as soon as it is in the arena, walk it to the boss (3 minutes at most, asking again
+  // every 30 s: a warp asked before the start may only go through when the boss starts)
+  const missed = [];
+  Promise.all(out.map(async (o) => {
+    const g = games.get(o.id); if (!g) return;
+    for (let i = 0; i < 90; i++) {
+      if (!g.bossTrip) return; // stopped meanwhile
+      if (WORLD_ARENAS.has(mapOf(g))) { await walkToBossThenAuto(o.id, kind); return; }
+      if (i && i % 15 === 0) await sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
+      await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
     }
-    await Promise.all(out.filter((o) => (games.get(o.id) || {}).bossTrip).map((o) => walkToBossThenAuto(o.id, kind)));
-    if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / ยังไม่เริ่ม / วาร์ปไม่สำเร็จใน 45 วิ)`);
-  }, 7000);
+    missed.push(o.name); g.bossTrip = null; log.info(`acc ${o.id}: world boss -> not in the arena after 3 min`);
+  })).then(() => { if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 3 นาที)`); }).catch((e) => log.warn(`world boss go: ${e.message}`));
   return { ok: true, sent: out.length, accounts: out };
 }
 // where to stand: next to the world boss; if it is not in sight, the middle of the monsters around
@@ -1990,13 +1996,18 @@ const BOSS_SPOT_JS = (type) => `(() => { try { const g = window.__game; const st
   let x, y, how;
   if (boss) { x = boss.x; y = boss.y; how = 'boss'; } else if (all.length) { x = all.reduce((t, m) => t + m.x, 0) / all.length; y = all.reduce((t, m) => t + m.y, 0) / all.length; how = 'mobs'; } else return { me: [me.x, me.y], none: true };
   return { x: Math.round(x), y: Math.round(y), how, d: Math.hypot(x - me.x, y - me.y), me: [Math.round(me.x), Math.round(me.y)] }; } catch (e) { return null; } })()`;
-async function walkToBossThenAuto(id, kind) {
+async function walkToBossThenAuto(id, kind, again = false) {
   const g = games.get(id); if (!g || !g.win || g.win.isDestroyed()) return;
   const type = WORLD_TYPES[kind] || '';
-  if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off while walking (it would stop to fight on the way)
   let spot = null;
+  if (again) { // got up again: only walk when it woke up out of AUTO's reach (16 tiles) of the boss
+    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; }
+    if (!spot || spot.how !== 'boss' || spot.d <= 12) { if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return; }
+    log.info(`acc ${id}: world boss -> up again ${Math.round(spot.d)} tiles from the boss, walking back`);
+  }
+  if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // AUTO off while walking (it would stop to fight on the way)
   // in early (before it spawns): wait for the boss to show up, up to ~3 minutes
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < (again ? 3 : 60); i++) {
     try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
     if (spot && spot.how === 'boss') break;
     if (i === 0) log.info(`acc ${id}: world boss not in sight yet -> waiting for it`);
@@ -2018,6 +2029,7 @@ async function worldBossLeave(kind) {
     if (!(g.bossTrip && g.bossTrip.kind === kind) && !inArena) continue;
     await sendInput(id, { type: 'worldBossWarp', enter: false, kind }); // eslint-disable-line no-await-in-loop
     log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip ? g.bossTrip.from : 'town'})`);
+    if (g.bossTrip && g.bossTrip.from && !WORLD_ARENAS.has(g.bossTrip.from)) g.loopBack = { map: g.bossTrip.from, x: g.bossTrip.x, y: g.bossTrip.y, at: Date.now(), done: false, why: 'boss' };
     g.bossTrip = null;
     setTimeout(async () => { if (!(await liveUi(id)).auto) gameCommand(id, 'auto', {}); }, 8000);
     await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
