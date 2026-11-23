@@ -2014,7 +2014,7 @@ async function bountyStep(id) {
       const to = cur.map; const t0 = Date.now();
       const watch = setInterval(() => {
         if (!g.bounty || !g.bounty.on || g.bounty.phase !== 'travel' || Date.now() - t0 > 6 * 60000) { clearInterval(watch); return; }
-        if (mapOf(g) === to) { clearInterval(watch); setTimeout(() => bountyStep(id).catch(() => {}), 1200); }
+        if (mapOf(g) === to) { clearInterval(watch); g.bountyArrivedAt = Date.now(); log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
       }, 1000);
       return;
     }
@@ -2029,7 +2029,7 @@ async function bountyStep(id) {
       let spot = null; try { spot = await g.win.webContents.executeJavaScript(MOB_SPOT_JS(type), true); } catch { spot = null; }
       if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // the settings window can pause it: make sure
       B.phase = 'hunt';
-      log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}`);
+      log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}${g.bountyArrivedAt ? ` · AUTO ${((Date.now() - g.bountyArrivedAt) / 1000).toFixed(1)} s after arriving` : ''}`); g.bountyArrivedAt = 0;
     }
     B.note = `ล่า ${cur.name} ${cur.prog}/${cur.need} ที่ ${mapName(cur.map)}`;
   } catch (err) { log.warn(`acc ${id}: bounty step: ${err.message}`); } finally { if (g.bounty) g.bounty.busy = false; pushState(); }
