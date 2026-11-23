@@ -949,12 +949,12 @@ L.predict = async (p) => {
   let cmb = { mult: 1, parts: [] }; try { cmb = comboOf(b, { ...q, pack: 1, lifePack: Math.max(1, Math.min(8, Number(p.pack) || 4)) }, r); } catch { /* none */ }
   // field monsters come in packs: the damage really done counts every monster a zone / cleave / pierce hits
   // (real logs of AoE builds did 2.5-3x the one-target number). Bosses stay one target.
-  let packDps = null; const pack = Math.max(1, Math.min(8, Number(p.pack) || 4));
+  let packDps = null; const pack = Math.max(1, Math.min(8, Number(p.pack) || 4)); // may be fractional (learned from real logs)
   let packCurve = null;
   if (!isBossTarget(b)) {
     const tot = rot.share.reduce((t, x) => t + x.dmg, 0);
     const at = (n) => Math.round(rot.dps * cmb.mult * rot.share.reduce((t, x) => t + x.dmg * (x.key === 'basic' ? 1 : targetsOf(x.key, b.skills[x.key] || 1, b.evo[x.key], n)), 0) / tot);
-    if (tot > 0) { packCurve = [1, 2, 3, 4, 5, 6, 7, 8].map(at); packDps = packCurve[pack - 1]; }
+    if (tot > 0) { packCurve = [1, 2, 3, 4, 5, 6, 7, 8].map(at); const lo = Math.floor(pack); const hi = Math.min(8, lo + 1); packDps = Math.round(packCurve[lo - 1] + (packCurve[hi - 1] - packCurve[lo - 1]) * (pack - lo)); }
   }
   return {
     withCombos: Math.round(rot.dps * cmb.mult), packDps, pack: packDps ? pack : null, packCurve, combos: cmb.parts, sheet: sheetOf(r),

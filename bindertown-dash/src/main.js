@@ -51,10 +51,10 @@ const selftest = require('./selftest').create({
     if (c.d != null && (c.d < 0.2 || c.d > 20)) c.d = null; // whole-DPS ratio: real / formula (hits per second, focus, splash included)
     const relOf = (a, b) => { const out = { ...(a || {}) }; for (const [sid, x] of Object.entries(b || {})) out[sid] = out[sid] ? +(out[sid] * 0.6 + x * 0.4).toFixed(3) : x; return out; };
     if (c.pack != null && !(c.pack >= 1 && c.pack <= 8)) c.pack = null; // monsters really hit at once (from real DPS over the pack curve)
-    if (old && old.pack == null && c.pack != null) old.d = null; // an old ratio against the one-target number
+    if (old && old.v !== c.v) old.d = null; // a ratio saved by an older way of counting (one target / a fixed pack of 4)
     all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), pack: ease(old.pack, c.pack), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
     // field monsters differ a lot (weak ones die in one hit, and overkill is not reported): also per monster
-    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; if (om && om.pack == null && c.pack != null) om.d = null; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), pack: ease(om.pack, c.pack), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
+    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; if (om && om.v !== c.v) om.d = null; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), pack: ease(om.pack, c.pack), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
     store.save();
   },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
@@ -471,6 +471,7 @@ function handleEvents(id, events) {
         if (ev.dead === false && g.deadSince && Date.now() - g.deadSince > 15000) g.deadSince = 0; // up (the revive message was missed)
         break;
       case 'death':
+        g.autoAtDeath = !!g.data.stats.auto;
         if (g.lastDeathAt && Date.now() - g.lastDeathAt < 1500) break; // the same death, second message
         g.lastDeathAt = Date.now(); g.deadSince = g.lastDeathAt;
         selftest.count(id, 'deaths');
@@ -486,6 +487,7 @@ function handleEvents(id, events) {
       case 'revive':
         if (g.respawnTries) selftest.count(id, 'respawnOk');
         g.respawnClicked = false; g.respawnWhy = false;
+        setTimeout(() => backupRespawn(id, 0), 2500); // a death screen that shows up after the revive gets closed
         if (g.bossTrip && WORLD_ARENAS.has(mapOf(g)) && !g.bossWalking) { g.bossWalking = true; setTimeout(() => walkToBossThenAuto(id, g.bossTrip ? g.bossTrip.kind : '', true).catch(() => {}).finally(() => { g.bossWalking = false; }), 1200); }
         if (g.deadSince) { const ms = Date.now() - g.deadSince; selftest.count(id, 'revives'); selftest.count(id, 'deadMs', ms); log.info(`acc ${id}: up again after ${(ms / 1000).toFixed(1)} s${ev.here ? ' (the game\'s own)' : ''}`); g.deadSince = 0; } // how long it lay dead
         clearTimeout(g.deathAlertTimer);
@@ -1225,7 +1227,9 @@ async function ensureAutoRespawn(id) {
 // (there the button is free). Same price as the game's own (5,000 G in fields, free at world bosses).
 const RESPAWN_HERE_JS = `(() => { const o = document.getElementById('deathoverlay'); const shown = !!(o && getComputedStyle(o).display !== 'none');
   let me = null; try { me = window.__game && window.__game.me(); } catch {}
-  const dead = shown || !!(me && (me.state === 'dead' || me.hp <= 0));
+  const meDead = !!(me && (me.state === 'dead' || me.hp <= 0));
+  if (shown && me && !meDead && me.hp > 0) { o.style.display = 'none'; return { dead: false, stale: true }; } // alive behind a left-over death screen
+  const dead = shown || meDead;
   if (!dead) return { dead: false };
   const h = shown ? document.getElementById('drespawnhere') : null;
   if (!h) return { dead: true, waiting: true }; // the death screen comes ~2 s after the death
@@ -1243,6 +1247,7 @@ function backupRespawn(id, delay = 150) {
     if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
     let r; try { r = await g.win.webContents.executeJavaScript(RESPAWN_HERE_JS, true); } catch { r = null; }
     if (!r) { g.respawnTries = (g.respawnTries || 0) + 1; if (g.respawnTries < 40) backupRespawn(id, 300); return; } // page busy: look again, do not give up
+    if (r.stale) { log.info(`acc ${id}: death screen left over while alive -> closed it`); selftest.count(id, 'staleDeathScreen'); if (g.autoAtDeath || g.bossTrip) setTimeout(async () => { if (!(await liveUi(id)).auto) gameCommand(id, 'auto', {}); }, 800); }
     if (!r.dead) { if (g.respawnTries) log.info(`acc ${id}: up again after ${((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1)} s`); g.respawnTries = 0; return; } // up already
     const since = ((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1);
     if (!g.respawnTries || (g.respawnTries % 5 === 0 && !r.clicked)) { // at once, then again every ~1.5 s while still down
@@ -1260,6 +1265,7 @@ function backupRespawn(id, delay = 150) {
 }
 async function liveDead(id) {
   const g = games.get(id);
+  // a death screen over a living character counts too: backupRespawn closes it
   try { return await g.win.webContents.executeJavaScript(`(() => { try { const o = document.getElementById('deathoverlay'); if (o && getComputedStyle(o).display !== 'none') return true; const m = window.__game && window.__game.me(); return !!(m && (m.state === 'dead' || m.hp <= 0)); } catch { return false; } })()`, true); } catch { return false; }
 }
 function autoRespawnTick() {
@@ -1419,6 +1425,9 @@ async function abStart(id, phase, minutes, label) {
   const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
   if (!['A', 'B'].includes(phase)) return { ok: false, error: 'phase' };
   g.ab = g.ab || {};
+  const running = g.ab.phase && g.ab[g.ab.phase] && Date.now() - g.ab[g.ab.phase].start < g.ab[g.ab.phase].minutes * 60000;
+  if (running) { const P = g.ab[g.ab.phase]; return { ok: false, error: `กำลังวัด ${g.ab.phase} อยู่ อีก ~${Math.ceil((P.start + P.minutes * 60000 - Date.now()) / 60000)} นาที · รอให้ครบก่อน (หรือกดหยุด)` }; }
+  if (phase === 'B') { const a = abStats(g.ab.A); if (!a || a.n < 3) return { ok: false, error: 'ต้องวัดแบบเดิม (A) ให้ได้อย่างน้อย 3 นาทีที่ตีจริงก่อน แล้วค่อยเปลี่ยนและวัด B' }; }
   if (phase === 'A') g.ab.B = null;
   g.ab[phase] = { start: Date.now(), minutes: Math.max(2, Math.min(60, Number(minutes) || 10)), mins: [], mobs: {}, map: mapOf(g), label: String(label || '').slice(0, 80), lastHit: 0 };
   g.ab.phase = phase; g.ab.last = phase;
@@ -2521,7 +2530,7 @@ function registerIpc() {
     const c = calibFor(p); if (!c) return p;
     const out = { ...p };
     if (c.rel && c.runs >= 1) out.skillAdj = c.rel;
-    if (c.kind === 'field' && c.pack && !p.packSet) out.pack = Math.max(1, Math.round(c.pack));
+    if (c.kind === 'field' && c.pack && !p.packSet) out.pack = Math.max(1, Math.round(c.pack * 10) / 10);
     return out;
   };
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(withAdj(p))})`));
@@ -2529,7 +2538,7 @@ function registerIpc() {
     const r = await labCall(`window.__bdLab.predict(${JSON.stringify(withAdj(p))})`);
     const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test((p && p.target) || '') ? 'world' : 'field';
     const c = calibFor(p);
-    if (r && c && c.job === p.job) { const m = (r.packDps && c.pack == null ? null : c.d) || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.packDps || r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
+    if (r && c && c.job === p.job) { const m = (r.packDps && c.v !== 2 ? null : c.d) || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.packDps || r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
     return r;
   });
   handle('fight-times', () => fightTimes());

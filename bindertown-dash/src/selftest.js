@@ -69,7 +69,9 @@ function create(deps) {
               else if (rec.realDps > c[0]) { for (let i = 1; i < c.length; i++) if (rec.realDps <= c[i]) { n = i + (c[i] > c[i - 1] ? (rec.realDps - c[i - 1]) / (c[i] - c[i - 1]) : 0); break; } }
               rec.pack = +n.toFixed(2);
             }
-            const pred = p.packDps || p.withCombos || p.dps;
+            // the ratio against the curve at that pack: below one monster's worth it is the formula being high
+            const curveAt = (c, n) => { const lo = Math.max(1, Math.min(c.length, Math.floor(n))); const hi = Math.min(c.length, lo + 1); return c[lo - 1] + (c[hi - 1] - c[lo - 1]) * (n - lo); };
+            const pred = p.packCurve && rec.pack ? curveAt(p.packCurve, rec.pack) : (p.packDps || p.withCombos || p.dps);
             rec.sim.packDps = p.packDps || null;
             rec.ratio = pred ? +(rec.realDps / pred).toFixed(3) : null;
             // one hit, real against the formula, per skill (non-crit hits; 20+ hits): which skills are off and by how much
@@ -100,7 +102,7 @@ function create(deps) {
                   if (fv.length >= 3) { const m = fv[Math.floor(fv.length / 2)]; rel = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, +(v / m).toFixed(3)])); rec.dpsCheck = { median: +m.toFixed(3), rel }; }
                 }
               } catch { /* keep the per-hit numbers */ }
-              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, pack: rec.pack || null, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
+              if (deps.saveCalib) deps.saveCalib(id, { v: 2, k: rec.calib, d: rec.ratio, pack: rec.pack || null, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));
