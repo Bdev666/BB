@@ -537,11 +537,11 @@ async function openFarmMaps(accId) {
   const rows = (r && r.rows) || [];
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `${m} นาที` : m < 1440 ? `${Math.round(m / 60)} ชม.` : `${Math.round(m / 1440)} วัน`; };
   openModal('📊 แมพที่เคยฟาร์ม', [
-    el('p', { class: 'hint' }, `เลเวล ${r.level} (นับนาทีที่ฟาร์มตอนเลเวลห่างไม่เกิน 5) · กำไร = Silver จากมอน (รวมคอมโบ/การ์ด Gold) + ขาย/หลอมอัตโนมัติ Normal/Magic + ETC ราคา NPC − ยาที่ซื้อ · ไม่นับราคาตลาด · ตัวเลขแม่นขึ้นเมื่อเปิดขาย/หลอมอัตโนมัติในเกม`),
+    el('p', { class: 'hint' }, `เลเวล ${r.level} (นับนาทีที่ฟาร์มตอนเลเวลห่างไม่เกิน 5) · รวมผลฟาร์มจาก log สถิติย้อนหลัง 14 วัน (≈ = ประมาณจาก log) · กำไร = Silver จากมอน (รวมคอมโบ/การ์ด Gold) + ขาย/หลอมอัตโนมัติ Normal/Magic + ETC ราคา NPC − ยาที่ซื้อ · ไม่นับราคาตลาด · ตัวเลขแม่นขึ้นเมื่อเปิดขาย/หลอมอัตโนมัติในเกม`),
     rows.length ? el('table', { class: 'lab-table' },
       el('tr', {}, ...['แมพ', 'กำไร/ชม.', 'จากมอน/ชม.', 'ฆ่า/ชม.', 'วัดแล้ว', 'ล่าสุด', ''].map((h) => el('th', {}, h))),
       ...rows.map((x) => el('tr', { class: x.map === r.here ? 'on' : '' },
-        el('td', {}, x.name + (x.map === r.here ? ' (อยู่ตอนนี้)' : '')), el('td', {}, el('b', {}, num(x.netHr))), el('td', {}, num(x.killSilverHr)), el('td', {}, num(x.killsHr)), el('td', {}, `${x.minutes} นาที`), el('td', {}, ago(x.last)),
+        el('td', {}, x.name + (x.map === r.here ? ' (อยู่ตอนนี้)' : '')), el('td', { title: x.est ? 'ประมาณ: Silver จากมอนใน log สถิติ × สัดส่วนกำไร/เงินจากมอนของตัวนี้ในแมพที่วัดจริง (log สถิติไม่มีเงินขายอัตโนมัติ)' : 'วัดจริง: Silver ในตัวที่เพิ่มขึ้น + ETC − ยา' }, el('b', {}, (x.est ? '≈ ' : '') + num(x.netHr))), el('td', {}, num(x.killSilverHr)), el('td', {}, num(x.killsHr)), el('td', {}, [x.minutes ? `วัด ${x.minutes} นาที` : '', x.histMinutes ? `log ${x.histMinutes} นาที` : ''].filter(Boolean).join(' · ')), el('td', {}, ago(x.last)),
         el('td', {}, x.map === r.here ? '' : el('button', { class: 'tiny', onclick: async () => { const g = await dash.invoke('farm-go', accId, x.map); showBanner(g && g.ok ? `🚶 กำลังไป ${x.name} · ถึงแล้วเปิด AUTO ทั้งแมพ` : (g && g.error) || 'ไปไม่ได้'); closeModal(); } }, 'ไปฟาร์ม'))))) : el('p', {}, 'ยังไม่มีข้อมูล · เปิด AUTO ฟาร์มสักพัก หรือกด "🔎 หาที่ฟาร์มคุ้มสุด"'),
   ]);
 }

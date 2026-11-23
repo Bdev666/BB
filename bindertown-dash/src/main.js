@@ -1509,7 +1509,29 @@ function farmClose(L) {
   farmDirtyStore = true;
 }
 // per map for one account, near its level: Silver per hour (median of the minutes, one bad minute does not swing it)
+let farmHistCache = null;
+function farmHist() { if (!farmHistCache || Date.now() - farmHistCache.at > 30 * 60000) { let h = {}; try { h = selftest.farmHistory(14); } catch (e) { log.warn(`farm history: ${e.message}`); } farmHistCache = { at: Date.now(), h }; } return farmHistCache.h; }
 function farmSummary(accId, level, sinceMin = 0) {
+  const live = farmSummaryLedger(accId, level, sinceMin);
+  if (sinceMin) return live; // a measurement window: only what was measured in it
+  // + the stats log (every 10 min, 14 days): Silver from kills per map. It has no auto-sell, so maps known only from
+  // there get an estimate: their kill Silver x this account's own (profit / kill Silver) from maps measured both ways
+  const hist = farmHist(); const byMap = new Map(live.map((x) => [x.map, x]));
+  const ratios = live.filter((x) => x.minutes >= 10 && x.killSilverHr > 0).map((x) => x.netHr / x.killSilverHr);
+  const ratio = ratios.length ? Math.max(0.8, Math.min(3, ratios.reduce((t, x) => t + x, 0) / ratios.length)) : 1;
+  for (const a of Object.values(hist)) {
+    if (Number(a.acc) !== accId || WORLD_ARENAS.has(a.map)) continue;
+    const st = a.steps.filter((s) => !level || !s.lv || Math.abs(s.lv - level) <= 5);
+    const min = st.reduce((t, s) => t + s.min, 0); if (min < 20) continue;
+    const killHr = Math.round(st.reduce((t, s) => t + s.silver, 0) / min * 60); const killsHr = Math.round(st.reduce((t, s) => t + s.kills, 0) / min * 60);
+    if (killsHr < 100) continue; // a town / standing around, not a farm
+    const x = byMap.get(a.map);
+    if (x) Object.assign(x, { histMinutes: min, histKillHr: killHr });
+    else { const e = { map: a.map, name: mapName(a.map), minutes: 0, netHr: Math.round(killHr * ratio), est: true, killSilverHr: killHr, killsHr, histMinutes: min, histKillHr: killHr, last: Math.max(...st.map((s) => s.t)) }; live.push(e); byMap.set(a.map, e); }
+  }
+  return live.sort((p, q) => q.netHr - p.netHr);
+}
+function farmSummaryLedger(accId, level, sinceMin = 0) {
   const out = [];
   for (const [key, rows] of Object.entries(store.data.farm || {})) {
     const [a, map] = [key.slice(0, key.indexOf(':')), key.slice(key.indexOf(':') + 1)];
@@ -1652,7 +1674,7 @@ async function finderStart(id, on) {
   } catch (e) { log.warn(`acc ${id}: farm finder maps: ${e.message}`); }
   const lv = me.level;
   const minutes = Math.max(5, Math.min(30, Number(store.data.settings.farmTrialMinutes) || 10));
-  const known = new Map(farmSummary(id, lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= minutes).map((x) => [x.map, x]));
+  const known = new Map([...farmSummary(id, lv).filter((x) => x.est && x.histMinutes >= 30), ...farmSummary(id, lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= minutes)].map((x) => [x.map, x]));
   // safe first (5+ hits to die); if that leaves fewer than 3 other maps, take 3+ hits, then any in the level band
   const inBand = ((sim && sim.rows) || []).filter((r) => r.band && r.band[0] <= lv + 3 && !WORLD_ARENAS.has(r.id));
   let rows = inBand.filter((r) => r.hitsToDie == null || r.hitsToDie >= 5);
@@ -1707,7 +1729,10 @@ async function finderStep(id) {
     }
     if (f.phase === 'pick') {
       const unsafe = new Set(f.list.filter((x) => x.unsafe).map((x) => x.map));
-      const all = farmSummary(id, f.lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= 3 && !unsafe.has(x.map) && !WORLD_ARENAS.has(x.map));
+      // measured in the last 3 days, plus maps known from the stats log (estimated); the measured number wins per map
+      const recent = farmSummary(id, f.lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= 3);
+      const fromLog = farmSummary(id, f.lv).filter((x) => x.est && x.histMinutes >= 30 && !recent.some((y) => y.map === x.map));
+      const all = [...recent, ...fromLog].filter((x) => !unsafe.has(x.map) && !WORLD_ARENAS.has(x.map)).sort((p, q) => q.netHr - p.netHr);
       const best = all[0];
       if (!best) { f.on = false; f.note = 'ยังไม่มีข้อมูลพอ (ไม่ได้ฟาร์มครบนาทีในแมพไหนเลย)'; return; }
       f.best = { map: best.map, name: best.name, netHr: best.netHr };

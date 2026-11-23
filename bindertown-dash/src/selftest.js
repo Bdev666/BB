@@ -390,7 +390,31 @@ function create(deps) {
     return { ok: true, file, kb: Math.round(out.length / 1024) };
   }
 
-  return { runSelfTest, statsTick, statsSummary, count, counters, logProblems, bundle, combatHit, combatFlush };
+  // what the stats lines (every 10 min) say each map paid: Silver from kills and kills, step by step on one map
+  // (the numbers in a line are averages since the game opened: each step is the difference of two lines)
+  function farmHistory(days = 14) {
+    const since = Date.now() - days * 24 * 3600 * 1000;
+    let files = []; try { files = fs.readdirSync(dirOf('stats')).filter((f) => /^stats-.*\.jsonl$/.test(f)).sort().slice(-2); } catch { /* none */ }
+    const rows = [];
+    for (const f of files) {
+      let text = ''; try { text = fs.readFileSync(path.join(dirOf('stats'), f), 'utf8'); } catch { continue; }
+      for (const l of text.split('\n')) { if (!l) continue; try { const o = JSON.parse(l); if (Date.parse(o.t) >= since) rows.push(o); } catch { /* skip */ } }
+    }
+    rows.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+    const prev = {}; const out = {};
+    for (const r of rows) {
+      const p = prev[r.acc]; prev[r.acc] = r;
+      if (!p || p.map !== r.map || !(r.min > p.min) || r.min - p.min > 15) continue;
+      const dm = r.min - p.min;
+      const ds = (r.silverH || 0) * r.min / 60 - (p.silverH || 0) * p.min / 60;
+      const dk = (r.killsH || 0) * r.min / 60 - (p.killsH || 0) * p.min / 60;
+      if (!(dk > 0) || ds < 0) continue; // not farming (town, travelling, a new session)
+      const key = `${r.acc}:${r.map}`; const a = out[key] || (out[key] = { acc: r.acc, map: r.map, steps: [] });
+      a.steps.push({ lv: r.level || 0, min: dm, silver: ds, kills: dk, t: Date.parse(r.t) });
+    }
+    return out;
+  }
+  return { runSelfTest, statsTick, statsSummary, farmHistory, count, counters, logProblems, bundle, combatHit, combatFlush };
 }
 
 module.exports = { create };
