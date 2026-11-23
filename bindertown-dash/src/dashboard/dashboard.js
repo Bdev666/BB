@@ -197,28 +197,19 @@ function renderProfile(a) {
       el('span', { class: 'bi' }, ic), b.name, count ? el('b', { class: 'bn' }, '×' + count) : null, left ? el('small', {}, left) : null);
   }));
 
-  const tiles = [
-    ['เวลาเล่น', dur(r.playMs), '', 'นับตั้งแต่เปิดเกมในบัญชีนี้'],
-    ['EXP/ชม.', short(r.expPerHour)],
-    ['Kill/ชม.', short(r.killsPerHour)],
-    ['ดาเมจ/วิ', short(r.dpsNow), '', `ดาเมจที่ตีได้ใน 1 นาทีล่าสุด · เฉลี่ยต่อครั้ง ${short(r.avgHit)}`],
-    ['Silver/ชม.', short(r.silverPerHour), 'pos', 'Silver ที่ได้จากการล้มมอน'],
-    ['ขายดรอป/ชม.', short(r.dropValuePerHour), 'pos', `มูลค่าของดรอปถ้าขาย NPC (คำนวณแบบเดียวกับเกม) · รวม ${num(r.dropValue)}`],
-    ['Silver เพิ่มจริง/ชม.', a.silverUpHr ? short(a.silverUpHr.perHour) : '-', 'gold', a.silverUpHr ? `Silver ในตัวที่เพิ่มขึ้นจริงใน ${a.silverUpHr.minutes} นาทีล่าสุด (นับแบบเดียวกับหน้าพักจอของเกม: รวมทุกอย่าง ทั้งมอน ขาย/หลอมอัตโนมัติ ลบค่ายา/ค่าเกิด และรวมช่วงตีบอส/เดินทาง) · หน้าพักจอนับเฉพาะตั้งแต่เข้าพักจอ ถ้าเพิ่งเข้า 1–2 นาที ตัวเลขแกว่งมาก` : 'รออย่างน้อย 5 นาที'],
-    ['มอน+ETC/ชม.', short(r.incomePerHour), 'gold', 'Silver จากล้มมอน + ETC ที่เก็บ (ราคา NPC) เฉลี่ยตั้งแต่เปิดเกม (รวมช่วงไม่ได้ฟาร์ม) · ไม่รวมเงินขาย/หลอมอัตโนมัติ · ดูเงินที่ได้จริงที่ "กำไรฟาร์ม/ชม."'],
-    ['กำไรฟาร์ม/ชม.', a.farmNow ? short(a.farmNow.netHr) : '-', 'gold', a.farmNow ? `Silver ในตัวที่เพิ่มจริง (แบบเดียวกับหน้าพักจอของเกม) + ETC ราคา NPC − ยาที่ซื้อ · เฉลี่ย ${a.farmNow.minutes} นาทีที่ฟาร์มแมพนี้ใน 1 ชม.ล่าสุด · หน้าพักจอของเกมนับแค่ช่วงสั้น ๆ ตั้งแต่เข้าพักจอ ตัวเลขจึงแกว่งกว่า · ไม่นับราคาตลาด` : 'ต้องฟาร์มด้วย AUTO สักพักก่อน (นับเฉพาะนาทีที่ล้มมอน)'],
-    ['การ์ด', r.cards ? `${num(r.cards)} · ${r.cardsPerHour.toFixed(1)}/ชม.` : '0', 'card', (d.cards || []).slice(-5).map((c) => c.mob).join(', ') || 'ยังไม่ได้การ์ด'],
+  // what the game's own sleep screen shows, since the game opened (no estimates, nothing added up)
+  const S = r.session || {}; const hrs = Math.max(1 / 60, r.playMs / 3600000);
+  const ph = (v) => (v && r.playMs > 120000 ? ` (${num(Math.round(v / hrs))}/ชม.)` : '');
+  const sg = (v) => (v == null ? '-' : (v >= 0 ? '+' : '') + num(v));
+  const lines = [
+    `สรุปตั้งแต่เปิดเกม · ${dur(r.playMs)}`,
+    `ล้มมอน ${num(S.kills || 0)}${ph(S.kills)} · ตาย ${num(S.deaths || 0)} · เลเวลอัป ${num(S.levels || 0)} · ยาที่ใช้ ${num(S.potions || 0)}`,
+    `EXP +${num(S.exp || 0)}${ph(S.exp)} · Job EXP +${num(S.job || 0)} · Gold ${sg(S.gold)}${S.gold ? ph(S.gold) : ''}`,
   ];
-  // update text in place (no DOM rebuild every second)
   const box = $('#d-tiles');
-  if (box.children.length !== tiles.length) {
-    box.replaceChildren(...tiles.map(([l, , c]) => el('div', { class: 'tile' + (c ? ' ' + c : '') }, el('span', {}, l), el('b', {}))));
-  }
-  tiles.forEach(([, v, , tip], i) => {
-    const t = box.children[i];
-    if (t.lastChild.textContent !== v) t.lastChild.textContent = v;
-    t.title = tip || '';
-  });
+  if (!box.classList.contains('sleepsum')) { box.className = 'tiles sleepsum'; box.replaceChildren(el('h4', {}), el('p', {}), el('p', {})); }
+  lines.forEach((t, k) => { if (box.children[k].textContent !== t) box.children[k].textContent = t; });
+  box.title = 'นับแบบหน้าพักจอของเกม: Gold = Silver ในตัวตอนนี้ลบตอนเปิดเกม (รวมทุกอย่าง) · ต่อชั่วโมงคิดจากเวลาตั้งแต่เปิดเกม';
 }
 
 function chips(container, list, current, onPick) {
@@ -1559,7 +1550,7 @@ if (dash.platform === 'darwin') {
 {
   const fold = (btn, box, cls, key, on, offTxt, onTxt) => { box.classList.toggle(cls, on); btn.textContent = on ? onTxt : offTxt; try { localStorage.setItem(key, on ? '1' : ''); } catch { /* storage off */ } };
   const tb = $('#tiles-fold'); const prof = document.querySelector('.profile');
-  const tSet = (on) => fold(tb, prof, 'tiles-min', 'tilesMin', on, '📊 ตัวเลข ▴', '📊 ตัวเลข ▾');
+  const tSet = (on) => fold(tb, prof, 'tiles-min', 'tilesMin', on, '📊 สรุป ▴', '📊 สรุป ▾');
   tb.addEventListener('click', () => tSet(!prof.classList.contains('tiles-min')));
   const eb = $('#ev-fold'); const logs = document.querySelector('.logs');
   const eSet = (on) => fold(eb, logs, 'ev-min', 'evMin', on, 'ย่อ ▴', 'ขยาย ▾');

@@ -382,7 +382,7 @@ class BinderTownAdapter {
         break;
       }
       case 'levelUp':
-        if (e.id === this.sessionId) out.push({ type: 'info', text: `เลเวลอัป! Lv ${e.level}`, t: at });
+        if (e.id === this.sessionId) { out.push({ type: 'info', text: `เลเวลอัป! Lv ${e.level}`, t: at }); out.push({ type: 'levelUp', level: e.level, t: at }); }
         break;
       case 'jobLevelUp':
         if (e.id === this.sessionId) out.push({ type: 'info', text: `Job เลเวลอัป! Job ${e.level}`, t: at });

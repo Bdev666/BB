@@ -44,6 +44,7 @@ class AccountData {
     this.minimap = null;      // data URL of the game's own minimap
     this.startedAt = Date.now();
     this.kills = 0;
+    this.expGain = 0; this.jobGain = 0; this.deaths = 0; this.levelUps = 0; this.potionsUsed = 0; this.firstLevel = null;
     this.silverStart = null;
     this.killSilver = 0; // Silver from killing monsters only (spending never counts against it)
     this.dmgWindow = [];      // [{ t, dmg }] last 60s of damage dealt
@@ -105,6 +106,7 @@ class AccountData {
       case 'hurt': this.log('hurt', `โดน ${ev.from} ${fmt(ev.dmg)}`, t); break;
       case 'kill':
         this.kills++;
+        if (ev.exp > 0) this.expGain += Number(ev.exp); if (ev.job > 0) this.jobGain += Number(ev.job); // a level-up kill reads negative (the bar starts over)
         this.killSilver += Number(ev.silver) || 0;
         this.log('exp', `ล้ม ${ev.target}${ev.exp ? ` +${fmt(ev.exp)} EXP` : ''}${ev.job != null ? ` · +${fmt(ev.job)} Job` : ''}${ev.silver ? ` · +${fmt(ev.silver)} Silver` : ''}`, t);
         break;
@@ -121,7 +123,7 @@ class AccountData {
         for (const it of ev.items || []) {
           const b = this.bagItem(it.name, t);
           if (b.firstQty === null) b.firstQty = Math.max(0, it.qty - b.gained); // loot already counted
-          else if (it.qty < b.qty) b.useLog.push([t, b.qty - it.qty]); // used up (sales are taken back out below)
+          else if (it.qty < b.qty) { b.useLog.push([t, b.qty - it.qty]); if (it.supply && /potion|elixir|ether|โพชั่น|ยา|อีลิกเซอร์|อีเธอร์/i.test(it.name + ' ' + ((it.ids || [])[0] || {}).id)) this.potionsUsed += b.qty - it.qty; } // used up (sales are taken back out below)
           b.qty = it.qty;
           if (it.ids) b.ids = it.ids;
           b.supply = !!it.supply;
@@ -134,7 +136,7 @@ class AccountData {
       }
       case 'sold': {
         const b = this.bag.get(ev.item);
-        if (b) { b.sold += ev.qty || 0; b.useLog.push([t, -(ev.qty || 0)]); }
+        if (b) { b.sold += ev.qty || 0; b.useLog.push([t, -(ev.qty || 0)]); if (b.supply) this.potionsUsed = Math.max(0, this.potionsUsed - (ev.qty || 0)); }
         if (ev.id) { const s = this.baseItem(baseId(ev.id)); s.useLog.push([t, -(ev.qty || 0)]); } // a sale is not use (it may come before or after the bag drops)
         this.soldSilver += ev.silver || 0;
         this.log(ev.auto ? 'other' : 'loot', `${ev.forged ? 'หลอมอัตโนมัติ' : ev.auto ? 'ขายอัตโนมัติ' : 'ขาย'} ${ev.item}${ev.qty > 1 ? ' x' + ev.qty : ''}${ev.silver ? ` ได้ ${fmt(ev.silver)} Silver` : ''}`, t);
@@ -161,7 +163,8 @@ class AccountData {
         if (this.cards.length > 50) this.cards.shift();
         this.log('loot', `🃏 ได้การ์ด ${ev.mob}${ev.level ? ` Lv ${ev.level}` : ''}`, t);
         break;
-      case 'death': this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
+      case 'levelUp': this.levelUps++; break;
+      case 'death': if (!(this.lastDeathT && t - this.lastDeathT < 1500)) this.deaths++; this.lastDeathT = t; this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
       case 'revive': this.log('other', 'ฟื้นแล้ว', t); break;
       case 'party': this.log('other', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`, t); break;
       default: break;
@@ -224,6 +227,9 @@ class AccountData {
     const silver = this.stats.silver;
     return {
       playMs: now - this.startedAt,
+      // the game's sleep-screen summary, since the game opened in BinderDash
+      session: { kills: this.kills, deaths: this.deaths, levels: this.levelUps, potions: this.potionsUsed, exp: this.expGain, job: this.jobGain,
+        gold: typeof this.stats.silver === 'number' && this.silverStart !== null ? this.stats.silver - this.silverStart : null },
       ...this.levelEta(),
       expPerHour: this.expTracker.perHour(),
       killsPerHour: this.kills / hours,
