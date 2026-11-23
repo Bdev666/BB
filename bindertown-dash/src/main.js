@@ -367,7 +367,9 @@ async function pollSnapshots() {
   for (const [id, g] of openGames()) {
     if (g.snapshotBusy || g.status === 'maintenance' || g.status === 'crashed') continue;
     // dashboard closed: every 3 s is plenty for alerts
-    if (!looking && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
+    // every second only for the account open in the Dashboard; the others (and all when nobody looks) every 3 s:
+    // each read runs inside the game page, so fewer reads = smoother games
+    if ((!looking || id !== watchedId) && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
     g.lastSnapAt = now;
     g.snapshotBusy = true;
     try {
@@ -658,8 +660,24 @@ async function runCommand(id, cmd, arg) {
       break;
     case 'sell': {
       const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
-      if (!/^[\w~#.:+^|-]+$/.test(arg.itemId || '')) return { ok: false, error: 'ไอเทมไม่ถูกต้อง' };
+      if (!/^[\w~#.:+^|$&!%@*-]+$/.test(arg.itemId || '')) return { ok: false, error: 'ไอเทมไม่ถูกต้อง' };
       ok = await js(`(window.__game && window.__game.sell) ? (window.__game.sell(${JSON.stringify(arg.itemId)}, ${qty}), true) : false`);
+      break;
+    }
+    case 'sellNpc': {
+      // chosen pieces (the dashboard's NPC sell window); never a locked one, whatever the list says
+      const list = Array.isArray(arg.items) ? arg.items.slice(0, 300) : [];
+      let n = 0;
+      for (const it of list) {
+        const itemId = String(it.itemId || ''); const qty = Math.max(1, Math.floor(Number(it.qty) || 1));
+        if (!/^[\w~#.:+^|$&!%@*-]+$/.test(itemId) || (g.adapter.locks && g.adapter.locks.has(itemId))) continue;
+        // eslint-disable-next-line no-await-in-loop
+        await js(`window.__game.sell(${JSON.stringify(itemId)}, ${qty}), true`); n++;
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      log.info(`acc ${id}: sold ${n} item stack(s) to the NPC (chosen in the dashboard)`);
+      ok = n > 0;
       break;
     }
     case 'sellEtc': {

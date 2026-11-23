@@ -456,3 +456,16 @@ footer { font-size: 12.5px; }
 footer { flex-shrink: 0; padding-top: 4px; background: var(--bg); position: relative; z-index: 2; }
 
 @media (min-width: 1400px) { .tiles { grid-template-columns: repeat(5, 1fr); } }
+/* NPC sell window rows */
+.gearrow { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.gearrow .nm { flex: 1; display: flex; flex-direction: column; }
+.gearrow .nm small, .hv .nm small { color: var(--muted); font-size: 12px; }
+.gearrow .pr { color: var(--muted); white-space: nowrap; }
+.gearrow.rich { background: rgba(255, 200, 60, .08); }
+/* fold up / down: the numbers block and the events log */
+.fold-btn { margin-left: auto; }
+.profile.tiles-min #d-tiles { display: none; }
+.logs.ev-min { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+.logs.ev-min .log:not(.chat) .lines, .logs.ev-min .log:not(.chat) .chips { display: none; }
+.logs.ev-min .log:not(.chat) { flex: none; padding-top: 8px; padding-bottom: 8px; }
+.tiles-head { display: flex; justify-content: flex-end; margin-top: 8px; }

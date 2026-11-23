@@ -40,7 +40,7 @@ const DEFAULTS = {
     salvageByPrice: true,     // salvage only gear the central market says is worth little
     salvageMaxPrice: 1000000, // ... under this many Gold (or no price at all)
     salvageKeepVol: 3,        // ... and never what sold this many times or more in the last 7 days
-    highValueGold: 10000000, // the dashboard's "high-value gear" panel shows pieces worth at least this
+    highValueGold: 5000000, // the dashboard's "high-value gear" panel shows pieces worth at least this
     valuableMinGold: 1000000, // notify drops whose central-market value is at least this (Gold)
     potionMinutes: 30,
     bossLeadMinutes: 5,      // heads-up this many minutes before a boss spawns / starts       // warn when supplies run out within this many minutes
@@ -80,6 +80,10 @@ class Store {
         },
       };
       // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
+      if (!this.data.settings.hv5m) { // the high-value panel starts at 5M now (the old default was 10M)
+        if (this.data.settings.highValueGold === 10000000) this.data.settings.highValueGold = 5000000;
+        this.data.settings.hv5m = true;
+      }
       if (!this.data.settings.valuable1m) {
         if (this.data.settings.valuableMinGold < 1000000) this.data.settings.valuableMinGold = 1000000;
         this.data.settings.valuable1m = true;

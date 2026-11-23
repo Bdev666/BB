@@ -590,6 +590,45 @@ function gearList() {
   return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked).map((x) => ({ ...x, name: b.name, market: b.market })));
 }
 function gearCount() { return gearList().length; }
+// which piece is which: Thai name, +refine and its lines (many pieces share one name)
+const AFX_TH = { atk: 'ATK', atkpct: 'ATK%', matk: 'MATK', matkpct: 'MATK%', crit: 'คริ', critdmg: 'ดาเมจคริ', cdr: 'คูลดาวน์', aspd: 'สปีดตี', str: 'STR', agi: 'AGI', vit: 'VIT', int: 'INT', dex: 'DEX', luk: 'LUK', hp: 'HP', hppct: 'HP%', vsdebuff: 'ดาเมจใส่ดีบัฟ', guard: 'Guard', spellamp: 'Spell Amp', armorpen: 'เจาะเกราะ', p_bleed: 'Rend', p_echo: 'Echo', p_chain: 'Chain', p_expose: 'Sunder', p_bulwark: 'Bulwark', p_haste: 'Frenzy', p_thorns: 'สะท้อน', sturdy: 'Sturdy', evasive: 'หลบ', move: 'วิ่งเร็ว', leech: 'ดูดเลือด', opener: 'ตีแรก' };
+function gearLabel(x, name) {
+  const id = String(x.id || '');
+  const ref = /\+(\d+)/.exec(id.split('|')[0]);
+  const lines = ((/\|([^#]*)/.exec(id) || [])[1] || '').split(',').filter(Boolean).map((a) => { const p = a.split(':'); return `${AFX_TH[p[0]] || p[0]} ${p[2] || ''}`.trim(); });
+  return { title: `${name}${ref ? ' +' + ref[1] : ''}`, sub: lines.join(' · ') };
+}
+// sell chosen pieces to the NPC shop (never locked ones; expensive ones are not ticked)
+async function openNpcSell() {
+  const min = (state && state.settings.highValueGold) || 5000000;
+  const ip = (detail && detail.itemPrices) || {};
+  const gear = ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked).map((x) => ({ ...x, name: b.name })));
+  const rows = gear.map((g) => {
+    const p = ip[g.id]; const rich = p && p.price >= min; const lb = gearLabel(g, g.name);
+    const box = el('input', { type: 'checkbox', value: g.id, 'data-rarity': g.rarity || 'normal', checked: !rich && ['normal', 'magic'].includes(g.rarity || 'normal') ? '' : null });
+    return { g, box, row: el('label', { class: 'gearrow' + (rich ? ' rich' : '') }, box,
+      el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]),
+      el('span', { class: 'nm' }, (rich ? '💎 ' : '') + lb.title, lb.sub ? el('small', {}, lb.sub) : null),
+      el('small', { class: 'pr' }, p && p.price ? `ตลาด ${short(p.price)} G` : g.bound ? 'ผูกตัว (ขายตลาดไม่ได้)' : 'ยังไม่รู้ราคาตลาด')) };
+  });
+  const count = el('b', {}, '');
+  const upd = () => { count.textContent = String(rows.filter((r) => r.box.checked).length); };
+  for (const r of rows) r.box.addEventListener('change', upd);
+  const pick = (rar, on) => { for (const r of rows) if ((r.g.rarity || 'normal') === rar && !(ip[r.g.id] && ip[r.g.id].price >= min)) r.box.checked = on; upd(); };
+  upd();
+  openModal('🪙 ขายของให้ NPC', [
+    el('p', { class: 'hint' }, `ชื่อภาษาไทยตามเกม · ของที่ล็อกในเกมไม่แสดงและไม่ขาย · 💎 = ราคาตลาด ≥ ${short(min)} G (ไม่ติ๊กให้) · ติ๊ก Normal/Magic ไว้ให้ก่อน`),
+    el('div', { class: 'lab-row' }, ...['normal', 'magic', 'rare', 'epic'].map((rar) => el('button', { class: 'tiny', onclick: () => pick(rar, !rows.some((r) => (r.g.rarity || 'normal') === rar && r.box.checked)) }, `เลือก/ไม่เลือก ${(RARITIES.find((r) => r[0] === rar) || RARITIES[0])[1]}`))),
+    rows.length ? el('div', { class: 'gearlist' }, ...rows.map((r) => r.row)) : el('p', {}, 'ไม่มีอุปกรณ์ที่ขายได้ (ที่ล็อกไว้ไม่นับ)'),
+    el('div', { class: 'lab-row' }, el('button', { class: 'primary', onclick: async () => {
+      const items = rows.filter((r) => r.box.checked).map((r) => ({ itemId: r.g.id, qty: r.g.qty || 1 }));
+      if (!items.length) return;
+      const rich = items.filter((x) => ip[x.itemId] && ip[x.itemId].price >= min).length;
+      if (!confirm(`ขาย ${items.length} ชิ้นให้ NPC?${rich ? `\n⚠ มี ${rich} ชิ้นที่ราคาตลาด ≥ ${short(min)} G` : ''}`)) return;
+      closeModal(); await cmd('sellNpc', { items }, `กำลังขาย ${items.length} ชิ้นให้ NPC…`);
+    } }, 'ขายให้ NPC ', count, ' ชิ้น')),
+  ]);
+}
 
 async function openSalvage() {
   const gear = gearList();
@@ -657,7 +696,7 @@ function tradableGear() {
 
 // ---------- high-value gear panel: pieces worth >= highValueGold on the central market ----------
 function renderHighValue() {
-  const min = (state && state.settings.highValueGold) || 10000000;
+  const min = (state && state.settings.highValueGold) || 5000000;
   const a = state && state.accounts.find((x) => x.id === selected);
   const live = !!a && a.status === 'online';
   const ip = (detail && detail.itemPrices) || {};
@@ -671,7 +710,7 @@ function renderHighValue() {
   rebuild($('#hivalue'), key, () => {
     const out = rich.map((g) => el('div', { class: 'item hv' },
       el('span', { class: 'rar r-' + (g.rarity || 'normal') }, (RARITIES.find((r) => r[0] === g.rarity) || RARITIES[0])[1]),
-      el('div', { class: 'nm' }, g.name, el('small', {}, g.p.basis === 'listed' ? `ตลาดถูกสุด ${short(g.p.price)} G${g.p.last ? ` · ขายล่าสุด ${short(g.p.last)}` : ''} · วางขาย ${g.p.stock}` : `ขายจริงล่าสุด ${short(g.p.price)} G · ตอนนี้ไม่มีคนวางขาย`)),
+      el('div', { class: 'nm' }, gearLabel(g, g.name).title, el('small', {}, gearLabel(g, g.name).sub), el('small', {}, g.p.basis === 'listed' ? `ตลาดถูกสุด ${short(g.p.price)} G${g.p.last ? ` · ขายล่าสุด ${short(g.p.last)}` : ''} · วางขาย ${g.p.stock}` : `ขายจริงล่าสุด ${short(g.p.price)} G · ตอนนี้ไม่มีคนวางขาย`)),
       live ? el('button', { class: 'tiny', title: 'ลงขายชิ้นนี้ในตลาดกลาง', onclick: () => openMarketSell({ only: [g.id] }) }, '🏪 ขาย') : null));
     if (rich.length > 1 && live) out.push(el('button', { class: 'ctl small', onclick: () => openMarketSell({ only: rich.map((g) => g.id) }) }, `🏪 ลงขายทั้งหมด ${rich.length} ชิ้น`));
     for (const p of pending) {
@@ -1231,7 +1270,8 @@ function renderControls(a) {
       el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
       el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {
       if (confirm(`ขายของดรอปทั้งหมด ${num(etcQty)} ชิ้นให้ NPC?`)) cmd('sellEtc', {}, 'กำลังขายของดรอป…');
-    } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`))),
+    } }, `🪙 ขาย ETC ทั้งหมด (${num(etcQty)})`),
+      el('button', { class: 'ctl', disabled: gearCount() && canSell() ? null : '', title: canSell() ? 'เลือกอุปกรณ์ที่ล้นกระเป๋าขายให้ NPC (ชื่อไทย มี +ตีบวก และออฟชั่นบอกว่าชิ้นไหน · ของล็อกไม่แสดง · ของแพงไม่ติ๊กให้)' : SELL_RULE, onclick: () => openNpcSell() }, `🪙 ขายอุปกรณ์ให้ NPC (${gearCount()})`))),
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '🧪 บิลด์'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl', title: 'วิเคราะห์บิลด์ของตัวละครนี้: ดาเมจตอนนี้จากเกียร์+การ์ดที่ใส่ แล้วหาชุดสกิลและการ์ดที่แรงที่สุด', onclick: () => openLab({ id: a.id, auto: true }) }, '🧪 วิเคราะห์บิลด์'))),
     (a.deaths && a.deaths.perHour >= 5) || (a.bounty && (a.bounty.on || a.bounty.note)) || (a.finder && a.finder.note) ? el('div', { class: 'ctl-status' }, a.finder && a.finder.note ? el('span', { class: 'ctl-chip' + (a.finder.on ? ' on' : ''), title: 'หาที่ฟาร์มคุ้มสุด' }, `🔎 ${a.finder.note}`) : null, a.deaths && a.deaths.perHour >= 5 ? el('span', { class: 'ctl-chip' + (a.deaths.feePerHour > a.deaths.silverPerHour * 0.1 ? ' warn' : ''), title: 'ตายบ่อยในแมพนี้: ทุกครั้งที่ตายเสียเวลาตี และเกิดที่เดิมในแมพฟิลด์เสีย 5,000 G ต่อครั้ง · ถ้าค่าเกิดเกิน 10% ของรายได้ ลองเพิ่ม HP/VIT หรือย้ายไปแมพที่มอนเบาลง' }, `☠ ตาย ${a.deaths.perHour}/ชม. · ค่าเกิด ~${num(a.deaths.feePerHour)} G/ชม.${a.deaths.silverPerHour ? ` (${Math.round(a.deaths.feePerHour / a.deaths.silverPerHour * 100)}% ของรายได้)` : ''}`) : null, a.bounty && (a.bounty.on || a.bounty.note) ? el('span', { class: 'ctl-chip' + (a.bounty.on ? ' on' : ''), title: 'ค่าหัวรายวัน' }, `📜 ${a.bounty.note || a.bounty.phase}${a.bounty.done ? ` · รับแล้ว ${a.bounty.done}` : ''}`) : null) : null,
@@ -1505,4 +1545,16 @@ setInterval(refreshDetail, 1000);
 if (dash.platform === 'darwin') {
   const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = w.nextNode(); n; n = w.nextNode()) if (/Ctrl|พร้อม Windows|มุมขวาล่าง/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Ctrl\+/g, 'Cmd+').replace(/พร้อม Windows/g, 'ตอนเปิด Mac').replace(/มุมขวาล่าง/g, 'บนแถบเมนูด้านบน');
+}
+
+// fold up / down (remembered): the numbers block and the events (damage) log
+{
+  const fold = (btn, box, cls, key, on, offTxt, onTxt) => { box.classList.toggle(cls, on); btn.textContent = on ? onTxt : offTxt; try { localStorage.setItem(key, on ? '1' : ''); } catch { /* storage off */ } };
+  const tb = $('#tiles-fold'); const prof = document.querySelector('.profile');
+  const tSet = (on) => fold(tb, prof, 'tiles-min', 'tilesMin', on, '📊 ตัวเลข ▴', '📊 ตัวเลข ▾');
+  tb.addEventListener('click', () => tSet(!prof.classList.contains('tiles-min')));
+  const eb = $('#ev-fold'); const logs = document.querySelector('.logs');
+  const eSet = (on) => fold(eb, logs, 'ev-min', 'evMin', on, 'ย่อ ▴', 'ขยาย ▾');
+  eb.addEventListener('click', () => eSet(!logs.classList.contains('ev-min')));
+  try { tSet(localStorage.getItem('tilesMin') === '1'); eSet(localStorage.getItem('evMin') === '1'); } catch { /* storage off */ }
 }

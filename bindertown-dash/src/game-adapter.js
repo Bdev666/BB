@@ -172,7 +172,7 @@ const SUPPLIES = /^(potion|mana_potion|.*_potion|.*elixir|.*ether|arrow.*|.*_arr
 function isSupply(id) { return SUPPLIES.test(baseOf(id)); }
 
 // "robe_t10+12|vit:6:9,dex:7:12#uuid" -> "robe_t10" (refine, inscription, quality and instance stripped)
-function baseOf(id) { return String(id || '').replace(/^cash:/, '').split(/[|#+^*~@]/)[0]; }
+function baseOf(id) { return String(id || '').replace(/^cash:/, '').split(/[|#+^*~@$&!%]/)[0]; }
 // Item grade the way the game computes it (client: affix count; the 20 classic affixes count one step higher)
 const CLASSIC_AFFIXES = new Set(['sharp', 'heavy', 'keen', 'precise', 'swift', 'fleet', 'runed', 'arcane', 'cruel', 'deadly', 'of_the_bear', 'of_the_ox', 'of_the_fox', 'of_fortune', 'of_the_sage', 'of_the_owl', 'of_the_wind', 'of_stone', 'of_the_monk', 'of_the_hawk']);
 function rarityOf(id) {
@@ -204,7 +204,7 @@ const titleCase = (id) => String(id || '?')
   .map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 // item / mob / skill id -> display name ("yellow_potion" -> "Yellow Potion", drop_<mob> -> the drop's name)
 function pretty(id) {
-  const base = String(id || '?').replace(/[~#^|+].*$/, '').replace(/^cash:/, '');
+  const base = String(id || '?').replace(/^cash:/, '').split(/[~#^|+*@$&!%]/)[0];
   const drop = /^drop_(.+)$/.exec(base);
   if (drop) {
     // same as the game: a named drop, else "<Mob> · <category>"
