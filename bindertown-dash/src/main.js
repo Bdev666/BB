@@ -2012,9 +2012,15 @@ async function bountyStep(id) {
       await answerWarpBox(id, g);
       // the moment it is on the map: the next step at once (the 20-s tick left it standing there)
       const to = cur.map; const t0 = Date.now();
-      const watch = setInterval(() => {
-        if (!g.bounty || !g.bounty.on || g.bounty.phase !== 'travel' || Date.now() - t0 > 6 * 60000) { clearInterval(watch); return; }
-        if (mapOf(g) === to) { clearInterval(watch); g.bountyArrivedAt = Date.now(); log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
+      let looking = false;
+      const watch = setInterval(async () => {
+        if (!g.bounty || !g.bounty.on || g.bounty.phase !== 'travel' || Date.now() - t0 > 6 * 60000 || !g.win || g.win.isDestroyed()) { clearInterval(watch); return; }
+        if (looking) return; looking = true;
+        let m = mapOf(g); try { m = await g.win.webContents.executeJavaScript('window.__game && window.__game.mapId()', true); } catch { /* page busy: use the last snapshot */ }
+        looking = false;
+        if (m === to) { clearInterval(watch);
+          // AUTO on the moment it lands; the bounty step then keeps it to the bounty monster
+          await new Promise((r) => setTimeout(r, 800)); { const prev = await setFarmRange(g, 0); if (prev != null && prev !== 0 && g.bounty && g.bounty.prevFarm == null) g.bounty.prevFarm = prev; } if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); g.bountyArrivedAt = Date.now(); log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
       }, 1000);
       return;
     }
