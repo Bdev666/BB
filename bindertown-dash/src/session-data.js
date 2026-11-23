@@ -44,6 +44,7 @@ class AccountData {
     this.minimap = null;      // data URL of the game's own minimap
     this.startedAt = Date.now();
     this.kills = 0;
+    this.goldFarm = 0; this.goldJumps = 0; this.lastSilver = null;
     this.expGain = 0; this.jobGain = 0; this.deaths = 0; this.levelUps = 0; this.potionsUsed = 0; this.firstLevel = null;
     this.silverStart = null;
     this.killSilver = 0; // Silver from killing monsters only (spending never counts against it)
@@ -77,6 +78,12 @@ class AccountData {
         else if (typeof total === 'number') this.expTracker.add(total, this.stats.level, t);
         if (typeof rest.expPct === 'number') this.pctTracker.add(rest.expPct, this.stats.level, t);
         if (typeof rest.silver === 'number' && this.silverStart === null) this.silverStart = rest.silver;
+        // farm Gold, step by step: a jump of more than 5M in one step is not farming (a market sale, mail, a trade,
+        // buying on the market) and is left out; everything else counts like the game's sleep screen
+        if (typeof rest.silver === 'number' && rest.silver > 0) {
+          if (this.lastSilver != null) { const d = rest.silver - this.lastSilver; if (Math.abs(d) <= 5000000) this.goldFarm += d; else this.goldJumps++; }
+          this.lastSilver = rest.silver;
+        }
         break;
       }
       case 'buffs': this.buffs = ev.list || []; break;
@@ -229,7 +236,7 @@ class AccountData {
       playMs: now - this.startedAt,
       // the game's sleep-screen summary, since the game opened in BinderDash
       session: { kills: this.kills, deaths: this.deaths, levels: this.levelUps, potions: this.potionsUsed, exp: this.expGain, job: this.jobGain,
-        gold: typeof this.stats.silver === 'number' && this.silverStart !== null ? this.stats.silver - this.silverStart : null },
+        gold: this.lastSilver != null ? this.goldFarm : null, goldJumps: this.goldJumps },
       ...this.levelEta(),
       expPerHour: this.expTracker.perHour(),
       killsPerHour: this.kills / hours,

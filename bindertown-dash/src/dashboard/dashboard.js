@@ -209,7 +209,7 @@ function renderProfile(a) {
   const box = $('#d-tiles');
   if (!box.classList.contains('sleepsum')) { box.className = 'tiles sleepsum'; box.replaceChildren(el('h4', {}), el('p', {}), el('p', {})); }
   lines.forEach((t, k) => { if (box.children[k].textContent !== t) box.children[k].textContent = t; });
-  box.title = 'นับแบบหน้าพักจอของเกม: Gold = Silver ในตัวตอนนี้ลบตอนเปิดเกม (รวมทุกอย่าง) · ต่อชั่วโมงคิดจากเวลาตั้งแต่เปิดเกม';
+  box.title = 'นับแบบหน้าพักจอของเกม: Gold = Silver ในตัวที่เปลี่ยนไประหว่างฟาร์ม (ล้มมอน ขาย/หลอมอัตโนมัติ ลบค่ายา/ค่าเกิด) · เงินก้อนเกิน 5 ล้านในครั้งเดียว (ขายตลาด จดหมาย เทรด) ไม่นับ · ต่อชั่วโมงคิดจากเวลาตั้งแต่เปิดเกม';
 }
 
 function chips(container, list, current, onPick) {
