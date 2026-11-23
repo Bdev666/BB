@@ -2010,23 +2010,24 @@ async function bountyStep(id) {
       B.phase = 'travel'; B.travelAt = Date.now(); B.note = `กำลังเดินทางไป ${mapName(cur.map)}`;
       log.info(`acc ${id}: bounty travel ${here} -> ${cur.map}`);
       await answerWarpBox(id, g);
+      // the moment it is on the map: the next step at once (the 20-s tick left it standing there)
+      const to = cur.map; const t0 = Date.now();
+      const watch = setInterval(() => {
+        if (!g.bounty || !g.bounty.on || g.bounty.phase !== 'travel' || Date.now() - t0 > 6 * 60000) { clearInterval(watch); return; }
+        if (mapOf(g) === to) { clearInterval(watch); setTimeout(() => bountyStep(id).catch(() => {}), 1200); }
+      }, 1000);
       return;
     }
     // on the map: stand next to the bounty monster and fight there
     const type = MOB_BY_NAME[cur.name] || '';
     if (B.phase !== 'hunt' || !(await liveUi(id)).auto) {
-      let spot = null;
-      for (let i = 0; i < 10; i++) {
-        try { spot = await g.win.webContents.executeJavaScript(MOB_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
-        if (!spot || !spot.n || spot.d <= 4) break;
-        if (i === 0 && (await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // eslint-disable-line no-await-in-loop
-        await sendInput(id, { type: 'moveTo', x: spot.x + 1, y: spot.y }); // eslint-disable-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
-      }
-      // the monster is not in sight: let AUTO walk the whole map to find it (the player's range comes back afterwards)
+      // AUTO on at once over the whole map (it walks to the monsters itself), then keep it to the bounty monster.
+      // (it used to walk to the monster with AUTO off first: up to 20 s more of standing around)
       { const prev = await setFarmRange(g, 0); if (prev != null && prev !== 0 && B.prevFarm == null) B.prevFarm = prev; } // whole map while on a bounty
-      if (store.data.settings.bountyOnlyTarget !== false) await bountyFilterOn(id, g, cur.map, cur.name); // AUTO hits only the bounty monster
       if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+      if (store.data.settings.bountyOnlyTarget !== false) await bountyFilterOn(id, g, cur.map, cur.name); // AUTO hits only the bounty monster
+      let spot = null; try { spot = await g.win.webContents.executeJavaScript(MOB_SPOT_JS(type), true); } catch { spot = null; }
+      if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // the settings window can pause it: make sure
       B.phase = 'hunt';
       log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}`);
     }
