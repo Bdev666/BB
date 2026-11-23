@@ -154,7 +154,9 @@ function setAlert(id, key, on, text) {
   if (on && !g.alerts.has(key)) {
     g.alerts.add(key);
     log.info(`acc ${id}: alert on ${key.replace(/:.*/, ':…')}`);
-    notify(id, key, text);
+    g.alertSaid = g.alertSaid || new Map();
+    const said = g.alertSaid.get(key);
+    if (!(said && Date.now() - said < 15 * 60000 && /^(weight|weightFull|idle|potion|item)/.test(key))) { g.alertSaid.set(key, Date.now()); notify(id, key, text); }
   } else if (!on && g.alerts.has(key)) {
     g.alerts.delete(key);
     log.info(`acc ${id}: alert off ${key.replace(/:.*/, ':…')}`);
@@ -1194,6 +1196,8 @@ function deathLoopCheck(id, g) {
   const arena = WORLD_ARENAS.has(mapOf(g)) && [...bosses.world.values()].some((w) => w.state === 'live' || (w.endsAt && now - w.endsAt < 5 * 60 * 1000));
   if (arena || g.bossTrip || (g.fight && now - g.fight.last < 30000) || (g.freeRespawnAt && now - g.freeRespawnAt < 5 * 60 * 1000)) return;
   g.respawnPausedUntil = now + 10 * 60 * 1000; g.deathTimes = [];
+  // where it farmed: after the pause it is taken back there (a log: woke up in town and stood there 8 hours)
+  { const st = (g.data.world && g.data.world.self) || {}; const again = g.loopBack && now - g.loopBack.at < 60 * 60000; g.loopBack = again ? { ...g.loopBack, giveUp: true } : { map: mapOf(g), x: st.x, y: st.y, at: now, done: false }; }
   selftest.count(id, 'deathLoops');
   if (g.win && !g.win.isDestroyed()) g.win.webContents.executeJavaScript(`(() => { const c = document.getElementById('au-respawn'); if (c && c.checked && !c.disabled) { c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true; } return false; })()`, true).catch(() => {});
   log.info(`acc ${id}: death loop (4 deaths in 2 min) -> respawn in place off for 10 min`);
@@ -1500,6 +1504,38 @@ async function stuckCheck(id, g) {
   g.autoSeenOffAt = now; // give it 3 more minutes
 }
 
+// ---------- after a death-loop pause: back to the farming spot, AUTO on (once an hour; a second loop = stay, say so) ----------
+async function loopBackCheck(id, g) {
+  const L = g.loopBack;
+  if (!L || L.done || L.busy || !g.inGame || g.demo || g.status !== 'online' || !L.map) return;
+  if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return;
+  if (L.giveUp) { L.done = true; notify(id, 'death', `☠ ตายวนซ้ำอีกรอบใน 1 ชม. ที่ ${mapName(L.map)} · ไม่พากลับแล้ว รอคุณดู (ลองแมพที่มอนเบาลง หรือเช็คยา/อุปกรณ์)`); log.info(`acc ${id}: death loop again at ${L.map} -> not going back`); return; }
+  if (g.bossTrip || g.travelling || (g.bounty && g.bounty.on) || (g.finder && g.finder.on) || WORLD_ARENAS.has(mapOf(g))) { L.done = true; return; } // something else runs this character
+  L.busy = true;
+  try {
+    if (mapOf(g) !== L.map) {
+      log.info(`acc ${id}: death-loop pause over, in ${mapOf(g)} -> back to ${L.map}`);
+      const r = await travelTo(id, g, L.map);
+      if (!r.ok) { L.done = true; log.info(`acc ${id}: back to farm: ${r.error}`); return; }
+      if (!r.here && !(await arrive(id, g, L.map, 6 * 60000, true))) { L.done = true; log.info(`acc ${id}: back to farm: did not arrive`); return; }
+    }
+    if (L.x != null) {
+      if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+      for (let i = 0; i < 20; i++) { // eslint-disable-line no-await-in-loop
+        const st = (g.data.world && g.data.world.self) || {};
+        if (st.x == null || Math.hypot(st.x - L.x, st.y - L.y) <= 3) break;
+        await sendInput(id, { type: 'moveTo', x: L.x, y: L.y }); // eslint-disable-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
+      }
+    }
+    if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
+    g.autoSeenOffAt = Date.now();
+    L.done = true;
+    log.info(`acc ${id}: back at the farming spot on ${L.map}, AUTO on`);
+    g.data.log('other', `↩ กลับจุดฟาร์มหลังพักเกิดที่เดิม 10 นาที · ${mapName(L.map)} · เปิด AUTO`);
+  } finally { L.busy = false; }
+}
+
 // ---------- travel to any map with the game's own world-map "travel" button ----------
 // The game opens its world map on a map from the hunt window's "ไปที่แมพ" buttons; the button reads the map when
 // clicked, so any of them can open the world map on another map. Then the game's "เดินทางไป …" (warp when free).
@@ -1522,13 +1558,14 @@ async function travelTo(id, g, map) {
   return { ok: true };
 }
 // wait until the character is on the map (6 minutes at most), then AUTO on over the whole map
-async function arrive(id, g, map, maxMs = 6 * 60000) {
+async function arrive(id, g, map, maxMs = 6 * 60000, keepRange = false) {
   const t0 = Date.now();
   while (Date.now() - t0 < maxMs) {
     if (!g.win || g.win.isDestroyed()) return false;
     if (mapOf(g) === map) {
       await new Promise((r) => setTimeout(r, 2500));
       g.travelling = null;
+      if (keepRange) return true; // the caller walks to its spot and starts AUTO there
       await setFarmRange(g, 0);
       if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {});
       g.autoSeenOffAt = Date.now();
@@ -1637,6 +1674,7 @@ function farmTick() {
     if (!g.inGame || g.demo) continue;
     farmBucket(g); // closes the minute that just ended
     stuckCheck(id, g).catch(() => {});
+    loopBackCheck(id, g).catch((e) => log.warn(`acc ${id}: back to farm: ${e.message}`));
     finderStep(id).catch((e) => log.warn(`acc ${id}: farm finder: ${e.message}`));
   }
 }
@@ -1820,6 +1858,7 @@ async function bountyClaimDone(id, list) {
 async function bountyStep(id) {
   const g = games.get(id); const B = g && g.bounty;
   if (!B || !B.on || !g.inGame || g.demo || !g.win || g.win.isDestroyed() || B.busy) return;
+  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { B.note = 'พักไว้ระหว่างตีบอสโลก'; return; }
   B.busy = true;
   try {
     const list = await bountyList(id);
@@ -1926,14 +1965,17 @@ async function worldBossGo(kind, reason = 'ปุ่ม') {
   log.info(`world boss ${kind}: sent ${out.length} account(s) in (${reason})`);
   // once there: walk up to the boss first (AUTO only fights inside 16 tiles of where it was switched on,
   // and the arena's warp-in point is farther than that), then AUTO on; say who did not get in
+  // a log showed 2 of 3 accounts still loading the arena at 7 s: they were taken as "did not get in",
+  // so nobody walked them to the boss or took them back after (one stood idle 16 minutes in the arena)
   setTimeout(async () => {
     const missed = [];
+    for (let i = 0; i < 19 && out.some((o) => { const g = games.get(o.id); return g && g.bossTrip && mapOf(g) === o.from; }); i++) await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
     for (const o of out) {
       const g = games.get(o.id); if (!g || !g.bossTrip) continue;
       if (mapOf(g) === o.from) { missed.push(o.name); g.bossTrip = null; continue; }
     }
     await Promise.all(out.filter((o) => (games.get(o.id) || {}).bossTrip).map((o) => walkToBossThenAuto(o.id, kind)));
-    if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / ยังไม่เริ่ม / กำลังวาร์ป)`);
+    if (missed.length) notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / ยังไม่เริ่ม / วาร์ปไม่สำเร็จใน 45 วิ)`);
   }, 7000);
   return { ok: true, sent: out.length, accounts: out };
 }
@@ -1970,9 +2012,10 @@ async function walkToBossThenAuto(id, kind) {
 }
 async function worldBossLeave(kind) {
   for (const [id, g] of openGames()) {
-    if (!g.bossTrip || g.bossTrip.kind !== kind) continue;
+    const inArena = g.inGame && !g.demo && WORLD_ARENAS.has(mapOf(g));
+    if (!(g.bossTrip && g.bossTrip.kind === kind) && !inArena) continue;
     await sendInput(id, { type: 'worldBossWarp', enter: false, kind }); // eslint-disable-line no-await-in-loop
-    log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip.from})`);
+    log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip ? g.bossTrip.from : 'town'})`);
     g.bossTrip = null;
     setTimeout(async () => { if (!(await liveUi(id)).auto) gameCommand(id, 'auto', {}); }, 8000);
     await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
