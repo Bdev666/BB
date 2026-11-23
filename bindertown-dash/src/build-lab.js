@@ -737,6 +737,9 @@ function describe(b, p) {
     skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
     hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(),
+    // damaging hotbar skills this character has never been measured with: their numbers are the formula only
+    unmeasured: Object.keys(SKILL_ADJ).length ? b.hotbar.filter((sid) => SKILL_ADJ[sid] == null).map(name) : [],
+    measured: Object.keys(SKILL_ADJ).length > 0,
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
     problems,

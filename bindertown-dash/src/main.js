@@ -2852,6 +2852,17 @@ app.whenReady().then(() => {
   setInterval(crowdTick, 20000);
   setInterval(farmTick, 15000);
   setInterval(farmSaveTick, 5 * 60000);
+  // Build Lab numbers from every real-damage record kept, at start and every hour
+  const calibFromHistory = () => {
+    try {
+      const h = selftest.calibHistory(45); const all = store.data.calib || (store.data.calib = {});
+      let n = 0;
+      for (const [key, c] of Object.entries(h)) { const old = all[key]; if (!old || old.v !== 3 || old.job !== c.job || (old.runs || 0) <= c.runs) { all[key] = c; n++; } }
+      if (n) { store.save(); log.info(`calibration from the combat history: ${n} entr${n === 1 ? 'y' : 'ies'} · ${Object.entries(h).filter(([k]) => !k.includes(':mob:')).map(([k, c]) => `${k} k=${c.k} pack=${c.pack} n=${c.n}`).join(', ')}`); }
+    } catch (e) { log.warn(`calibration from history: ${e.message}`); }
+  };
+  setTimeout(calibFromHistory, 8000);
+  setInterval(calibFromHistory, 60 * 60000);
   applyStartWithWindows();
   syncRemote();
 });

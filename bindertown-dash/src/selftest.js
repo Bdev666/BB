@@ -414,7 +414,62 @@ function create(deps) {
     }
     return out;
   }
-  return { runSelfTest, statsTick, statsSummary, farmHistory, count, counters, logProblems, bundle, combatHit, combatFlush };
+  // every real-damage record kept (45 days), per account + field/world boss: how hard each skill really hits
+  // against the game's formula (median over all records: one odd fight does not move it).
+  // k = all skills together, rel = each skill against k (what ranks skills and builds in the lab),
+  // pack = monsters really hit at once, d = whole real DPS against the lab at that pack, mob = what it farms.
+  function calibHistory(days = 45) {
+    const since = Date.now() - days * 24 * 3600 * 1000;
+    let files = []; try { files = fs.readdirSync(dirOf('combat')).filter((f) => /^combat-.*\.jsonl$/.test(f)).sort().slice(-3); } catch { /* none */ }
+    const groups = {};
+    for (const f of files) {
+      let text = ''; try { text = fs.readFileSync(path.join(dirOf('combat'), f), 'utf8'); } catch { continue; }
+      for (const l of text.split('\n')) {
+        if (!l) continue; let r; try { r = JSON.parse(l); } catch { continue; }
+        if (!r || !r.hitCheck || !r.build || Date.parse(r.t) < since) continue;
+        const kind = r.targetKind === 'world' ? 'world' : 'field';
+        const key = `${r.acc}:${kind}`; const g = groups[key] || (groups[key] = { acc: r.acc, kind, list: [] });
+        g.list.push(r);
+      }
+    }
+    const med = (a) => { const x = a.filter((v) => Number.isFinite(v)).sort((p, q) => p - q); if (!x.length) return null; const m = x.length >> 1; return x.length % 2 ? x[m] : (x[m - 1] + x[m]) / 2; };
+    const ver = (v) => String(v || '0').split('.').map(Number).reduce((t, n) => t * 1000 + (n || 0), 0);
+    const out = {};
+    for (const [key, g] of Object.entries(groups)) {
+      // only the character's current job (a re-roll or class change starts over)
+      const job = g.list[g.list.length - 1].build.job;
+      const list = g.list.filter((r) => r.build.job === job);
+      const k = med(list.map((r) => r.calib)); if (!k) continue;
+      const per = {};
+      for (const r of list) for (const [sid, v] of Object.entries(r.hitCheck)) (per[sid] || (per[sid] = [])).push(v.x);
+      const rel = {};
+      for (const [sid, xs] of Object.entries(per)) if (xs.length >= 3) rel[sid] = med(xs) / k;
+      // the per-skill factors only re-rank skills: scale them so the build's total stays where the formula puts it
+      // (weighted by each skill's share of the real damage; the total is matched by pack / d below)
+      { const last = list[list.length - 1]; let ws = 0; let inv = 0;
+        for (const [sid, f] of Object.entries(rel)) { const w = ((last.skills || {})[sid] || {}).share || 0; if (w > 0 && f > 0) { ws += w; inv += w / f; } }
+        const H = ws && inv ? ws / inv : 1;
+        for (const sid of Object.keys(rel)) rel[sid] = +(rel[sid] / H).toFixed(3); }
+      // whole-DPS ratio and pack: only records made the way the app counts them now (1.2.2+)
+      const newer = list.filter((r) => ver(r.app) >= ver('1.2.2'));
+      const pack = med(newer.map((r) => r.pack));
+      const d = med(newer.map((r) => r.ratio));
+      const mobs = {}; for (const r of list.slice(-30)) if (r.mainMob) mobs[r.mainMob] = (mobs[r.mainMob] || 0) + 1;
+      const mob = Object.entries(mobs).sort((a, b) => b[1] - a[1])[0];
+      out[key] = { v: 3, job, c2: list[list.length - 1].build.c2 || '', kind: g.kind, k: +k.toFixed(3), d: d ? +d.toFixed(3) : null, pack: pack ? +pack.toFixed(2) : null, rel, mob: mob ? mob[0] : '', n: list.length, runs: list.length, fromHistory: true, at: Date.now() };
+      // per monster (fields): its own numbers once it has 5 records
+      if (g.kind === 'field') {
+        const byMob = {}; for (const r of list) if (r.mainMob) (byMob[r.mainMob] || (byMob[r.mainMob] = [])).push(r);
+        for (const [m, rs] of Object.entries(byMob)) {
+          if (rs.length < 5) continue;
+          const km = med(rs.map((r) => r.calib)); const rn = rs.filter((r) => ver(r.app) >= ver('1.2.2'));
+          out[`${g.acc}:mob:${m}`] = { ...out[key], k: +km.toFixed(3), d: med(rn.map((r) => r.ratio)) || out[key].d, pack: med(rn.map((r) => r.pack)) || out[key].pack, mob: m, n: rs.length, runs: rs.length };
+        }
+      }
+    }
+    return out;
+  }
+  return { runSelfTest, statsTick, statsSummary, farmHistory, calibHistory, count, counters, logProblems, bundle, combatHit, combatFlush };
 }
 
 module.exports = { create };
