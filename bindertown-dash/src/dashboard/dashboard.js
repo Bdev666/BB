@@ -333,9 +333,17 @@ function bagRow(it, limit, live) {
     it.market != null ? `ตลาด ~${short(it.market)} G` : null,
     limit != null ? `เตือน < ${num(limit)}` : null,
   ].filter(Boolean).join(' · ');
-  const row = el('div', { class: 'item' + (low ? ' low' : '') },
-    el('div', { class: 'ic' }, it.name.slice(0, 1)),
-    el('div', { class: 'nm' }, it.name, el('small', {}, info || ' ')),
+  // gear: which grades / pieces are in this row (many pieces share one Thai name); tap to see each piece
+  const gear = (it.ids || []).filter((x) => x.gear);
+  const grades = gear.length ? ['epic', 'rare', 'magic', 'normal'].map((r) => [r, gear.filter((x) => (x.rarity || 'normal') === r).length]).filter(([, n]) => n) : [];
+  const best = grades.length ? grades[0][0] : '';
+  const kind = gear.length ? '⚔' : (it.ids || []).some((x) => /^drop_/.test(x.id)) ? '📦' : /potion|elixir|ether|โพชั่น|ยา/.test(it.name + ' ' + ((it.ids || [])[0] || {}).id) ? '🧪' : /card/.test(((it.ids || [])[0] || {}).id || '') ? '🃏' : '•';
+  const gradeTxt = grades.map(([r, n]) => `${(RARITIES.find((x) => x[0] === r) || RARITIES[0])[1]} ${n}`).join(' · ');
+  const locked = gear.filter((x) => x.locked).length;
+  const pieces = gear.length ? el('div', { class: 'pieces', hidden: '' }, ...gear.map((x) => { const lb = gearLabel(x, it.name); const ref = lb.title.slice(it.name.length).trim(); return el('div', { class: 'piece' }, el('span', { class: 'rar r-' + (x.rarity || 'normal') }, (RARITIES.find((r) => r[0] === (x.rarity || 'normal')) || RARITIES[0])[1]), el('span', { class: 'pt', title: lb.title + (lb.sub ? ' · ' + lb.sub : '') }, (x.locked ? '🔒 ล็อก ' : '') + (ref || 'ไม่ตีบวก') + (lb.sub ? ' · ' + lb.sub : ''))); })) : null;
+  const row = el('div', { class: 'item' + (low ? ' low' : '') + (best ? ' g-' + best : '') },
+    el('div', { class: 'ic' + (best ? ' r-' + best : '') }, kind),
+    el('div', { class: 'nm', title: it.name, onclick: pieces ? () => { pieces.hidden = !pieces.hidden; } : null }, el('span', { class: 't' }, it.name + (pieces ? ' ▾' : '')), el('small', {}, [gradeTxt, locked ? `🔒 ${locked}` : '', info].filter(Boolean).join(' · ') || ' '), pieces),
     el('div', { class: 'q' }, num(it.qty)),
     el('div', { class: 'acts' },
       el('button', { class: 'tiny', title: 'ตั้งเตือนเมื่อเหลือน้อยกว่า…', onclick: () => editAmount(row, it.name, 'watch', limit) }, '🔔'),
@@ -810,7 +818,7 @@ async function openLab(opt = {}) {
     const p = { combos: useCombos.checked, fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, packSet: pack.dataset.touched === '1', target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
-    if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
+    if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr || {} };
     if (me && me.job === job.value) p.acc = accId; // the character's own learned per-skill factors (from its real hits)
     if (owned.length) p.owned = owned;
     if (me && me.skills) p.basics = me.skills; // the character's real basic-skill levels (the calculator assumes maxed)
@@ -863,7 +871,7 @@ async function openLab(opt = {}) {
       el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
         hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)'),
       me ? el('small', { class: 'hint' }, ` · มีการ์ด ${owned.length} ชนิด${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)}` : ''}`) : null),
-    me ? measureBox(accId, me, () => ({ ...labParams(), job: me.job, level: me.level, jobLevel: me.jobLevel, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 } })) : null,
+    me ? measureBox(accId, me, () => ({ ...labParams(), job: me.job, level: me.level, jobLevel: me.jobLevel, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr || {} } })) : null,
     el('div', { class: 'lab-row' }, go, full, el('small', { class: 'hint' }, ' ดาวการ์ด (โหมดแข่ง ถ้าไม่ใช้เฉพาะที่มี) '), fullStars, comboBtn), res,
     el('p', { class: 'hint' }, 'ติ๊ก "ใส่เกียร์+การ์ด" เพื่อให้ตัวเลขใกล้ของจริง · เทียบความแม่นได้ที่ห้องฝึก: เลือกเป้า "หุ่นฟางห้องฝึก" แล้วดู DPS ของ "บิลด์ปัจจุบัน" เทียบ DPS Meter (เปิด AUTO ตีหุ่น 1 นาที) · สเตตัสใช้ของตัวละครที่เลือก แก้ได้ · คลาส 2 คิดแบบ Job เต็ม (Lv 50 · 70 แต้ม ตามเกม) ถ้าอยากใช้ค่าจริงของตัวละครให้เอาติ๊กออก'),
   ].filter(Boolean));
@@ -886,7 +894,7 @@ async function openLab(opt = {}) {
       const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4, packSet: pack.dataset.touched === '1',
         target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true, acc: accId,
         loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
-        build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: {}, hotbar: [], c2: meNow.c2 || '' } };
+        build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: meNow.c2tr || {}, hotbar: [], c2: meNow.c2 || '' } };
       if (cMine.checked && meNow.ownedCards && meNow.ownedCards.length) q.owned = meNow.ownedCards;
       if (cNoCrit.checked) q.noCrit = true;
       if (cDup.checked) q.allowDup = true;
@@ -905,7 +913,7 @@ async function openLab(opt = {}) {
     const lTick = async () => {
       if (livePane.hidden || $('#modal').hidden) return;
       const m2 = await dash.invoke('lab-me', accId); if (!m2) { lOut.replaceChildren(el('p', {}, 'ตัวละครไม่ได้ออนไลน์')); return; }
-      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, c2Job: (m2.c2info && m2.c2info.jobLevel) || 50, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2 } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, c2Job: (m2.c2info && m2.c2info.jobLevel) || 50, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2, c2tr: m2.c2tr || {} } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
       const sh = pr.sheet || {};
       lOut.replaceChildren(

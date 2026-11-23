@@ -102,7 +102,7 @@ function create(deps) {
                   if (fv.length >= 3) { const m = fv[Math.floor(fv.length / 2)]; rel = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, +(v / m).toFixed(3)])); rec.dpsCheck = { median: +m.toFixed(3), rel }; }
                 }
               } catch { /* keep the per-hit numbers */ }
-              if (deps.saveCalib) deps.saveCalib(id, { v: 2, k: rec.calib, d: rec.ratio, pack: rec.pack || null, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
+              if (deps.saveCalib) deps.saveCalib(id, { v: 3, k: rec.calib, d: rec.ratio, pack: rec.pack || null, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));

@@ -51,10 +51,10 @@ const selftest = require('./selftest').create({
     if (c.d != null && (c.d < 0.2 || c.d > 20)) c.d = null; // whole-DPS ratio: real / formula (hits per second, focus, splash included)
     const relOf = (a, b) => { const out = { ...(a || {}) }; for (const [sid, x] of Object.entries(b || {})) out[sid] = out[sid] ? +(out[sid] * 0.6 + x * 0.4).toFixed(3) : x; return out; };
     if (c.pack != null && !(c.pack >= 1 && c.pack <= 8)) c.pack = null; // monsters really hit at once (from real DPS over the pack curve)
-    if (old && old.v !== c.v) old.d = null; // a ratio saved by an older way of counting (one target / a fixed pack of 4)
-    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), pack: ease(old.pack, c.pack), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
+    // v3: class-2 traits are in the lab now; numbers learned without them start over
+    all[key] = old && old.job === c.job && old.v === c.v ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), pack: ease(old.pack, c.pack), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
     // field monsters differ a lot (weak ones die in one hit, and overkill is not reported): also per monster
-    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; if (om && om.v !== c.v) om.d = null; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), pack: ease(om.pack, c.pack), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
+    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; all[mk] = om && om.job === c.job && om.v === c.v ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), pack: ease(om.pack, c.pack), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
     store.save();
   },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
@@ -1579,21 +1579,37 @@ async function loopBackCheck(id, g) {
 // ---------- travel to any map with the game's own world-map "travel" button ----------
 // The game opens its world map on a map from the hunt window's "ไปที่แมพ" buttons; the button reads the map when
 // clicked, so any of them can open the world map on another map. Then the game's "เดินทางไป …" (warp when free).
-const TRAVEL_JS = (map) => `(async () => { const win = document.getElementById('huntwin'); const open = document.getElementById('openhunt'); if (!win || !open) return { ok: false, why: 'no hunt window' };
-  if (win.style.display !== 'block') open.click();
-  await new Promise((r) => setTimeout(r, 600));
-  let b = document.querySelector('#huntwin [data-goto]');
-  if (!b) { for (const t of win.querySelectorAll('[data-htab]')) { t.click(); await new Promise((r) => setTimeout(r, 400)); b = document.querySelector('#huntwin [data-goto]'); if (b) break; } }
-  if (!b) { win.style.display = 'none'; return { ok: false, why: 'no map button' }; }
-  b.dataset.goto = ${JSON.stringify(map)}; b.click();
-  await new Promise((r) => setTimeout(r, 900));
-  const go = document.querySelector('.wdgo'); if (!go) return { ok: false, why: 'no travel button' }; go.click(); return { ok: true }; })()`;
+// The game's own "open the world map on this map" (its module exports it as openWorldMap; the hunt window, the
+// guide and the atlas all call it), then the game's "เดินทางไป …" button: warps when free, else walks.
+// Fallback when the module cannot be reached: a hunt-window "ไปที่แมพ" button pointed at the map (needs a bounty left).
+const TRAVEL_JS = (map) => `(async () => { const MAP = ${JSON.stringify(map)}; const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let how = '';
+  try {
+    if (!window.__bdOpenWorld) {
+      const urls = [...new Set([...performance.getEntriesByType('resource').map((e) => e.name), ...[...document.scripts].map((x) => x.src)].filter((u) => /\\/assets\\/main-[\\w-]+\\.js(\\?|$)/.test(u || '')))];
+      for (const u of urls) { try { const m = await import(u); if (m && typeof m.openWorldMap === 'function') { window.__bdOpenWorld = m.openWorldMap; break; } } catch (e) {} }
+    }
+    if (window.__bdOpenWorld) { window.__bdOpenWorld(MAP, true); how = 'worldmap'; }
+  } catch (e) {}
+  if (!how) {
+    const win = document.getElementById('huntwin'); const open = document.getElementById('openhunt'); if (!win || !open) return { ok: false, why: 'no world map and no hunt window' };
+    if (win.style.display !== 'block') open.click();
+    await wait(600);
+    let b = document.querySelector('#huntwin [data-goto]');
+    if (!b) { for (const t of win.querySelectorAll('[data-htab]')) { t.click(); await wait(400); b = document.querySelector('#huntwin [data-goto]'); if (b) break; } }
+    if (!b) { win.style.display = 'none'; return { ok: false, why: 'no map button' }; }
+    b.dataset.goto = MAP; b.click(); how = 'hunt';
+  }
+  let go = null; for (let i = 0; i < 10 && !go; i++) { await wait(300); go = document.querySelector('.wdgo'); }
+  if (!go) return { ok: false, why: 'no travel button (' + how + ')' };
+  go.click(); return { ok: true, how }; })()`;
 async function travelTo(id, g, map) {
   if (mapOf(g) === map) return { ok: true, here: true };
   if ((await liveUi(id)).auto) await gameCommand(id, 'auto', {}); // the game's travel walks; AUTO would fight on the way
   let r; try { r = await g.win.webContents.executeJavaScript(TRAVEL_JS(map), true); } catch (e) { r = { ok: false, why: e.message }; }
   if (!r || !r.ok) return { ok: false, error: `เดินทางไม่ได้ (${(r && r.why) || '?'})` };
   g.travelling = { map, at: Date.now() }; farmDirty(g);
+  log.info(`acc ${id}: travel ${mapOf(g)} -> ${map} (${r.how})`);
   await answerWarpBox(id, g);
   return { ok: true };
 }
@@ -1637,11 +1653,18 @@ async function finderStart(id, on) {
   const lv = me.level;
   const minutes = Math.max(5, Math.min(30, Number(store.data.settings.farmTrialMinutes) || 10));
   const known = new Map(farmSummary(id, lv, Math.floor(Date.now() / 60000) - 3 * 1440).filter((x) => x.minutes >= minutes).map((x) => [x.map, x]));
-  const rows = ((sim && sim.rows) || []).filter((r) => (r.hitsToDie == null || r.hitsToDie >= 5) && r.band && r.band[0] <= lv + 3 && !WORLD_ARENAS.has(r.id));
+  // safe first (5+ hits to die); if that leaves fewer than 3 other maps, take 3+ hits, then any in the level band
+  const inBand = ((sim && sim.rows) || []).filter((r) => r.band && r.band[0] <= lv + 3 && !WORLD_ARENAS.has(r.id));
+  let rows = inBand.filter((r) => r.hitsToDie == null || r.hitsToDie >= 5);
+  if (rows.filter((r) => r.id !== mapOf(g)).length < 3) rows = inBand.filter((r) => r.hitsToDie == null || r.hitsToDie >= 3);
+  if (rows.filter((r) => r.id !== mapOf(g)).length < 3) rows = inBand;
+  if (!sim) log.info(`acc ${id}: farm finder: Build Lab map list not available, only maps farmed before`);
   const list = [];
   const here = mapOf(g);
   if (!known.has(here) && !WORLD_ARENAS.has(here)) list.push({ map: here, sim: (rows.find((r) => r.id === here) || {}).silverHr || 0 });
   for (const r of rows) { if (list.length >= 4) break; if (!known.has(r.id) && !list.some((x) => x.map === r.id)) list.push({ map: r.id, sim: r.silverHr }); }
+  if (!list.length && !known.size) return { ok: false, error: 'หาแมพที่จะลองไม่ได้ (Build Lab ไม่ตอบ และยังไม่เคยฟาร์มที่ไหน) · ลองใหม่อีกครั้ง' };
+  if (list.length <= 1 && known.size === 0) log.info(`acc ${id}: farm finder: only ${list.length} map to try`);
   g.finder = { on: true, list, i: 0, phase: 'go', minutes, lv, note: 'เริ่ม', start: 0, deaths0: 0, tries: {} };
   log.info(`acc ${id}: farm finder start (Lv ${lv}, ${minutes} min each): try ${list.map((x) => x.map).join(', ') || '-'}; known ${[...known.keys()].join(', ') || '-'}`);
   finderStep(id).catch((e) => log.warn(`acc ${id}: farm finder: ${e.message}`));
@@ -1823,7 +1846,7 @@ const WARP_CONFIRM_JS = `(() => { const box = document.getElementById('buyconfir
 async function answerWarpBox(id, g) {
   for (let i = 0; i < 8; i++) { // the box comes after the server answers (a moment)
     let r; try { r = await g.win.webContents.executeJavaScript(WARP_CONFIRM_JS, true); } catch { r = null; } // eslint-disable-line no-await-in-loop
-    if (r && r.pressed) { log.info(`acc ${id}: bounty travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
+    if (r && r.pressed) { log.info(`acc ${id}: travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
     await new Promise((res) => setTimeout(res, 500)); // eslint-disable-line no-await-in-loop
   }
   return null;
@@ -2392,9 +2415,10 @@ const ME_JS = `(() => { const m = window.__game && window.__game.me(); if (!m) r
   const o = (v) => (v instanceof Map ? Object.fromEntries(v) : v && typeof v.toJSON === 'function' ? v.toJSON() : v);
   let traits = o(m.traits); try { if (typeof traits === 'string') traits = JSON.parse(traits); } catch { traits = {}; }
   let c2r = o(m.c2r); try { if (typeof c2r === 'string') c2r = JSON.parse(c2r); } catch { c2r = null; }
+  let c2tr = o(m.c2tr); try { if (typeof c2tr === 'string') c2tr = JSON.parse(c2tr); } catch { c2tr = {}; }
   return { job: m.job, level: m.level, jobLevel: m.jobLevel, skillPoints: m.skillPoints, c2: m.c2 || '', c2r,
     stats: { str: m.str, agi: m.agi, vit: m.vit, int: m.int, dex: m.dex, luk: m.luk }, statPoints: m.statPoints,
-    skills: o(m.skillLevels) || {}, evo: o(m.skillMods) || {}, traits: traits || {},
+    skills: o(m.skillLevels) || {}, evo: o(m.skillMods) || {}, traits: traits || {}, c2tr: c2tr || {},
     wRefine: m.wRefine || 0, sRefine: m.sRefine || 0, guildLevel: m.guildLevel || 0 }; })()`;
 
 function handle(cmd, fn) { ipcMain.handle('dash:' + cmd, (_e, ...args) => fn(...args)); }
@@ -2551,7 +2575,7 @@ function registerIpc() {
     const all = store.data.calib || {};
     const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test(p.target || '') ? 'world' : 'field';
     const c = all[`${p.acc}:mob:${p.target}`] || all[`${p.acc}:${kind}`];
-    return c && c.job === p.job ? { ...c, kind } : null;
+    return c && c.job === p.job && c.v === 3 ? { ...c, kind } : null; // older ones were learned without class-2 traits
   };
   // the character's own numbers: per-skill factors, and (farming) how many monsters it really hits at once
   const withAdj = (p) => {
@@ -2559,6 +2583,9 @@ function registerIpc() {
     const out = { ...p };
     if (c.rel && c.runs >= 1) out.skillAdj = c.rel;
     if (c.kind === 'field' && c.pack && !p.packSet) out.pack = Math.max(1, Math.round(c.pack * 10) / 10);
+    // farming with no monster chosen: the one this character really farms (its last real-damage log), not a stand-in
+    const farming = p.mode !== 'boss' && p.goal !== 'boss';
+    if (c.kind === 'field' && farming && !p.target && c.mob) out.target = c.mob;
     return out;
   };
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(withAdj(p))})`));
@@ -2566,7 +2593,7 @@ function registerIpc() {
     const r = await labCall(`window.__bdLab.predict(${JSON.stringify(withAdj(p))})`);
     const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test((p && p.target) || '') ? 'world' : 'field';
     const c = calibFor(p);
-    if (r && c && c.job === p.job) { const m = (r.packDps && c.v !== 2 ? null : c.d) || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.packDps || r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
+    if (r && c && c.job === p.job) { const m = c.d || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.packDps || r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
     return r;
   });
   handle('fight-times', () => fightTimes());

@@ -469,3 +469,24 @@ footer { flex-shrink: 0; padding-top: 4px; background: var(--bg); position: rela
 .logs.ev-min .log:not(.chat) .lines, .logs.ev-min .log:not(.chat) .chips { display: none; }
 .logs.ev-min .log:not(.chat) { flex: none; padding-top: 8px; padding-bottom: 8px; }
 .tiles-head { display: flex; justify-content: flex-end; margin-top: 8px; }
+/* bag: one clear line per row, the grade in colour, each gear piece on tap */
+.bag .item { align-items: flex-start; padding: 7px 0; }
+.bag .item .ic { flex: none; width: 30px; height: 30px; font-size: 16px; }
+.bag .item .ic.r-magic { box-shadow: inset 0 0 0 2px #60a5fa; }
+.bag .item .ic.r-rare { box-shadow: inset 0 0 0 2px #facc15; }
+.bag .item .ic.r-epic { box-shadow: inset 0 0 0 2px #c084fc; }
+.bag .item .nm { min-width: 0; cursor: default; }
+.bag .item .nm .t { display: block; font-size: 14.5px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bag .item .nm > small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; line-height: 1.4; }
+.bag .item .q { flex: none; font-size: 15px; min-width: 34px; text-align: right; padding-top: 2px; }
+.bag .item .acts { flex: none; padding-top: 1px; }
+.bag .pieces { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.bag .pieces[hidden] { display: none; }
+.bag .piece { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; }
+.bag .piece .rar { flex: none; }
+.bag .piece .pt { min-width: 0; display: flex; flex-direction: column; }
+.bag .piece .pt small { color: var(--muted); font-size: 12px; white-space: normal; }
+/* a wider right column on wide screens: Thai item names fit on one line */
+@media (min-width: 1360px) { .layout { grid-template-columns: 240px minmax(0, 1fr) 370px; } }
+@media (min-width: 1700px) { .layout { grid-template-columns: 250px minmax(0, 1fr) 420px; } }
+.bag .item .acts .tiny { padding: 2px 6px; }

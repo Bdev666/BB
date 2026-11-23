@@ -65,7 +65,15 @@ function detect(mod) {
 // The calculator counts the Novice basic skills (Tough Skin, Keen Edge, ...) as maxed - right for a
 // wiki guide, wrong for a real character. With b.basics set, the calculation runs with the character's
 // real basic levels (the lab window is ours alone, so the table is set for the call and put back).
+// the game keeps every trait choice in one list; the calculator reads class-2 lines from c2tr: move them there
+// (they were left out before: a character's class-2 traits did nothing in the lab)
+function c2TraitsIn(b) {
+  if (!b || !b.c2 || !b.traits || !G.c2defs || !G.c2defs[b.c2]) return;
+  b.c2tr = b.c2tr || {};
+  for (const l of G.c2defs[b.c2].lines || []) if (b.traits[l.id] && !b.c2tr[l.id]) b.c2tr[l.id] = b.traits[l.id];
+}
 function calc(b) {
+  c2TraitsIn(b);
   const bas = b && b.basics;
   if (!bas || !G.jobs.novice) return G.calc(b, (b && b.__opts) || {});
   const saved = [];
@@ -779,7 +787,7 @@ L.cards = async (p) => {
   if (!G.cardDefs || !G.mobs) throw new Error('หาข้อมูลการ์ดของเกมไม่เจอ');
   evals = 0; const t0 = performance.now();
   const goal = p.goal || 'boss';
-  const target = pickTarget(goal === 'boss' ? 'boss' : 'farm', p.level, goal === 'boss' ? p.target : '');
+  const target = pickTarget(goal === 'boss' ? 'boss' : 'farm', p.level, p.target || ''); // farming: the monster this character really farms (from its logs) when known
   const tmob = G.mobs[target];
   const q = { ...p, goal, pack: Math.max(1, p.pack || 4), mode: goal === 'boss' ? 'boss' : 'farm' };
   curP = q;
