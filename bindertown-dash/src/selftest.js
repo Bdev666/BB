@@ -63,7 +63,14 @@ function create(deps) {
             // split the gap: damage per hit (formula) vs hits per second (rotation, walking, overkill)
             const rb = rec.skills.basic; const sb = rec.sim.basic || {};
             if (rb && sb.vsTarget) rec.basicCheck = { realAvgNonCrit: rb.avgNonCrit, simPerHit: Math.round(sb.vsTarget), perHitRatio: rb.avgNonCrit ? +(rb.avgNonCrit / sb.vsTarget).toFixed(3) : null, realPerSec: +(rb.hits / sec).toFixed(2), simPerSec: sb.perSec != null ? +Number(sb.perSec).toFixed(2) : null, realCritRate: rb.critRate, simCrit: sb.critChance };
-            const pred = p.withCombos || p.dps;
+            if (p.packCurve && rec.realDps) {
+              const c = p.packCurve; let n = 1;
+              if (rec.realDps >= c[c.length - 1]) n = c.length;
+              else if (rec.realDps > c[0]) { for (let i = 1; i < c.length; i++) if (rec.realDps <= c[i]) { n = i + (c[i] > c[i - 1] ? (rec.realDps - c[i - 1]) / (c[i] - c[i - 1]) : 0); break; } }
+              rec.pack = +n.toFixed(2);
+            }
+            const pred = p.packDps || p.withCombos || p.dps;
+            rec.sim.packDps = p.packDps || null;
             rec.ratio = pred ? +(rec.realDps / pred).toFixed(3) : null;
             // one hit, real against the formula, per skill (non-crit hits; 20+ hits): which skills are off and by how much
             // one hit, real against the formula, per skill (20+ hits). Compared with the formula's EXPECTED hit,
@@ -93,7 +100,7 @@ function create(deps) {
                   if (fv.length >= 3) { const m = fv[Math.floor(fv.length / 2)]; rel = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, +(v / m).toFixed(3)])); rec.dpsCheck = { median: +m.toFixed(3), rel }; }
                 }
               } catch { /* keep the per-hit numbers */ }
-              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
+              if (deps.saveCalib) deps.saveCalib(id, { k: rec.calib, d: rec.ratio, pack: rec.pack || null, n: xs.length, job: me.job, c2: me.c2, kind: rec.targetKind, rel, mob: rec.mainMob, at: Date.now() });
             }
             const simTotal = (p.perSkill || []).reduce((t, x) => t + x.dps, 0) || 1;
             rec.shareDiff = Object.fromEntries((p.perSkill || []).map((x) => [x.sid, +(((rec.skills[x.sid] || {}).share || 0) - x.dps / simTotal).toFixed(3)]));
@@ -103,7 +110,7 @@ function create(deps) {
     } catch (err) { rec.simError = String(err && err.message || err); }
     const d = new Date();
     try { fs.appendFileSync(path.join(dirOf('combat'), `combat-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}.jsonl`), JSON.stringify(rec) + '\n'); } catch (err) { log.once('combat-write', 600000, 'warn', 'combat write:', err.message); }
-    log.info(`combat acc ${id}: ${rec.hits} hits, ${rec.activeSec}s active, real ${rec.realDps} DPS vs sim ${rec.sim ? (rec.sim.withCombos || rec.sim.dps) : '-'} on ${rec.mainMob}`);
+    log.info(`combat acc ${id}: ${rec.hits} hits, ${rec.activeSec}s active, real ${rec.realDps} DPS vs sim ${rec.sim ? (rec.sim.packDps || rec.sim.withCombos || rec.sim.dps) : '-'} on ${rec.mainMob}`);
     return rec;
   }
   const lastCombat = new Map();
@@ -226,10 +233,10 @@ function create(deps) {
         const bc = lc.basicCheck;
         const hc = Object.entries(lc.hitCheck || {}).sort((a, b2) => Math.abs(b2[1].x - 1) - Math.abs(a[1].x - 1));
         const hitTxt = lc.calib ? ` · ดาเมจต่อฮิตจริง/สูตร ×${lc.calib} (${hc.length} สกิล${hc.length ? `, ต่างสุด ${hc[0][0]} ×${hc[0][1].x}` : ''})` : '';
-        return { warn: lc.calib != null ? Math.abs(lc.calib - 1) > 0.25 : (ratio != null && Math.abs(ratio - 1) > 0.15), detail: `ตีจริง ${lc.mainMob}${hitTxt} · ${lc.realDps.toLocaleString('en-US')} DPS (ช่วงที่ตีอยู่ ${lc.activeSec} วิ, ${lc.hits} ครั้ง) · Simulator คาด ${(lc.sim.withCombos || lc.sim.dps).toLocaleString('en-US')} · จริง/คาด ${ratio != null ? Math.round(ratio * 100) + '%' : '-'}${bc ? ` · ตีปกติต่อครั้ง จริง ${bc.realAvgNonCrit} / คาด ${bc.simPerHit} · ครั้ง/วิ จริง ${bc.realPerSec} / คาด ${bc.simPerSec}` : ''}`, data: { job: me.job, level: me.level, predicted: lc.sim.withCombos || lc.sim.dps, measured: lc.realDps, ratio, hitRatio: lc.calib, mob: lc.mainMob, kind: lc.targetKind, hitCheck: lc.hitCheck } };
+        return { warn: lc.calib != null ? Math.abs(lc.calib - 1) > 0.25 : (ratio != null && Math.abs(ratio - 1) > 0.15), detail: `ตีจริง ${lc.mainMob}${hitTxt} · ${lc.realDps.toLocaleString('en-US')} DPS (ช่วงที่ตีอยู่ ${lc.activeSec} วิ, ${lc.hits} ครั้ง) · Simulator คาด ${(lc.sim.packDps || lc.sim.withCombos || lc.sim.dps).toLocaleString('en-US')} · จริง/คาด ${ratio != null ? Math.round(ratio * 100) + '%' : '-'}${bc ? ` · ตีปกติต่อครั้ง จริง ${bc.realAvgNonCrit} / คาด ${bc.simPerHit} · ครั้ง/วิ จริง ${bc.realPerSec} / คาด ${bc.simPerSec}` : ''}`, data: { job: me.job, level: me.level, predicted: lc.sim.withCombos || lc.sim.dps, measured: lc.realDps, ratio, hitRatio: lc.calib, mob: lc.mainMob, kind: lc.targetKind, hitCheck: lc.hitCheck } };
       }
       const p = await predictFor(me, 'training_dummy');
-      const pred = p && (p.withCombos || p.dps);
+      const pred = p && (p.packDps || p.withCombos || p.dps);
       const r = g.data.rates(Date.now());
       const m = g.lastMeasure;
       let detail = `คาด ${pred ? Math.round(pred).toLocaleString('en-US') : '-'} DPS (หุ่นฝึก)`;

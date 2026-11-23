@@ -50,9 +50,11 @@ const selftest = require('./selftest').create({
     const ease = (a, b) => (a && b ? +(a * 0.6 + b * 0.4).toFixed(3) : b || a || null);
     if (c.d != null && (c.d < 0.2 || c.d > 20)) c.d = null; // whole-DPS ratio: real / formula (hits per second, focus, splash included)
     const relOf = (a, b) => { const out = { ...(a || {}) }; for (const [sid, x] of Object.entries(b || {})) out[sid] = out[sid] ? +(out[sid] * 0.6 + x * 0.4).toFixed(3) : x; return out; };
-    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
+    if (c.pack != null && !(c.pack >= 1 && c.pack <= 8)) c.pack = null; // monsters really hit at once (from real DPS over the pack curve)
+    if (old && old.pack == null && c.pack != null) old.d = null; // an old ratio against the one-target number
+    all[key] = old && old.job === c.job ? { ...c, k: ease(old.k, c.k), d: ease(old.d, c.d), pack: ease(old.pack, c.pack), rel: relOf(old.rel, c.rel), runs: (old.runs || 1) + 1 } : { ...c, runs: 1 };
     // field monsters differ a lot (weak ones die in one hit, and overkill is not reported): also per monster
-    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
+    if (c.kind !== 'world' && c.mob) { const mk = `${id}:mob:${c.mob}`; const om = all[mk]; if (om && om.pack == null && c.pack != null) om.d = null; all[mk] = om && om.job === c.job ? { ...c, k: ease(om.k, c.k), d: ease(om.d, c.d), pack: ease(om.pack, c.pack), rel: relOf(om.rel, c.rel), runs: (om.runs || 1) + 1 } : { ...c, runs: 1 }; }
     store.save();
   },
   onProgress: (st) => { for (const w of [dashboard, settingsWin]) if (w && !w.isDestroyed()) w.webContents.send('dash:selftest-step', st); },
@@ -2502,13 +2504,20 @@ function registerIpc() {
     const c = all[`${p.acc}:mob:${p.target}`] || all[`${p.acc}:${kind}`];
     return c && c.job === p.job ? { ...c, kind } : null;
   };
-  const withAdj = (p) => { const c = calibFor(p); return c && c.rel && c.runs >= 1 ? { ...p, skillAdj: c.rel } : p; };
+  // the character's own numbers: per-skill factors, and (farming) how many monsters it really hits at once
+  const withAdj = (p) => {
+    const c = calibFor(p); if (!c) return p;
+    const out = { ...p };
+    if (c.rel && c.runs >= 1) out.skillAdj = c.rel;
+    if (c.kind === 'field' && c.pack && !p.packSet) out.pack = Math.max(1, Math.round(c.pack));
+    return out;
+  };
   handle('lab-run', (p) => labCall(`window.__bdLab.run(${JSON.stringify(withAdj(p))})`));
   handle('lab-predict', async (p) => {
     const r = await labCall(`window.__bdLab.predict(${JSON.stringify(withAdj(p))})`);
     const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test((p && p.target) || '') ? 'world' : 'field';
     const c = calibFor(p);
-    if (r && c && c.job === p.job) { const m = c.d || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
+    if (r && c && c.job === p.job) { const m = (r.packDps && c.pack == null ? null : c.d) || c.k; r.calib = { k: c.k, d: c.d || null, kind, n: c.n, runs: c.runs || 1, withCombos: Math.round((r.packDps || r.withCombos || r.dps) * m), dps: Math.round(r.dps * m) }; }
     return r;
   });
   handle('fight-times', () => fightTimes());

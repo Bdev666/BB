@@ -726,7 +726,7 @@ async function openLab(opt = {}) {
   const owned = (me && me.ownedCards) || [];
   const st = {}; for (const k of ['str', 'agi', 'vit', 'int', 'dex', 'luk']) st[k] = num_(me && me.stats ? me.stats[k] || 1 : 1, 0, 999);
   const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'), el('option', { value: 'farm' }, '🌾 ฟาร์มมอน (ตีหลายตัว)'));
-  const pack = num_(4, 1, 12);
+  const pack = num_(4, 1, 12); pack.addEventListener('change', () => { pack.dataset.touched = '1'; });
   const boss = el('select', {}, el('option', { value: '' }, 'บอสเลเวลใกล้ตัวที่สุด'),
     el('option', { value: 'wraithroot_colossus' }, '🌍 World Boss · Wraithroot Colossus (Lv 99)'),
     el('option', { value: 'pearlheart_titan' }, '🌍 World Boss · Pearlheart Titan (Lv 130)'),
@@ -767,7 +767,7 @@ async function openLab(opt = {}) {
   };
   const labParams = () => {
     const rf = realOf();
-    const p = { combos: useCombos.checked, fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, target: mode.value === 'boss' ? boss.value : '',
+    const p = { combos: useCombos.checked, fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, packSet: pack.dataset.touched === '1', target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2 };
@@ -843,7 +843,7 @@ async function openLab(opt = {}) {
     cGo.onclick = async () => {
       cGo.disabled = true; cOut.replaceChildren(el('p', { class: 'hint' }, 'กำลังอ่านตัวละครล่าสุดและลองการ์ดทุกคอมโบ…'));
       const meNow = (await dash.invoke('lab-me', accId)) || me;
-      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4,
+      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4, packSet: pack.dataset.touched === '1',
         target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true, acc: accId,
         loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
         build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: {}, hotbar: [], c2: meNow.c2 || '' } };
@@ -869,7 +869,7 @@ async function openLab(opt = {}) {
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
       const sh = pr.sheet || {};
       lOut.replaceChildren(
-        el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}`),
+        el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}${pr.packDps ? ` · ตีทั้งฝูง ${pr.pack} ตัว ≈ ${num(pr.packDps)}` : ''}`),
           d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
         pr.calib ? el('div', { class: 'lab-row' }, el('span', { class: 'chip ok' }, `ปรับตามดาเมจจริงของตัวละครนี้ ≈ ${num(pr.calib.withCombos)} DPS`), el('small', { class: 'hint' }, ` · ${pr.calib.kind === 'world' ? 'บอสโลก' : 'มอนทั่วไป'}: ดาเมจต่อฮิตจริง ×${pr.calib.k} ของสูตรเกม (รวมคริ)${pr.calib.d ? ` · DPS รวมจริง ×${pr.calib.d}` : ''} · จาก ${pr.calib.runs} รอบบันทึก · การจัดอันดับบิลด์ใช้สูตรเกม`)) : null,
         el('div', { class: 'lab-row' }, ...[['ATK', sh.atk], ['MATK', sh.matk], ['Spell Amp', sh.spellAmp, '%'], ['ลดคูลดาวน์', sh.cdr, '%'], ['ร่ายเร็ว', sh.castSpd, '%'], ['คริ', sh.crit, '%'], ['ดาเมจคริ', sh.critDmg, '%'], ['เจาะเกราะ', sh.armorPen, '%']].filter((x) => x[1] != null).map(([l, v, u]) => el('span', { class: 'chip' }, `${l} ${Number.isInteger(v) ? num(v) : v}${u || ''}`))),
@@ -1087,11 +1087,11 @@ function orderBox(o) {
 // which map earns the most silver per hour with this build (+ the cards picked for gold farming, if any)
 function mapBox(x) {
   const out = el('div', { class: 'lab-cards' });
-  const pack = el('input', { type: 'number', min: '1', max: '8', value: '3', style: 'width:52px' });
+  const pack = el('input', { type: 'number', min: '1', max: '8', value: '3', style: 'width:52px' }); pack.addEventListener('change', () => { pack.dataset.touched = '1'; });
   const go = el('button', { class: 'tiny', onclick: async () => {
     go.disabled = true; out.replaceChildren(el('p', { class: 'hint' }, 'กำลังคำนวณทุกแมพ…'));
     try {
-      const r = await dash.invoke('lab-maps', { ...lastLab, build: x.build, pack: +pack.value });
+      const r = await dash.invoke('lab-maps', { ...lastLab, build: x.build, pack: +pack.value, packSet: pack.dataset.touched === '1' });
       const lvl = lastLab.level;
       out.replaceChildren(
         el('p', { class: 'hint' }, `คิดจากดาเมจของบิลด์นี้กับมอนแต่ละชนิดในแมพ (เครื่องคิดเลขของเกม) · Silver/ตัว × Gold% · ฆ่า/ชม. จำกัดด้วยเวลาเกิดใหม่ · ${r.total} แมพ ใน ${(r.ms / 1000).toFixed(1)} วิ`),

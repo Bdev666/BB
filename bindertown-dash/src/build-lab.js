@@ -218,16 +218,23 @@ function comboOf(b, p, r) {
     mult *= m;
     parts.push({ k: 'proc', name: 'Proc จากเกียร์', gain: Math.round((m - 1) * 1000) / 10, list: bits });
   }
+  // farming: a monster lives only a few seconds, so anything that has to be put on it first (a status, Hunter's
+  // Mark stacks) is there only for part of its life. Real logs (Lv 100+): a Scout farming at ~1 kill a second hit
+  // with no Mark or status bonus at all, a Warrior that bleeds targets on its first crit hit with the full status bonus.
+  const ttk = (() => { if (boss) return Infinity; const hp = (r.target && r.target.hp) || 0; const d = rot.total / secs * mult; return hp > 0 && d > 0 ? hp / d * Math.max(1, p.lifePack || p.pack || 1) : Infinity; })(); // in a pack the damage is shared: each one lives longer
+  const lifeShare = (appsPerSec) => (ttk === Infinity ? 1 : appsPerSec > 0 ? Math.max(0, 1 - 1 / (appsPerSec * ttk)) : 0); // part of a life after the first application
   // 1) target under status: how much of the time, and what the calculator's "debuffed" switch is worth
-  let up = procUp; const ccSk = procUp ? ['Frostbite (เกียร์)'] : [];
+  let up = procUp; const ccSk = procUp ? ['Frostbite (เกียร์)'] : []; let apps = procUp ? 1000 / PROC.frost.icd * PROC.frost.ch : 0;
   for (const sid of b.hotbar) {
     const d = defOf(b, sid); const n = rate(sid); if (!n) continue;
     let ms = 0;
     if (!boss) ms = Math.max(ms, d.stunMs || 0, d.rootMs || 0, d.anchorRootMs || 0, d.freezeMs || 0);
     ms = Math.max(ms, d.slowPct ? (d.slowMs || 2000) : 0, d.chill ? CHILL_MS : 0);
-    if (ms) { up += n * ms / 1000; ccSk.push(d.name || sid); }
+    if (ms) { up += n * ms / 1000; apps += n; ccSk.push(d.name || sid); }
   }
-  up = Math.min(1, up);
+  // gear bleed (Rend) is a status too: on a crit, so with a high crit rate the target bleeds from the first hits
+  if (procVal.bleed && rot.total) { const sh0 = r.sheet || {}; const hitsPS = rot.ae.reduce((t, x) => t + rate(x.sid) * Math.max(1, x.perCast || 1), 0) + rate('basic'); const per = hitsPS * Math.min(1, sh0.crit || 0) * PROC.bleed.ch; const bl = Math.min(per, 1000 / PROC.bleed.icd); up += bl * 3; apps += per; /* a new target bleeds from its first crits (the cooldown is the character's, not the target's) */ ccSk.push('Rend (เกียร์)'); }
+  up = Math.min(1, up) * lifeShare(apps);
   if (up > 0) {
     let on = null; try { on = calc({ ...b, calc: { ...b.calc, debuffed: true } }); } catch { on = null; }
     const off = (r.rotation || {}).dps || 0; const onD = on ? (on.rotation || {}).dps || 0 : off;
@@ -239,11 +246,12 @@ function comboOf(b, p, r) {
   }
   // 2) Hunter's Mark (scout): stacks kept up by the marking skills
   if (b.job === 'scout') {
-    let apps = 0; let pct = 0;
-    for (const sid of b.hotbar) { const d = defOf(b, sid); if (d.huntMark && rate(sid)) { apps += rate(sid) * (d.huntMark.ms || 8000) / 1000; pct = Math.max(pct, d.huntMark.pct || 0); } }
+    let apps = 0; let pct = 0; let markRate = 0;
+    for (const sid of b.hotbar) { const d = defOf(b, sid); if (d.huntMark && rate(sid)) { apps += rate(sid) * (d.huntMark.ms || 8000) / 1000; markRate += rate(sid); pct = Math.max(pct, d.huntMark.pct || 0); } }
     if (apps > 0 && pct > 0) {
       const cap = b.c2 === 'markbow' ? 6 : 3;
-      const stacks = Math.min(cap, apps);
+      // farming: stacks build on each new monster from zero (average over its life)
+      const stacks = ttk === Infinity ? Math.min(cap, apps) : Math.min(cap, markRate * ttk / 2, apps);
       let m = 1 + stacks * pct; if (cap === 6 && stacks >= 6) m *= APEX;
       mult *= m;
       parts.push({ k: 'mark', name: "Hunter's Mark", stacks: Math.round(stacks * 10) / 10, cap, gain: Math.round((m - 1) * 1000) / 10, apex: cap === 6 && stacks >= 6 });
@@ -938,9 +946,18 @@ L.predict = async (p) => {
   rot.dps = Object.keys(SKILL_ADJ).length ? rot.share.reduce((t, x) => t + x.dmg, 0) / (rot0.seconds || 60) : rot0.dps * adj;
   const name = (sid) => (sid === 'basic' ? 'โจมตีปกติ' : (G.skills[sid] || {}).name || sid);
   const bs = r.basic || {}; const sh = r.sheet || {};
-  let cmb = { mult: 1, parts: [] }; try { cmb = comboOf(b, { ...q, pack: 1 }, r); } catch { /* none */ }
+  let cmb = { mult: 1, parts: [] }; try { cmb = comboOf(b, { ...q, pack: 1, lifePack: Math.max(1, Math.min(8, Number(p.pack) || 4)) }, r); } catch { /* none */ }
+  // field monsters come in packs: the damage really done counts every monster a zone / cleave / pierce hits
+  // (real logs of AoE builds did 2.5-3x the one-target number). Bosses stay one target.
+  let packDps = null; const pack = Math.max(1, Math.min(8, Number(p.pack) || 4));
+  let packCurve = null;
+  if (!isBossTarget(b)) {
+    const tot = rot.share.reduce((t, x) => t + x.dmg, 0);
+    const at = (n) => Math.round(rot.dps * cmb.mult * rot.share.reduce((t, x) => t + x.dmg * (x.key === 'basic' ? 1 : targetsOf(x.key, b.skills[x.key] || 1, b.evo[x.key], n)), 0) / tot);
+    if (tot > 0) { packCurve = [1, 2, 3, 4, 5, 6, 7, 8].map(at); packDps = packCurve[pack - 1]; }
+  }
   return {
-    withCombos: Math.round(rot.dps * cmb.mult), combos: cmb.parts, sheet: sheetOf(r),
+    withCombos: Math.round(rot.dps * cmb.mult), packDps, pack: packDps ? pack : null, packCurve, combos: cmb.parts, sheet: sheetOf(r),
     gear: Object.entries(b.gear || {}).map(([slot, it]) => ({ slot, id: it.id, name: (G.mobs && false) || it.id, affixes: it.affixes || [], refine: it.refine || 0 })),
     cards: (b.cards || []).map((c, i) => ({ id: c, star: (b.cardStars || [])[i] || 1 })),
     debug: { sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
