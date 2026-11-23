@@ -117,6 +117,7 @@ function publicState() {
 
 const visible = (w) => !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized();
 let pushTimer = null;
+let sleepMode = false; let sleepShown = [];
 function pushState() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
@@ -369,7 +370,7 @@ async function pollSnapshots() {
     // dashboard closed: every 3 s is plenty for alerts
     // every second only for the account open in the Dashboard; the others (and all when nobody looks) every 3 s:
     // each read runs inside the game page, so fewer reads = smoother games
-    if ((!looking || id !== watchedId) && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
+    if ((!looking || sleepMode || id !== watchedId) && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
     g.lastSnapAt = now;
     g.snapshotBusy = true;
     try {
@@ -2464,6 +2465,22 @@ function registerIpc() {
   handle('show', (id) => showGame(id));
   handle('reload', (id) => { const g = rt(id); if (g.win && !g.win.isDestroyed()) g.win.webContents.reload(); });
   handle('toggle-all', () => toggleAllGames());
+  // the Dashboard's sleep view: hide the game windows that are showing (they keep playing; a hidden window
+  // draws nothing, so the PC runs cooler and the other games smoother), show them again on the way out
+  handle('sleep-mode', (on) => {
+    sleepMode = !!on;
+    if (sleepMode) {
+      sleepShown = [];
+      for (const [id, g] of openGames()) if (g.win && !g.win.isDestroyed() && g.win.isVisible()) { sleepShown.push(id); g.win.hide(); }
+      log.info(`sleep view on: ${sleepShown.length} game window(s) hidden`);
+    } else {
+      for (const id of sleepShown) { const g = games.get(id); if (g && g.win && !g.win.isDestroyed()) g.win.showInactive(); }
+      log.info(`sleep view off: ${sleepShown.length} game window(s) shown again`);
+      sleepShown = [];
+    }
+    pushState();
+    return { ok: true };
+  });
   handle('hide', (id) => hideGame(id));
   handle('close', (id) => closeGame(id));
   handle('add', () => {

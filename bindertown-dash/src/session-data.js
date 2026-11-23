@@ -274,6 +274,7 @@ class AccountData {
       name: s.name, job: s.job, level: s.level, map: s.map,
       hp: s.hp, maxHp: s.maxHp, sp: s.sp, maxSp: s.maxSp, exp: s.exp, maxExp: s.maxExp, expPct: s.expPct,
       ping: this.net.ping, online: this.net.online, rewards: this.rewardsWaiting().total,
+      auto: !!s.auto, dead: !!s.dead, sleeping: !!s.sleeping, weightPct: s.weightPct, target: s.target || '',
       silver: s.silver, ...this.rates(now),
     };
   }

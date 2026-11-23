@@ -12,12 +12,13 @@
     <div class="kpis">
       <span>ออนไลน์ <b id="k-online">0 / 0</b></span>
       <span>Silver รวม <b id="k-silver">-</b></span>
-      <span title="Silver ที่ได้จากการล้มมอนตั้งแต่เปิดเกม (ไม่หักค่ายาหรือค่าใช้จ่ายอื่น)">Silver จากมอน <b id="k-silver-run" class="pos">-</b></span>
-      <span title="Silver/ชม. + มูลค่าดรอป/ชม. ของทุกบัญชีที่ออนไลน์">รายได้/ชม. <b id="k-income" class="gold">-</b></span>
+      <span hidden>Silver จากมอน <b id="k-silver-run" class="pos">-</b></span>
+      <span hidden>รายได้/ชม. <b id="k-income" class="gold">-</b></span>
       <span>คนในเซิร์ฟ <b id="k-server">-</b></span>
     </div>
     <div class="actions">
       <button id="update-btn" class="update" hidden title="มีเวอร์ชันใหม่ กดเพื่ออัปเดต"></button>
+      <button id="sleep-btn" class="sleepbtn" title="โหมดพักจอ: ดูทุกบัญชีพร้อมกันแบบหน้าพักจอของเกม (อัปเดตทุกวินาที) · ซ่อนหน้าต่างเกมระหว่างพัก เกมยังเล่นต่อ เครื่องเบาลง">🌙 พักจอ</button>
       <button id="mkt-btn" title="ติดตามราคาตลาดกลางแบบเรียลไทม์ · เช็คราคาไอเทมใดก็ได้">📈 ตลาด</button>
       <button id="lab-btn" title="หาชุดสกิลที่แรงที่สุด (ฟาร์ม / ตีบอส) ด้วยตัวคำนวณดาเมจของเกมเอง">🧪 Build Lab</button>
       <button id="toggle-all" title="ซ่อน/แสดงหน้าต่างเกมทุกบัญชีพร้อมกัน (เหมือนคลิกไอคอน BinderDash มุมขวาล่าง)">👁 ซ่อน/แสดงเกม</button>
@@ -25,6 +26,11 @@
     </div>
   </header>
 
+  <div id="sleep" class="sleep" hidden>
+    <div class="sl-head"><div class="sl-clock" id="sl-clock">--:--</div><div class="sl-sub" id="sl-sub"></div></div>
+    <div class="sl-grid" id="sl-grid"></div>
+    <div class="sl-foot"><button id="sl-exit" class="primary">☀ กลับ Dashboard</button><small>หน้าต่างเกมที่ซ่อนไว้จะกลับมาเอง · กด Esc ก็ได้</small></div>
+  </div>
   <div id="events" class="events" hidden></div>
   <div id="banner" class="banner" hidden></div>
 
