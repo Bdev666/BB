@@ -35,7 +35,7 @@ const DEFAULTS = {
     bountyAutoClaim: true, // claim finished daily bounties by themselves (free)
     worldBossAuto: false, // send every online account to the world boss when it starts
     worldBossReturn: true, // and take them back when it ends
-    deathLoopGuard: true, // 4 deaths in 2 minutes = respawn in place off for 10 minutes    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
+    deathLoopGuard: false, // 4 deaths in 2 minutes = respawn in place off for 10 minutes    // tick the game's Auto Respawn (respawn in place, Premium) + press respawn for hidden dead characters
     marketWatchMin: 2,        // refresh each watched market item every N minutes
     salvageByPrice: true,     // salvage only gear the central market says is worth little
     salvageMaxPrice: 1000000, // ... under this many Gold (or no price at all)
@@ -80,6 +80,7 @@ class Store {
         },
       };
       // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
+      this.data.settings.deathLoopGuard = false; // removed: always respawn at once
       if (!this.data.settings.hv5m) { // the high-value panel starts at 5M now (the old default was 10M)
         if (this.data.settings.highValueGold === 10000000) this.data.settings.highValueGold = 5000000;
         this.data.settings.hv5m = true;

@@ -764,7 +764,7 @@ async function openLab(opt = {}) {
   c2Full.addEventListener('change', c2Sync); c2Sync();
   const owned = (me && me.ownedCards) || [];
   const st = {}; for (const k of ['str', 'agi', 'vit', 'int', 'dex', 'luk']) st[k] = num_(me && me.stats ? me.stats[k] || 1 : 1, 0, 999);
-  const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'), el('option', { value: 'farm' }, '🌾 ฟาร์มมอน (ตีหลายตัว)'));
+  const mode = el('select', {}, el('option', { value: 'boss' }, '👑 ตีบอส (ดาเมจเป้าเดียว)'));
   const pack = num_(4, 1, 12); pack.addEventListener('change', () => { pack.dataset.touched = '1'; });
   const boss = el('select', {}, el('option', { value: '' }, 'บอสเลเวลใกล้ตัวที่สุด'),
     el('option', { value: 'wraithroot_colossus' }, '🌍 World Boss · Wraithroot Colossus (Lv 99)'),
@@ -871,7 +871,7 @@ async function openLab(opt = {}) {
   const cardPane = el('div', { hidden: '' });
   const livePane = el('div', { hidden: '' });
   if (me) {
-    const cGoal = el('select', {}, el('option', { value: 'boss' }, '👑 DPS ตีบอส'), el('option', { value: 'farm' }, '🌾 DPS ฟาร์ม'), el('option', { value: 'gold' }, '💰 ฟาร์มเงิน'));
+    const cGoal = el('select', {}, el('option', { value: 'boss' }, '👑 DPS ตีบอส'), el('option', { value: 'gold' }, '💰 ฟาร์มเงิน (การ์ด Gold/ดรอป)'));
     const cBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value }, o.textContent)));
     const cMine = el('input', { type: 'checkbox', checked: owned.length ? '' : null, disabled: owned.length ? null : '' });
     const cNoCrit = el('input', { type: 'checkbox' });
@@ -1063,7 +1063,6 @@ function cardBox(x) {
   return el('div', {},
     el('div', { class: 'lab-row' }, el('small', {}, '🃏 จัดการ์ดให้บิลด์นี้: '),
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'boss', onclick: (e) => run('boss', e.target) }, '👑 DPS ตีบอส'),
-      el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'farm', onclick: (e) => run('farm', e.target) }, '🌾 DPS ฟาร์ม'),
       el('button', { class: 'tiny lab-cardbtn', 'data-goal': 'gold', onclick: (e) => run('gold', e.target) }, '💰 ฟาร์มเงิน'),
       el('label', { class: 'hint', title: 'ไม่ใช้การ์ดที่ค่าหลักเป็นโอกาสคริ / ดาเมจคริ (สายเวทปกติไม่คริ)' }, noCrit, ' ไม่เอาการ์ดคริ'),
       el('label', { class: 'hint', title: 'เกมนับการ์ดใบเดียวกัน ใบที่ 2 ได้ 50% ใบที่ 3 ได้ 25% ใบที่ 4 ไม่ได้อะไร และไม่นับเข้าเซ็ต · ปกติไม่ใส่ซ้ำ' }, allowDup, ' ใส่การ์ดซ้ำได้'),

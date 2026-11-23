@@ -1221,6 +1221,8 @@ const AUTO_RESPAWN_JS = (premium) => `(() => { const c = document.getElementById
 // 4 deaths within 2 minutes = turn the game's "respawn in place" off for this account for 10 minutes,
 // so the next death goes back to town like normal, and say so
 function deathLoopCheck(id, g) {
+  return; // removed in 1.5.1 at the player's request: pausing respawn cost the farming spot; always get up at once
+  // eslint-disable-next-line no-unreachable
   if (store.data.settings.autoRespawnHere === false || store.data.settings.deathLoopGuard === false) return;
   const now = Date.now();
   g.deathTimes = (g.deathTimes || []).filter((t) => now - t < 120000); g.deathTimes.push(now);
