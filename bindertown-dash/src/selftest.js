@@ -330,7 +330,9 @@ function create(deps) {
           silverH: Math.round(r.silverPerHour), incomeH: Math.round(r.incomePerHour), dpsNow: Math.round(r.dpsNow), avgHit: r.avgHit ? Math.round(r.avgHit) : null,
           pots, decodeOk: h.ok, build: h.build, alerts: [...(g.alerts || [])].map((a) => String(a).split(':')[0]),
           c: counters.get(id) || {},
+          perf: g.perf && g.perf.n ? { fpsAvg: Math.round(g.perf.sum / g.perf.n), fpsMin: g.perf.min, worstMs: g.perf.worst, memMB: g.memoryMB || null } : { memMB: g.memoryMB || null },
         }));
+        g.perf = null;
       } catch (err) { log.once('stats-line', 600000, 'warn', 'stats line:', err.message); }
     }
     if (!lines.length) return;

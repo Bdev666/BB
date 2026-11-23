@@ -230,10 +230,12 @@ function announcementText(e) {
 const SNAPSHOT_JS = `(() => {
   // what the game is showing on top: its disconnect boxes (title text) or the sign-in screen
   const veil = [...document.querySelectorAll('.wbveil .cwtitle')].filter((e) => e.offsetParent).map((e) => e.textContent.trim()).join('|');
-  const login = !!document.body && document.body.innerText.includes('เข้าสู่ระบบด้วย Google');
-  const screen = { veil, login };
   const g = window.__game;
-  if (!g || typeof g.me !== 'function') return { ready: false, screen };
+  if (!window.__bdFpsOn) { window.__bdFpsOn = true; let n = 0; let worst = 0; let last = performance.now();
+    const loop = (t) => { n++; worst = Math.max(worst, t - last); last = t; requestAnimationFrame(loop); }; requestAnimationFrame(loop);
+    setInterval(() => { window.__bdFps = { fps: n, worstMs: Math.round(worst) }; n = 0; worst = 0; }, 1000); }
+  if (!g || typeof g.me !== 'function') { const login = !!document.body && document.body.innerText.includes('เข้าสู่ระบบด้วย Google'); return { ready: false, screen: { veil, login } }; }
+  const screen = { veil, login: false };
   let me, st;
   try { me = g.me(); st = g.state(); } catch (e) { return { ready: false, screen }; }
   if (!me || !st) return { ready: false, loading: true, screen };
@@ -262,7 +264,7 @@ const SNAPSHOT_JS = `(() => {
     weightPct: wf && wf.style.width ? parseFloat(wf.style.width) : null,
     deadScreen: !!(dead && dead.offsetParent),
   };
-  return { ready: true, screen, sessionId, self, players, mobs, loots, mapId, ui, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini };
+  return { ready: true, screen, sessionId, self, players, mobs, loots, mapId, ui, xpText: txt('xpbaset'), jobText: txt('xpjobt'), mini, fps: window.__bdFps || null };
 })()`;
 
 // One per account: keeps what's needed to give events names and owners.

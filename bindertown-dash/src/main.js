@@ -104,6 +104,7 @@ function publicState() {
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: bountyStatus(g),
         finder: finderStatus(g),
+        silverUpHr: (() => { const B = g.balHist; if (!B || B.length < 6) return null; const a = B[0]; const b = B[B.length - 1]; return { perHour: Math.round((b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 60), minutes: b[0] - a[0] }; })(),
         farmNow: g.inGame && !g.demo ? (farmSummary(a.id, g.data.stats.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === mapOf(g)) || null) : null,
         deaths: deathCost(a.id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
@@ -376,6 +377,15 @@ async function pollSnapshots() {
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
       if (g.inGame && !g.demo) farmBalance(g);
+      if (snap && snap.fps && g.win.isVisible() && !g.win.isMinimized()) {
+        const P = g.perf || (g.perf = { n: 0, sum: 0, min: 999, worst: 0 });
+        P.n++; P.sum += snap.fps.fps; P.min = Math.min(P.min, snap.fps.fps); P.worst = Math.max(P.worst, snap.fps.worstMs);
+        if (snap.fps.worstMs >= 2000 && (!g.freezeLogAt || Date.now() - g.freezeLogAt > 60000)) { g.freezeLogAt = Date.now(); log.info(`acc ${id}: game window froze ${(snap.fps.worstMs / 1000).toFixed(1)} s (${snap.fps.fps} fps this second, ${g.memoryMB || '?'} MB)`); }
+      }
+      if (g.inGame && !g.demo && Number.isFinite(Number(g.data.stats.silver))) {
+        const m = Math.floor(Date.now() / 60000); const B = g.balHist || (g.balHist = []);
+        if (!B.length || B[B.length - 1][0] !== m) { B.push([m, Number(g.data.stats.silver)]); while (B.length > 61) B.shift(); }
+      }
       if (snap && snap.ready) { if (!g.inGame) g.inGameAt = Date.now(); g.inGame = true; }
       else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
       watchScreen(id, snap);
@@ -1971,6 +1981,7 @@ async function worldBossGo(kind, reason = 'ปุ่ม') {
     const before = mapOf(g);
     const me = (g.data.world && g.data.world.self) || {};
     g.bossTrip = { kind, from: before, x: me.x, y: me.y, at: Date.now() };
+    log.info(`acc ${id}: world boss -> ${WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `asked the game to warp in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
     await sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
     out.push({ id, name, from: before });
     await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
