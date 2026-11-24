@@ -364,6 +364,7 @@ function onFrame(id, frame) {
 // Read the game's own state (window.__game) once a second: character, mobs, minimap. Read-only.
 let watchedId = null; // account the dashboard is showing (gets the minimap)
 async function pollSnapshots() {
+  if (process.env.BD_NO_SNAPSHOT) return; // diagnostics only: measure a game page with nothing read from it
   const looking = visible(dashboard);
   const now = Date.now();
   for (const [id, g] of openGames()) {
