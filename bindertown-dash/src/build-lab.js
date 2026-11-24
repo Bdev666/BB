@@ -26,7 +26,7 @@ async function load() {
   for (const f of idx) {
     let mod; try { mod = await import('/assets/' + f); } catch { continue; }
     const r = detect(mod);
-    if (r.calc && r.skills && r.jobs) { r.file = f; G = r; return G; }
+    if (r.calc && r.skills && r.jobs) { r.file = f; G = r; if (G.flags) { try { G.flags.C2_ULT_LIVE = true; } catch { /* frozen */ } } return G; }
   }
   throw new Error('หาตัวคำนวณของเกมไม่เจอ (เกมอาจอัปเดตรูปแบบไฟล์)');
 }
@@ -51,6 +51,7 @@ function detect(mod) {
         else if (Array.isArray(v.mage) && v.knight && v.mage.every((x) => typeof x === 'string')) r.c2opts = v;
         else if (v.stormcaller && Array.isArray(v.stormcaller.lines)) r.c2defs = v;
         else if (v.blade && v.blade.a && v.blade.a.perk) r.traits = v;
+        else if (!r.flags && 'C2_ULT_LIVE' in v) r.flags = v; // the game's switches
         else if (!r.ext && v.bolt && v.bolt.path && typeof v.bolt.plus === 'number' && typeof v.bolt.job === 'number') r.ext = v; // class 2 "+" levels on class 1 skills
         else if (!r.cardDefs && Object.keys(v).length > 20 && Object.values(v).slice(0, 25).every((x) => x && Array.isArray(x.fx))) r.cardDefs = v;
         else if (!r.mobs) {
@@ -117,7 +118,10 @@ function c1Req(job, sid) {
 function c2Skills(path) {
   const d = G.c2defs[path]; if (!d) return [];
   // "inherit" paths list class 1 skills inside their lines too: only true class 2 skills take class 2 points
-  return d.lines.flatMap((l) => { const own = l.skills.filter((x) => G.skills[x] && G.skills[x].c2); return own.map((sid, i) => ({ sid, line: l.id, prev: i ? own[i - 1] : null })); });
+  const list = d.lines.flatMap((l) => { const own = l.skills.filter((x) => G.skills[x] && G.skills[x].c2); return own.map((sid, i) => ({ sid, line: l.id, prev: i ? own[i - 1] : null })); });
+  const ult = Object.keys(G.skills).find((k) => G.skills[k].c2 && G.skills[k].c2.ult && G.skills[k].c2.path === path);
+  if (ult && !list.some((x) => x.sid === ult)) list.push({ sid: ult, line: 'ult', prev: null });
+  return list;
 }
 
 // ---- evaluation ----
@@ -380,7 +384,8 @@ function setHotbar(b) {
   const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const w = (s) => s.dpsAlone * sAdj(s.sid) * (curP && curP.mode === 'farm' ? targetsOf(s.sid, s.lv, b.evo[s.sid], curP.pack) : 1);
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => w(y) - w(x));
-  b.hotbar = dmg.slice(0, hotbarSize(b)).map((s) => s.sid);
+  const u = ultOf(b);
+  b.hotbar = withUlt(b, dmg.filter((s) => s.sid !== u).slice(0, b.c2 ? 8 : 6).map((s) => s.sid));
   return b;
 }
 function bestEvoAndTraits(b, p) {
@@ -609,15 +614,24 @@ function pruneUseless(b, p, c2map) {
   b.freed = [...all.values()];
 }
 // hotbar slots: 6 for class 1, 8 once the character is class 2
-const hotbarSize = (b) => (b && b.c2 ? 8 : 6);
+// class 2: 8 slots for skills + the 9th slot holds the path's Ultimate (5 class 2 points; the game casts it in farming too:
+// the logs show Titan's Cleave at 4-9% of a Warrior's damage). The calculator leaves it out unless the game's C2_ULT_LIVE
+// switch is on, so load() switches it on in the lab window (it is ours alone).
+const ultOf = (b) => (b && b.c2 ? Object.keys(G.skills).find((k) => G.skills[k].c2 && G.skills[k].c2.ult && G.skills[k].c2.path === b.c2) : undefined);
+const hasUlt = (b) => { const u = ultOf(b); return !!u && (b.skills[u] || 0) > 0; };
+const hotbarSize = (b) => (b && b.c2 ? 8 + (hasUlt(b) ? 1 : 0) : 6);
+// a hotbar of up to 8 skills, with the Ultimate (when learned) always last, in its own slot
+const withUlt = (b, hb) => { const u = ultOf(b); return u && (b.skills[u] || 0) > 0 ? [...hb.filter((x) => x !== u), u] : hb.filter((x) => x !== u); };
 // the game rotates skills in hotbar order: try every order of the slots (6 slots = 720), or pair swaps until
 // nothing improves (8 slots), and swapping in left-out damaging skills
 function bestHotbar(b, p, noExtra = false) {
   const r = calc({ ...b, hotbar: Object.keys(b.skills).filter((s) => b.skills[s] > 0 && !isPassive(s)) });
   const dmg = (r.skills || []).filter((s) => s.damages && s.lv > 0).sort((x, y) => y.dpsAlone - x.dpsAlone).map((s) => s.sid);
-  let best = { v: score(b, p).v, hb: b.hotbar.slice() };
+  const ult = ultOf(b);
+  b.hotbar = b.hotbar.filter((x) => x !== ult); b.hotbar = withUlt(b, b.hotbar); // (the Ultimate stays last, outside the order search)
+  let best = { v: score(b, p).v, hb: b.hotbar.filter((x) => x !== ult) };
   // a hotbar holds each skill once (an earlier version could put one skill in two or three slots)
-  const tryHb = (hb) => { if (new Set(hb).size !== hb.length) return; b.hotbar = hb; const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
+  const tryHb = (hb) => { if (new Set(hb).size !== hb.length) return; b.hotbar = withUlt(b, hb); const v = score(b, p).v; if (v > best.v + 1e-9) best = { v, hb: hb.slice() }; };
   if (!noExtra) for (const extra of dmg.filter((s) => !best.hb.includes(s)).slice(0, 3)) for (let i = 0; i < best.hb.length; i++) { if (best.hb.includes(extra)) break; const hb = best.hb.slice(); hb[i] = extra; tryHb(hb); }
   const a = best.hb.slice(); const n = a.length; const c = new Array(n).fill(0);
   if (n > 1 && n <= 6) { let i = 0; while (i < n) { if (c[i] < i) { const k = i % 2 ? c[i] : 0; [a[k], a[i]] = [a[i], a[k]]; tryHb(a.slice()); c[i]++; i = 0; } else { c[i] = 0; i++; } } }
@@ -630,7 +644,7 @@ function bestHotbar(b, p, noExtra = false) {
       if (best.v <= start + 1e-9) break;
     }
   }
-  b.hotbar = best.hb;
+  b.hotbar = withUlt(b, best.hb);
 }
 function stillValid(b, p, c2map) {
   for (const [sid, lv] of Object.entries(b.skills)) {
@@ -731,8 +745,10 @@ function rotationSim(r, hotbar, DL = 60000, FROM = 0) {
     const win = DL - FROM; const times = new Map();
     for (const c of casts) if (c.t >= FROM) (times.get(c.sid) || times.set(c.sid, []).get(c.sid)).push(c.t);
     for (const [sid, ts] of times) {
-      const q = per[sid]; if (!q || ts.length < 3) continue;
-      const cycle = (ts[ts.length - 1] - ts[0]) / (ts.length - 1);
+      const q = per[sid]; if (!q) continue;
+      const def = ae.find((x) => x.sid === sid);
+      if (ts.length < 3 && !(def && def.cdMs > 0)) continue;
+      const cycle = ts.length >= 3 ? (ts[ts.length - 1] - ts[0]) / (ts.length - 1) : def.cdMs; // a skill cast 1-2 times in the window: its cooldown is its cycle
       const n = win / cycle;
       if (cycle > 0 && Math.abs(n - q.n) < 1.5) { total += q.dmg * (n / q.n - 1); q.dmg *= n / q.n; q.n = n; }
     }
