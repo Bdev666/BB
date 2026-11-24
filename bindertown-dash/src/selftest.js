@@ -409,8 +409,9 @@ function create(deps) {
       const ds = (r.silverH || 0) * r.min / 60 - (p.silverH || 0) * p.min / 60;
       const dk = (r.killsH || 0) * r.min / 60 - (p.killsH || 0) * p.min / 60;
       if (!(dk > 0) || ds < 0) continue; // not farming (town, travelling, a new session)
+      const dd = Math.max(0, ((r.c || {}).deaths || 0) - ((p.c || {}).deaths || 0));
       const key = `${r.acc}:${r.map}`; const a = out[key] || (out[key] = { acc: r.acc, map: r.map, steps: [] });
-      a.steps.push({ lv: r.level || 0, min: dm, silver: ds, kills: dk, t: Date.parse(r.t) });
+      a.steps.push({ lv: r.level || 0, min: dm, silver: ds, kills: dk, deaths: dd, t: Date.parse(r.t) });
     }
     return out;
   }

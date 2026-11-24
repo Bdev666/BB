@@ -14,8 +14,8 @@ const DEFAULTS = {
     reconnectMinutes: 3,     // ... after being disconnected this long
     startWithWindows: false,       // open games without showing their window (lighter on the PC)
     gameUrl: '',             // empty = default server; takes effect after restart
-    autoRam: false,          // reload a game page whose memory passes ramLimitMB
-    ramLimitMB: 1500,
+    autoRam: true,           // reload a game page whose memory passes ramLimitMB (the game page leaks ~600 MB/h)
+    ramLimitMB: 2500,
     // notifications
     idleMinutes: 5,          // no hits (or no data) for this long -> warn
     disconnectSeconds: 60,   // socket closed this long -> warn
@@ -81,6 +81,7 @@ class Store {
       };
       // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
       this.data.settings.deathLoopGuard = false; // removed: always respawn at once
+      if (!this.data.settings.ram25) { this.data.settings.autoRam = true; if (!(this.data.settings.ramLimitMB >= 2000)) this.data.settings.ramLimitMB = 2500; this.data.settings.ram25 = true; } // the game page leaks: on for everyone once
       if (!this.data.settings.hv5m) { // the high-value panel starts at 5M now (the old default was 10M)
         if (this.data.settings.highValueGold === 10000000) this.data.settings.highValueGold = 5000000;
         this.data.settings.hv5m = true;

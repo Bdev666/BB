@@ -485,6 +485,7 @@ function handleEvents(id, events) {
         break;
       case 'death':
         g.autoAtDeath = !!g.data.stats.auto;
+        { const n0 = Date.now(); g.deathLog = (g.deathLog || []).filter((t) => n0 - t < 3600000); if (!g.deathLog.length || n0 - g.deathLog[g.deathLog.length - 1] > 1500) g.deathLog.push(n0); }
         if (g.lastDeathAt && Date.now() - g.lastDeathAt < 1500) break; // the same death, second message
         g.lastDeathAt = Date.now(); g.deadSince = g.lastDeathAt;
         selftest.count(id, 'deaths');
@@ -1530,9 +1531,13 @@ function farmSummary(accId, level, sinceMin = 0) {
     const min = st.reduce((t, s) => t + s.min, 0); if (min < 20) continue;
     const killHr = Math.round(st.reduce((t, s) => t + s.silver, 0) / min * 60); const killsHr = Math.round(st.reduce((t, s) => t + s.kills, 0) / min * 60);
     if (killsHr < 100) continue; // a town / standing around, not a farm
+    // deaths cost: respawning in place is 5,000 G each in fields (a log: a Scout dying 45 times an hour paid
+    // 2/3 of its kill Silver back in fees); time lost dead is already in the kill numbers
+    const deathsHr = +(st.reduce((t, s) => t + (s.deaths || 0), 0) / min * 60).toFixed(1);
+    const fee = Math.round(deathsHr * 5000);
     const x = byMap.get(a.map);
-    if (x) Object.assign(x, { histMinutes: min, histKillHr: killHr });
-    else { const e = { map: a.map, name: mapName(a.map), minutes: 0, netHr: Math.round(killHr * ratio), est: true, killSilverHr: killHr, killsHr, histMinutes: min, histKillHr: killHr, last: Math.max(...st.map((s) => s.t)) }; live.push(e); byMap.set(a.map, e); }
+    if (x) Object.assign(x, { histMinutes: min, histKillHr: killHr, deathsHr });
+    else { const e = { map: a.map, name: mapName(a.map), minutes: 0, netHr: Math.round(killHr * ratio) - fee, est: true, killSilverHr: killHr, killsHr, deathsHr, histMinutes: min, histKillHr: killHr, last: Math.max(...st.map((s) => s.t)) }; live.push(e); byMap.set(a.map, e); }
   }
   return live.sort((p, q) => q.netHr - p.netHr);
 }
@@ -1767,11 +1772,27 @@ async function farmGo(id, map) {
   arrive(id, g, map).then((ok) => log.info(`acc ${id}: go farm ${map}: ${ok ? 'arrived, AUTO on' : 'did not arrive'}`)).catch(() => {});
   return { ok: true };
 }
+// dying a lot on a farm map costs real money (5,000 G a respawn): say so once in a while, with a better map
+function deathRateCheck(id, g) {
+  const now = Date.now(); const map = mapOf(g);
+  if (!map || WORLD_ARENAS.has(map) || g.bossTrip) return;
+  const n = (g.deathLog || []).filter((t) => now - t < 3600000).length;
+  if (n < 20 || (g.deathWarnAt && now - g.deathWarnAt < 2 * 3600000)) return;
+  if (g.inGameAt && now - g.inGameAt < 45 * 60000) return; // an hour's worth first
+  g.deathWarnAt = now;
+  const lv = g.data.stats.level || 0;
+  const rows = farmSummary(id, lv).filter((x) => !WORLD_ARENAS.has(x.map));
+  const here = rows.find((x) => x.map === map);
+  const better = rows.filter((x) => x.map !== map && (x.deathsHr == null || x.deathsHr < n / 2) && (!here || x.netHr > here.netHr))[0];
+  log.info(`acc ${id}: ${n} deaths in the last hour on ${map} (~${n * 5000} G in respawns)${better ? ` -> suggest ${better.map} (${better.netHr}/h)` : ''}`);
+  notify(id, 'deathRate', `☠ ตาย ${n} ครั้งใน 1 ชม. ที่ ${mapName(map)} · ค่าเกิด ~${(n * 5000).toLocaleString('en-US')} G/ชม.${here ? ` (เงินจากมอน ~${Math.round(here.killSilverHr / 1000)}k/ชม.)` : ''}${better ? ` · แมพที่คุ้มกว่า: ${better.name} ~${Math.round(better.netHr / 1000)}k/ชม. (กด 📊 แมพที่เคยฟาร์ม → ไปฟาร์ม)` : ''}`);
+}
 function farmTick() {
   for (const [id, g] of games) {
     if (!g.inGame || g.demo) continue;
     farmBucket(g); // closes the minute that just ended
     stuckCheck(id, g).catch(() => {});
+    deathRateCheck(id, g);
     loopBackCheck(id, g).catch((e) => log.warn(`acc ${id}: back to farm: ${e.message}`));
     finderStep(id).catch((e) => log.warn(`acc ${id}: farm finder: ${e.message}`));
   }
@@ -2351,12 +2372,24 @@ function tick() {
     if (g.status === 'online' && !g.alerts.has('death') && lastActivity && now - lastActivity > s.idleMinutes * 60 * 1000) {
       setAlert(id, 'idle', true, g.lastHitAt ? `ไม่ได้ตีเลย ${s.idleMinutes} นาที · Auto Play น่าจะหยุด` : `ไม่มีข้อมูลจากเกม ${s.idleMinutes} นาที · AUTO อาจหยุด`);
     }
-    // Give back RAM: reload a page that grew past the limit (at most every 30 min, not while something's wrong)
-    if (s.autoRam && g.memoryMB > s.ramLimitMB && g.status === 'online' && g.alerts.size === 0
+    // Give back RAM: a game page grows ~600-700 MB an hour and stutters, then stops, near 5 GB (a 10-hour log).
+    // Reload it past the limit (at most every 30 min, one account at a time), not while it travels, is at a boss
+    // or lies dead; small warnings (potions, bag weight) do not hold it back. AUTO is switched back on after.
+    const minorOnly = [...g.alerts].every((k) => /^(potion|item|weight|weightFull|idle)/.test(k));
+    const busy = g.bossTrip || g.travelling || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || (g.finder && g.finder.on && g.finder.phase === 'go') || g.data.stats.dead || WORLD_ARENAS.has(mapOf(g));
+    const otherReloading = [...games.values()].some((o) => o !== g && o.ramReloadAt && now - o.ramReloadAt < 90 * 1000);
+    if (s.autoRam && g.memoryMB > s.ramLimitMB && g.status === 'online' && minorOnly && !busy && !otherReloading
         && (!g.ramReloadAt || now - g.ramReloadAt > 30 * 60 * 1000)) {
       g.ramReloadAt = now;
-      g.data.log('other', `หน้าเกมใช้ RAM ${g.memoryMB} MB เกิน ${s.ramLimitMB} MB · โหลดใหม่เพื่อคืน RAM`);
-      g.win.webContents.reload();
+      const mb = g.memoryMB;
+      log.info(`acc ${id}: game page uses ${mb} MB (limit ${s.ramLimitMB}) -> reload to give the memory back`);
+      g.data.log('other', `หน้าเกมใช้ RAM ${mb} MB เกิน ${s.ramLimitMB} MB · โหลดใหม่เพื่อคืน RAM`);
+      liveUi(id).then((ui) => {
+        g.autoBeforeReload = !!ui.auto;
+        g.win.webContents.reload();
+        // back in the game: AUTO on again if it was on (the character is where it was: the server kept it there)
+        setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await liveUi(id)).auto) { await gameCommand(id, 'auto', {}); log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading */ } }, 60000);
+      }).catch(() => g.win.webContents.reload());
     }
   }
   pushState();
