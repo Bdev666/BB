@@ -590,3 +590,4 @@ body.sleeping-view .layout, body.sleeping-view .topbar, body.sleeping-view foote
 .modal-box th, .modal-box td { white-space: nowrap; padding: 7px 10px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, .05); }
 .modal-box tr:hover td { background: rgba(124, 92, 255, .06); }
 .lab-card .warnline { color: #ffb547; margin-bottom: 6px; } .lab-card .okline { color: #3ccf91; margin-bottom: 6px; }
+.fx-dead { opacity: .45; text-decoration: line-through; }

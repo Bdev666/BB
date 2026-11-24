@@ -861,15 +861,15 @@ L.cards = async (p) => {
   const cand = new Set(single.slice(0, 45).map((x) => x.id));
   for (const g of groups.values()) for (const id of g.members.slice().sort((a, c) => val[c] - val[a]).slice(0, 7)) cand.add(id);
   const C = [...cand];
-  const fill = (list) => {
-    // greedy fill from the candidates (gain per Spirit Load), then swaps over the candidates
+  const fill = (list, perSlot = false) => {
+    // greedy fill from the candidates (gain per Spirit Load, or per slot), then swaps over the candidates
     let v = sc();
     while (b.cards.length < slots) {
       let best = null;
       for (const id of list) {
         if (used() + cardLoad(id) > cap || !haveLeft(id)) continue;
         b.cards.push(id); b.cardStars.push(starOf(id));
-        const nv = sc(); const g = (nv - v) / cardLoad(id);
+        const nv = sc(); const g = perSlot ? nv - v : (nv - v) / cardLoad(id);
         if (!best || g > best.g) best = { id, v: nv, g };
         b.cards.pop(); b.cardStars.pop();
       }
@@ -906,7 +906,12 @@ L.cards = async (p) => {
     let ok = true;
     for (const id of seed) { if (b.cards.length >= slots || used() + cardLoad(id) > cap || !haveLeft(id)) { ok = false; break; } b.cards.push(id); b.cardStars.push(starOf(id)); }
     if (!ok) continue;
-    const v = fill(C);
+    // both ways from the same start: per Spirit Load and per slot; keep the stronger set
+    const start = { cards: b.cards.slice(), stars: b.cardStars.slice() };
+    const v1 = fill(C, false); const r1 = { cards: b.cards.slice(), stars: b.cardStars.slice() };
+    b.cards = start.cards.slice(); b.cardStars = start.stars.slice();
+    let v = fill(C, true);
+    if (v1 > v) { v = v1; b.cards = r1.cards; b.cardStars = r1.stars; }
     if (!best || v > best.v) best = { v, cards: b.cards.slice(), stars: b.cardStars.slice() };
     await new Promise((r) => setTimeout(r, 0));
   }
@@ -935,6 +940,15 @@ L.cards = async (p) => {
     const name = top ? (top.k === 'basic' ? 'โจมตีปกติ' : (G.skills[top.k] || {}).name || top.k) : '';
     return { set: lost.join(', '), pct: fin.v ? Math.round((fin.v - w.v) / fin.v * 1000) / 10 : 0, skill: top && top.g > 0 ? name : '', skillPct: top && top.base ? Math.round(top.g / top.base * 100) : 0 };
   });
+  const lineGain = keepC.map((id) => {
+    const def = G.cardDefs[id]; const fx0 = (def && def.fx) || [];
+    return fx0.map((_, j) => {
+      def.fx = fx0.filter((__, k) => k !== j);
+      let w; try { w = cardScore(b, q).v; } catch { w = fin.v; }
+      def.fx = fx0;
+      return fin.v ? Math.round((fin.v - w) / fin.v * 1000) / 10 : 0;
+    });
+  });
   const magic = !!(fin.r && fin.r.basic && fin.r.basic.usesMatk) || ((fin.r && fin.r.skills) || []).filter((x) => x.magic && b.skills[x.sid]).length > ((fin.r && fin.r.skills) || []).filter((x) => !x.magic && x.damages && b.skills[x.sid]).length;
   return {
     goal, target: { id: target, level: b.calc.targetLevel }, slots, cap, load: used(), star, magic,
@@ -947,7 +961,7 @@ L.cards = async (p) => {
       return t && /คริแน่นอน/.test(t[1] || '') ? (d.name || sid) + ' (Evo ' + b.evo[sid].toUpperCase() + ' · ' + t[0] + ')' : null;
     }).filter(Boolean),
     now: q0 ? { dps: Math.round(q0.dps), gold: Math.round(q0.gold * 10) / 10, drop: Math.round(q0.drop * 10) / 10, cards: nowCards } : null,
-    cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], why: why[i], proc: (G.cardDefs[id].fx || []).some((f) => f.k !== 'stat' && !/Pct$|^(crit|critDmg|cdr|aspd|armorPen|boss|elite|night|gold|drop|spellAmp|castSpd|hit|flee|def|mdef|matk|atk|maxHp|maxMp|dmgTaken|slayer|ward|wardBoss|wardNight|debuffed|opener|desperate|haste|barrier|spirit|gather|block|lifesteal|magicRes|thorns)$/.test(f.k)), role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
+    cards: b.cards.map((id, i) => ({ id, star: b.cardStars[i], why: why[i], lineGain: lineGain[i] || [], proc: (G.cardDefs[id].fx || []).some((f) => f.k !== 'stat' && !/Pct$|^(crit|critDmg|cdr|aspd|armorPen|boss|elite|night|gold|drop|spellAmp|castSpd|hit|flee|def|mdef|matk|atk|maxHp|maxMp|dmgTaken|slayer|ward|wardBoss|wardNight|debuffed|opener|desperate|haste|barrier|spirit|gather|block|lifesteal|magicRes|thorns)$/.test(f.k)), role: G.mobs[id].role, level: G.mobs[id].level, load: cardLoad(id), fx: (G.cardDefs[id].fx || []).map((f) => fxText(f, b.cardStars[i])) })),
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
     sets, near, seeds: tried, evals, ms: Math.round(performance.now() - t0),
