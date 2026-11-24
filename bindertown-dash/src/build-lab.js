@@ -498,7 +498,8 @@ async function optimize(p, onStep) {
     }
     return out;
   };
-  for (const cls of [1, 2]) {
+  // spend the points of one class, one step at a time; strict = only steps that really add damage
+  const spend = async (cls, strict) => {
     let n = 0;
     while ((cls === 1 ? left1 : left2) > 0) {
       const left = cls === 1 ? left1 : left2;
@@ -513,13 +514,14 @@ async function optimize(p, onStep) {
         for (const s of path) { b.skills[s] -= 1; if (!b.skills[s]) delete b.skills[s]; }
         b.hotbar = hb;
       }
-      if (!best) break; // spend everything first (a skill can be worth it only after the one before it); pruneUseless takes back what adds nothing
+      if (!best || (strict && !(best.gain > 0))) break; // first pass spends everything (a skill can be worth it only after the one before it); pruneUseless takes back what adds nothing
       for (const s of best.path) b.skills[s] = (b.skills[s] || 0) + 1;
       b.hotbar = best.hotbar; cur = best.sv;
       if (cls === 1) left1 -= best.path.length; else left2 -= best.path.length;
       if (++n % 5 === 0) { bestEvoAndTraits(b, p); cur = score(b, p).v; if (onStep) await onStep(); }
     }
-  }
+  };
+  for (const cls of [1, 2]) await spend(cls, false);
   bestEvoAndTraits(b, p); setHotbar(b); cur = score(b, p).v;
   // polish: move single points between skills of the same class while it helps
   for (let round = 0; round < 4; round++) {
@@ -549,6 +551,11 @@ async function optimize(p, onStep) {
     if (!moved) break;
   }
   pruneUseless(b, p, c2map);
+  // the points that were given back go to whatever really adds damage (not to skills that are not on the hotbar)
+  const used1 = Object.entries(b.skills).filter(([sid]) => !c2map[sid] && !((G.jobs.novice || {}).skills || []).includes(sid)).reduce((t, [, x]) => t + x, 0);
+  const used2 = Object.entries(b.skills).filter(([sid]) => c2map[sid]).reduce((t, [, x]) => t + x, 0);
+  left1 = c1Budget(p.job, p.jobLevel) - used1; left2 = p.c2 ? p.c2Points - used2 : 0;
+  if (left1 > 0 || left2 > 0) { setHotbar(b); cur = score(b, p).v; for (const cls of [1, 2]) await spend(cls, true); bestEvoAndTraits(b, p); }
   bestHotbar(b, p);
   return b;
 }
@@ -561,7 +568,14 @@ function uselessSkills(b, p, c2map, apply) {
   for (const sid of Object.keys(b.skills)) {
     const lv = b.skills[sid]; if (!(lv > 0)) continue;
     if (((G.jobs.novice || {}).skills || []).includes(sid)) continue; // basics are not part of the build's points
-    const keep = free.has(sid) ? 1 : 0; if (lv <= keep) continue;
+    // what must stay: the free first skill of a line, and the level the skills built on it ask for (a chain link needs 3)
+    let keep = free.has(sid) ? 1 : 0;
+    for (const t of Object.keys(b.skills)) {
+      if (t === sid || !(b.skills[t] > 0)) continue;
+      if (c2map[t]) { if (c2map[t].prev === sid) keep = Math.max(keep, 1); continue; }
+      const q = c1Req(p.job, t); if (q.prereq === sid) keep = Math.max(keep, q.prereqLevel || 1);
+    }
+    if (lv <= keep) continue;
     const hb = b.hotbar;
     b.skills[sid] = keep; if (!keep) delete b.skills[sid];
     const valid = stillValid(b, p, c2map);
@@ -572,7 +586,13 @@ function uselessSkills(b, p, c2map, apply) {
   if (apply && out.length) setHotbar(b);
   return out;
 }
-function pruneUseless(b, p, c2map) { b.freed = uselessSkills(b, p, c2map, true); }
+function pruneUseless(b, p, c2map) {
+  // twice: taking a skill away can free the one it was holding up
+  const a = uselessSkills(b, p, c2map, true); const c = uselessSkills(b, p, c2map, true);
+  const all = new Map();
+  for (const x of [...a, ...c]) { const o = all.get(x.sid); if (o) o.points += x.points; else all.set(x.sid, { ...x }); }
+  b.freed = [...all.values()];
+}
 // hotbar slots: 6 for class 1, 8 once the character is class 2
 const hotbarSize = (b) => (b && b.c2 ? 8 : 6);
 // the game rotates skills in hotbar order: try every order of the slots (6 slots = 720), or pair swaps until
