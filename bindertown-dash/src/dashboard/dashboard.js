@@ -908,6 +908,7 @@ async function openLab(opt = {}) {
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
       const sh = pr.sheet || {};
       lOut.replaceChildren(
+        pr.useless && pr.useless.length ? el('div', { class: 'hint warnline' }, `⚠ แต้มที่ไม่เพิ่มดาเมจตอนตีบอส: ${pr.useless.map((x) => `${x.name} ${x.points} แต้ม`).join(' · ')} · ย้ายไปลงสกิลที่ใช้ตีได้ (ดูผล "หาบิลด์" ด้านล่าง) · ถ้าเป็นสกิลเอาตัวรอด (HP/ป้องกัน) อาจตั้งใจเก็บไว้`) : null,
         el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}${pr.packDps ? ` · ตีทั้งฝูง ${pr.pack} ตัว ≈ ${num(pr.packDps)}` : ''}`),
           d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
         pr.calib ? el('div', { class: 'lab-row' }, el('span', { class: 'chip ok' }, `ปรับตามดาเมจจริงของตัวละครนี้ ≈ ${num(pr.calib.withCombos)} DPS`), el('small', { class: 'hint' }, ` · ${pr.calib.kind === 'world' ? 'บอสโลก' : 'มอนทั่วไป'}: ดาเมจต่อฮิตจริง ×${pr.calib.k} ของสูตรเกม (รวมคริ)${pr.calib.d ? ` · DPS รวมจริง ×${pr.calib.d}` : ''} · จาก ${pr.calib.runs} รอบบันทึก · การจัดอันดับบิลด์ใช้สูตรเกม`)) : null,
@@ -1151,6 +1152,7 @@ function renderLab(box, r) {
   const cur = r.current;
   const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}${r.fight ? ` · คิดจากการสู้ ${r.fight.sec >= 120 ? (r.fight.sec / 60).toFixed(1) + ' นาที' : r.fight.sec + ' วิ'} (${r.fight.why})` : ''} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
+    x.freed && x.freed.length ? el('div', { class: 'hint okline' }, `♻ ไม่ลงแต้มสกิลที่ไม่เพิ่มดาเมจ · เก็บแต้มไว้: ${x.freed.join(' · ')}`) : null,
     x.measured ? el('div', { class: 'hint ' + (x.unmeasured && x.unmeasured.length ? 'warnline' : 'okline') }, x.unmeasured && x.unmeasured.length ? `⚠ สกิลที่ยังไม่เคยวัดดาเมจจริง: ${x.unmeasured.join(', ')} · ตัวเลขของสกิลพวกนี้มาจากสูตรอย่างเดียว ลองใช้จริงแล้ววัดด้วย A/B ก่อนเชื่อ` : '✓ ทุกสกิลในช่องลัดปรับตามดาเมจจริงของตัวละครนี้แล้ว') : null,
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
       el('span', { class: 'lab-score' }, `${r.mode === 'boss' ? (x.fightSec ? `DPS เฉลี่ย ${x.fightSec >= 120 ? (x.fightSec / 60).toFixed(1) + ' นาที' : x.fightSec + ' วิ'}` : x.window === 'burst' ? 'DPS 60 วิแรก' : 'DPS ยาว') : 'ดาเมจรวม/วิ'} ${num(x.score)}`),

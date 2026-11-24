@@ -513,7 +513,7 @@ async function optimize(p, onStep) {
         for (const s of path) { b.skills[s] -= 1; if (!b.skills[s]) delete b.skills[s]; }
         b.hotbar = hb;
       }
-      if (!best) break;
+      if (!best || !(best.gain > cur * 0.0002)) break; // nothing left that adds damage: keep the points
       for (const s of best.path) b.skills[s] = (b.skills[s] || 0) + 1;
       b.hotbar = best.hotbar; cur = best.sv;
       if (cls === 1) left1 -= best.path.length; else left2 -= best.path.length;
@@ -548,9 +548,29 @@ async function optimize(p, onStep) {
     bestEvoAndTraits(b, p); setHotbar(b); cur = score(b, p).v;
     if (!moved) break;
   }
+  pruneUseless(b, p, c2map);
   bestHotbar(b, p);
   return b;
 }
+// skills whose points add (almost) no damage: give the points back (the free first skill of a line stays,
+// and so does anything another skill needs). Returns what was taken back.
+function uselessSkills(b, p, c2map, apply) {
+  const free = new Set(c1Lines(p.job).filter((l) => l.id && l.id !== 'basics').map((l) => l.skills[0]));
+  const base = score(b, p).v; const out = [];
+  for (const sid of Object.keys(b.skills)) {
+    const lv = b.skills[sid]; if (!(lv > 0)) continue;
+    const keep = free.has(sid) ? 1 : 0; if (lv <= keep) continue;
+    const hb = b.hotbar;
+    b.skills[sid] = keep; if (!keep) delete b.skills[sid];
+    const valid = stillValid(b, p, c2map);
+    let sv = 0; if (valid) { setHotbar(b); sv = score(b, p).v; }
+    if (valid && sv >= base * 0.998) out.push({ sid, name: (G.skills[sid] || {}).name || sid, points: lv - keep, c2: !!c2map[sid] });
+    if (!(apply && valid && sv >= base * 0.998)) { b.skills[sid] = lv; b.hotbar = hb; }
+  }
+  if (apply && out.length) setHotbar(b);
+  return out;
+}
+function pruneUseless(b, p, c2map) { b.freed = uselessSkills(b, p, c2map, true); }
 // hotbar slots: 6 for class 1, 8 once the character is class 2
 const hotbarSize = (b) => (b && b.c2 ? 8 : 6);
 // the game rotates skills in hotbar order: try every order of the slots (6 slots = 720), or pair swaps until
@@ -739,6 +759,7 @@ function describe(b, p) {
     hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(),
     // damaging hotbar skills this character has never been measured with: their numbers are the formula only
     unmeasured: Object.keys(SKILL_ADJ).length ? b.hotbar.filter((sid) => SKILL_ADJ[sid] == null).map(name) : [],
+    freed: (b.freed || []).map((x) => x.name + ' ' + x.points + ' แต้ม'),
     measured: Object.keys(SKILL_ADJ).length > 0,
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
@@ -950,6 +971,9 @@ L.predict = async (p) => {
     // p.reorder: the best order of the same skills (nothing added or dropped)
     if (p.reorder) { const before = score(b, q).v; bestHotbar(b, q, true); const after = score(b, q).v; reorder = { gainPct: Math.round((after / Math.max(1e-9, before) - 1) * 1000) / 10 }; }
   } else { setHotbar(b); bestHotbar(b, q); }
+  // the character's own points that add no boss damage (and nothing needs): worth moving elsewhere
+  let useless = [];
+  try { const hb0 = b.hotbar.slice(); const c2map = Object.fromEntries((b.c2 ? c2Skills(b.c2) : []).map((x) => [x.sid, x])); useless = uselessSkills(b, q, c2map, false).map((x) => ({ name: x.name, points: x.points })); b.hotbar = hb0; } catch { useless = []; }
   const r = calc(b);
   const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
   const adj = dummyAdj(b, r);
@@ -968,6 +992,7 @@ L.predict = async (p) => {
     if (tot > 0) { packCurve = [1, 2, 3, 4, 5, 6, 7, 8].map(at); const lo = Math.floor(pack); const hi = Math.min(8, lo + 1); packDps = Math.round(packCurve[lo - 1] + (packCurve[hi - 1] - packCurve[lo - 1]) * (pack - lo)); }
   }
   return {
+    useless,
     withCombos: Math.round(rot.dps * cmb.mult), packDps, pack: packDps ? pack : null, packCurve, combos: cmb.parts, sheet: sheetOf(r),
     gear: Object.entries(b.gear || {}).map(([slot, it]) => ({ slot, id: it.id, name: (G.mobs && false) || it.id, affixes: it.affixes || [], refine: it.refine || 0 })),
     cards: (b.cards || []).map((c, i) => ({ id: c, star: (b.cardStars || [])[i] || 1 })),
