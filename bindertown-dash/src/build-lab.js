@@ -617,12 +617,15 @@ const STAT_TRY = [
   ['atkPct', 'ATK %', 5], ['matkPct', 'MATK %', 5], ['spellAmp', 'Spell Amp %', 5], ['cdr', 'ลดคูลดาวน์ %', 5], ['castSpd', 'ร่ายเร็ว %', 5],
   ['crit', 'โอกาสคริ %', 5], ['critDmg', 'ดาเมจคริ %', 10], ['aspd', 'ความเร็วโจมตี %', 5], ['armorPen', 'เจาะเกราะ %', 5], ['boss', 'ดาเมจใส่บอส %', 10],
 ];
+// Adds "+val of key" to the build the way a card line would, for the game's calculator to price it. The line goes on a
+// card of its own: put on one of the build's real cards it was scaled by that card (the same +20 armor pierce came out
+// as 17 on one card and 28 on another), so the price of Sunder / stat weights depended on which card was first.
 function withExtra(b, key, val, fn) {
-  const host = (b.cards && b.cards[0]) || Object.keys(G.cardDefs || {}).find((id) => G.mobs[id]);
-  const def = G.cardDefs && G.cardDefs[host]; if (!def) return fn(b);
-  const saved = def.fx; const nb = b.cards && b.cards.length ? b : { ...b, cards: [host], cardStars: [5] };
-  def.fx = [...saved, { k: key, v: [val, val] }];
-  try { return fn(nb); } finally { def.fx = saved; }
+  if (!G.cardDefs || !G.mobs) return fn(b);
+  if (!G.mobs.zzextra) G.mobs.zzextra = { role: 'trash', level: 1, name: 'extra' };
+  G.cardDefs.zzextra = { fx: [{ k: key, v: [val, val] }] };
+  const nb = { ...b, cards: [...(b.cards || []), 'zzextra'], cardStars: [...(b.cardStars || []), 5] };
+  try { return fn(nb); } finally { delete G.cardDefs.zzextra; }
 }
 function statWeights(b, p) {
   const base = score(b, p).v; if (!base) return [];
@@ -965,7 +968,8 @@ L.cards = async (p) => {
   const shareOf = (r) => Object.fromEntries((((r && r.rotation) || {}).share || []).map((x) => [x.key, x.dmg]));
   const fullShare = shareOf(fin.r);
   const qGame = { ...q, combos: false }; const finGame = cardScore(b, qGame); // the game's calculator alone, without the program's own estimates
-  const setsOf = (r) => ((((r && r.album) || {}).res) || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => ({ name: x.name, tier: x.count >= 5 ? 5 : 3 }));
+  // every combo that is on: region (3 or 5 cards), kin pair (Echoing Oath ...), colour set
+  const setsOf = (r) => ((((r && r.album) || {}).res) || []).filter((x) => x.on || (x.kind === 'region' && x.count >= 3)).map((x) => ({ name: x.name, tier: x.kind === 'region' ? (x.count >= 5 ? 5 : 3) : (x.need || x.count) }));
   const fullSets = setsOf(fin.r);
   const keepC = b.cards; const keepS = b.cardStars;
   const why = keepC.map((id, i) => {
