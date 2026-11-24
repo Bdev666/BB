@@ -974,6 +974,8 @@ L.cards = async (p) => {
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
     sets, near, seeds: tried, evals, ms: Math.round(performance.now() - t0),
+    // where the character's numbers sit against the game's caps (the calculator applies them; this just says it)
+    caps: (() => { const sh = sheetOf(fin.r) || {}; return { crit: sh.crit, cdr: sh.cdr, armorPen: sh.armorPen }; })(),
     compare: { base: Math.round(base.v), sets: Math.round(comboV), direct: Math.round(directRaw), directTuned: Math.round(vDirect), pick },
   };
 };

@@ -1015,6 +1015,12 @@ function cardsView(r, goal) {
         el('div', { class: 'lab-row' }, el('span', { class: 'chip' }, `DPS ${num(r.before.dps)} → ${num(r.after.dps)} (${pct(r.after.dps, r.before.dps)})`),
           r.after.gold ? el('span', { class: 'chip' }, `Gold +${r.after.gold}%`) : null, r.after.drop ? el('span', { class: 'chip' }, `Drop +${r.after.drop}%`) : null,
           r.seeds ? el('small', { class: 'hint' }, ` · ลอง ${r.seeds} จุดเริ่ม (ทุกคอมโบ) ${num(r.evals)} แบบ`) : null),
+    r.caps ? (() => { const c = r.caps; const t = [];
+      if (c.crit != null && c.crit >= 99.5) t.push('คริเต็ม 100% แล้ว: การ์ดโอกาสคริไม่มีผล');
+      else if (c.crit != null && c.crit >= 90) t.push(`คริ ${c.crit}% ใกล้เต็ม 100%: การ์ดคริได้ผลแค่ถึง 100%`);
+      if (c.cdr != null && c.cdr >= 42) t.push(`ลด CD ${c.cdr}% เลยจุดลดผล 42% แล้ว: ใส่เพิ่มได้ผลแค่ 40% (เต็มที่ 75%)`);
+      if (c.armorPen != null && c.armorPen >= 50) t.push(`เจาะเกราะ ${c.armorPen}% เลยจุดลดผล 50% แล้ว`);
+      return t.length ? el('div', { class: 'hint warnline' }, '📏 เพดานของเกม (ตัวคำนวณหักให้แล้ว): ' + t.join(' · ')) : null; })() : null,
     r.compare && r.compare.base ? el('div', { class: 'hint' }, `⚖ เทียบทั้งชุด (ดาเมจเพิ่มจากไม่ใส่การ์ด): เน้นเซ็ต +${Math.round((r.compare.sets / r.compare.base - 1) * 100)}% · การ์ดดาเมจตรงสายล้วน +${Math.round((r.compare.direct / r.compare.base - 1) * 100)}% (สลับปรับแล้ว +${Math.round((r.compare.directTuned / r.compare.base - 1) * 100)}%) → เลือก${r.compare.pick === 'direct' ? 'การ์ดตรงสาย' : 'ชุดที่มีเซ็ต'} เพราะดาเมจรวมสูงกว่า`) : null,
     r.sets && r.sets.length ? el('div', { class: 'lab-row' }, el('small', {}, '🔗 คอมโบที่ติด: '), ...r.sets.map((t) => el('span', { class: 'chip combo ' + t.kind, title: t.fx.join(' · ') }, `${t.name} ${t.count} ใบ: ${t.fx.join(', ')}`))) : null,
     r.near && r.near.length ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, 'ขาดอีก 1 ใบ: '), ...r.near.map((t) => el('span', { class: 'chip dim' }, `${t.name} ${t.count}/${t.need}`))) : null,
