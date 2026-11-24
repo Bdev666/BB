@@ -1236,7 +1236,10 @@ L.run = async (p) => {
   const tmob = G.mobs && G.mobs[target];
   // skills are judged on their own: the character's cards stay out of the skill search (a skill build that only wins
   // because of what the cards add is not the best skill build). Cards are chosen afterwards for the winning skills.
-  const base = { ...p, loadout: p.withCards ? p.loadout : noAlbum(p.loadout), target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), c2Points: Math.max(0, Math.min(C2_POINTS, p.c2Points == null ? C2_POINTS : p.c2Points)), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
+  // a real character's class 2 points: the ones in class 2 skills + unspent (sent by the page) + the levels it already put past the top
+  // of class 1 skills (those cost class 2 points too, and the page does not see which skills have a "+" part)
+  const extSpent = p.realC2 && p.current && p.current.c2 ? Object.entries(p.current.skills || {}).reduce((t, [sid, l]) => { const e = G.ext && G.ext[sid]; return t + (e && e.path === p.current.c2 ? Math.max(0, Math.min(e.plus, l - maxLv(sid))) : 0); }, 0) : 0;
+  const base = { ...p, loadout: p.withCards ? p.loadout : noAlbum(p.loadout), target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), c2Points: Math.max(0, Math.min(C2_POINTS, (p.c2Points == null ? C2_POINTS : p.c2Points) + extSpent)), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
   const paths = p.paths && p.paths.length ? p.paths : ['', ...(G.c2opts[p.job] || [])];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   // fight length used to score builds (boss mode): set by the player, recorded from real fights,

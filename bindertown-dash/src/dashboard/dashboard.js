@@ -809,6 +809,7 @@ async function openLab(opt = {}) {
     const p = { combos: useCombos.checked, fightMode: win.value, window: win.value === 'sustain' ? 'sustain' : 'sustain', party: +party.value || 1, realSec: rf ? rf.sec : 0, realN: rf ? rf.n : 0, worldSec: ft.world[boss.value] || 0, job: job.value, level: +lv.value, jobLevel: +jlv.value, c2Job: +c2lv.value, c2Points: +c2pts.value, mode: mode.value, pack: +pack.value, packSet: pack.dataset.touched === '1', target: mode.value === 'boss' ? boss.value : '',
       stats: Object.fromEntries(Object.entries(st).map(([k, i]) => [k, +i.value || 0])) };
     if (useGear.checked && hasLo) p.loadout = { ...lo, wRefine: me.wRefine, sRefine: me.sRefine };
+    p.realC2 = !c2Full.checked && !!c2Real; // the real class 2 points: the lab adds the levels already put past the top of class 1 skills
     if (useCur.checked && me && me.job === job.value) p.current = { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr || {} };
     if (me && me.job === job.value) p.acc = accId; // the character's own learned per-skill factors (from its real hits)
     if (owned.length) p.owned = owned;
