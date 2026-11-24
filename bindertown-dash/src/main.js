@@ -104,6 +104,7 @@ function publicState() {
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: bountyStatus(g),
         finder: finderStatus(g),
+        driver: (() => { const d = driverOf(g); return d ? DRIVE_TH[d] : ''; })(),
         silverUpHr: (() => { const B = g.balHist; if (!B || B.length < 6) return null; const a = B[0]; const b = B[B.length - 1]; return { perHour: Math.round((b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 60), minutes: b[0] - a[0] }; })(),
         farmNow: g.inGame && !g.demo ? (farmSummary(a.id, g.data.stats.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === mapOf(g)) || null) : null,
         deaths: deathCost(a.id, g),
@@ -1556,10 +1557,36 @@ function farmSummaryLedger(accId, level, sinceMin = 0) {
 }
 function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; store.save(); } }
 
+// ---------- who drives this character now ----------
+// Every system that walks, travels or presses AUTO asks mayAct() first. Order: world boss (and the way back
+// from it) > bounty > farm finder / a map chosen in the Dashboard / back after a death > crowded-channel move >
+// AUTO-stuck fix / RAM reload. A higher one pauses the lower ones; equal or lower ones wait.
+const DRIVE_PRIO = { boss: 5, bossReturn: 5, bounty: 4, finder: 3, travel: 3, deathReturn: 3, crowd: 1, stuck: 1, ram: 0 };
+const DRIVE_TH = { boss: 'ตีบอสโลก', bossReturn: 'กลับจุดฟาร์มหลังบอส', bounty: 'ทำค่าหัว', finder: 'หาที่ฟาร์ม', travel: 'เดินทางไปแมพที่เลือก', deathReturn: 'กลับจุดฟาร์มหลังตาย', crowd: 'ย้าย CH', stuck: 'แก้ AUTO ค้าง', ram: 'คืนแรม' };
+function driverOf(g) {
+  const now = Date.now(); const list = [];
+  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) list.push('boss');
+  if (g.loopBack && !g.loopBack.done) list.push(g.loopBack.why === 'boss' ? 'bossReturn' : 'deathReturn');
+  if (g.bounty && g.bounty.on) list.push('bounty');
+  if (g.finder && g.finder.on) list.push('finder');
+  if (g.travelling && now - g.travelling.at < 8 * 60000) list.push('travel');
+  if (g.crowdBusy) list.push('crowd');
+  if (g.ramReloadAt && now - g.ramReloadAt < 90 * 1000) list.push('ram');
+  list.sort((a, b) => DRIVE_PRIO[b] - DRIVE_PRIO[a]);
+  return list[0] || null;
+}
+// who may go ahead: nobody else drives, or it is itself, or it outranks the one driving
+function mayAct(g, who) {
+  const d = driverOf(g);
+  return !d || d === who || DRIVE_PRIO[who] > DRIVE_PRIO[d];
+}
+function waitNote(g) { const d = driverOf(g); return d ? `รอ: กำลัง${DRIVE_TH[d]}` : ''; }
+
 // ---------- AUTO on but nothing hit for 3 minutes: switch AUTO off and on again (at most 4 times an hour) ----------
 async function stuckCheck(id, g) {
   if (!store.data.settings.stuckFix || !g.inGame || g.demo || g.status !== 'online' || g.alerts.has('death') || g.humanCheck) return;
-  if (g.bossTrip || g.travelling || g.crowdBusy || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || WORLD_ARENAS.has(mapOf(g))) return;
+  const d0 = driverOf(g); if (d0 && d0 !== 'bounty' && d0 !== 'finder') return; // something is moving it (a bounty / finder standing on its map may be helped)
+  if (g.bounty && g.bounty.on && g.bounty.phase === 'travel') return;
   const now = Date.now(); const last = Math.max(g.lastHitAt || 0, g.inGameAt || 0, g.autoSeenOffAt || 0);
   if (now - last < 3 * 60000) return;
   const ui = await liveUi(id);
@@ -1582,7 +1609,9 @@ async function loopBackCheck(id, g) {
   if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return;
   if (L.giveUp) { L.done = true; notify(id, 'death', `☠ ตายวนซ้ำอีกรอบใน 1 ชม. ที่ ${mapName(L.map)} · ไม่พากลับแล้ว รอคุณดู (ลองแมพที่มอนเบาลง หรือเช็คยา/อุปกรณ์)`); log.info(`acc ${id}: death loop again at ${L.map} -> not going back`); return; }
   if (WORLD_ARENAS.has(mapOf(g)) && !g.bossTrip && Date.now() - L.at < 3 * 60000) return; // still leaving the arena
-  if (g.bossTrip || g.travelling || (g.bounty && g.bounty.on) || (g.finder && g.finder.on) || WORLD_ARENAS.has(mapOf(g))) { L.done = true; return; } // something else runs this character
+  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) return; // a new boss trip: wait for it
+  // a bounty or the finder took the character meanwhile: they decide where it goes now
+  if ((g.bounty && g.bounty.on) || (g.finder && g.finder.on)) { L.done = true; log.info(`acc ${id}: back to farm: not needed, ${g.bounty && g.bounty.on ? 'bounty' : 'farm finder'} runs it`); return; }
   L.busy = true;
   try {
     if (mapOf(g) !== L.map) {
@@ -1711,8 +1740,8 @@ async function finderStart(id, on) {
 async function finderStep(id) {
   const g = games.get(id); const f = g && g.finder;
   if (!f || !f.on || f.busy || !g.inGame || g.demo || g.status !== 'online') return;
-  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { f.note = 'พักไว้ระหว่างตีบอสโลก'; return; }
   if (g.bounty && g.bounty.on) { f.on = false; f.note = 'หยุด: เริ่มทำค่าหัว'; return; }
+  if (!mayAct(g, 'finder')) { f.note = waitNote(g) || f.note; return; } // a world boss (or the way back from it) first
   f.busy = true;
   try {
     const deaths = (selftest.counters.get(id) || {}).deaths || 0;
@@ -1765,7 +1794,8 @@ async function finderStep(id) {
 }
 async function farmGo(id, map) {
   const g = games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
-  if (g.bounty && g.bounty.on) return { ok: false, error: 'กำลังทำค่าหัวอยู่' };
+  if (!mayAct(g, 'travel')) return { ok: false, error: waitNote(g) || 'ตัวละครกำลังทำอย่างอื่นอยู่' };
+  if (g.finder && g.finder.on) { g.finder.on = false; g.finder.note = 'หยุด: คุณเลือกแมพเอง'; } // the player's choice wins over the finder
   const r = await travelTo(id, g, map);
   if (!r.ok) return r;
   if (r.here) { if (!(await liveUi(id)).auto) await gameCommand(id, 'auto', {}); return { ok: true }; }
@@ -1832,7 +1862,7 @@ const CROWD_JS = `(() => { try { const g = window.__game; const me = g.me(); con
 async function crowdCheck(id, g) {
   const s = store.data.settings;
   if (!s.crowdSwitch || !g.inGame || g.demo || g.status !== 'online' || !g.win || g.win.isDestroyed() || g.crowdBusy) return;
-  if ((g.bounty && g.bounty.on) || g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { g.crowdSince = 0; g.crowdHist = []; return; }
+  if (driverOf(g)) { g.crowdSince = 0; g.crowdHist = []; return; } // only while the character just farms
   if (!(await liveUi(id)).auto) { g.crowdSince = 0; g.crowdHist = []; return; } // only while AUTO farms
   let c; try { c = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { c = null; }
   if (!c || !c.ch || c.ch === PVP_CH) { g.crowdSince = 0; g.crowdHist = []; return; }
@@ -1983,7 +2013,7 @@ async function bountyClaimDone(id, list) {
 async function bountyStep(id) {
   const g = games.get(id); const B = g && g.bounty;
   if (!B || !B.on || !g.inGame || g.demo || !g.win || g.win.isDestroyed() || B.busy) return;
-  if (g.bossTrip || WORLD_ARENAS.has(mapOf(g))) { B.note = 'พักไว้ระหว่างตีบอสโลก'; return; }
+  if (!mayAct(g, 'bounty')) { B.note = waitNote(g) || 'พักไว้'; return; } // a world boss (or the way back from it) first
   B.busy = true;
   try {
     const list = await bountyList(id);
@@ -2376,7 +2406,8 @@ function tick() {
     // Reload it past the limit (at most every 30 min, one account at a time), not while it travels, is at a boss
     // or lies dead; small warnings (potions, bag weight) do not hold it back. AUTO is switched back on after.
     const minorOnly = [...g.alerts].every((k) => /^(potion|item|weight|weightFull|idle)/.test(k));
-    const busy = g.bossTrip || g.travelling || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || (g.finder && g.finder.on && g.finder.phase === 'go') || g.data.stats.dead || WORLD_ARENAS.has(mapOf(g));
+    const dr = driverOf(g);
+    const busy = (dr && dr !== 'bounty' && dr !== 'finder') || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || (g.finder && g.finder.on && g.finder.phase !== 'measure') || g.data.stats.dead;
     const otherReloading = [...games.values()].some((o) => o !== g && o.ramReloadAt && now - o.ramReloadAt < 90 * 1000);
     if (s.autoRam && g.memoryMB > s.ramLimitMB && g.status === 'online' && minorOnly && !busy && !otherReloading
         && (!g.ramReloadAt || now - g.ramReloadAt > 30 * 60 * 1000)) {
