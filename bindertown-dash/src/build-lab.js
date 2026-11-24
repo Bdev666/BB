@@ -915,6 +915,15 @@ L.cards = async (p) => {
     if (!best || v > best.v) best = { v, cards: b.cards.slice(), stars: b.cardStars.slice() };
     await new Promise((r) => setTimeout(r, 0));
   }
+  // 2b) the other way round: the strongest cards on their own (no set chased), then the same swaps. A set is kept
+  //     only when the whole set beats the direct cards it takes the slots of (one-card swaps never see that).
+  const comboV = best ? best.v : 0;
+  b.cards = []; b.cardStars = [];
+  for (const x of single) { if (b.cards.length >= slots || !(x.v > 0)) break; if (used() + cardLoad(x.id) > cap || !haveLeft(x.id)) continue; b.cards.push(x.id); b.cardStars.push(starOf(x.id)); }
+  const directRaw = sc();
+  const vDirect = fill(C, true);
+  const pick = !best || vDirect > best.v ? 'direct' : 'sets';
+  if (pick === 'direct') best = { v: vDirect, cards: b.cards.slice(), stars: b.cardStars.slice() };
   b.cards = best ? best.cards : []; b.cardStars = best ? best.stars : [];
   // 3) last polish over every card in the game (or every card owned)
   cur = fill(pool);
@@ -965,6 +974,7 @@ L.cards = async (p) => {
     before: { dps: Math.round(base.dps), gold: base.gold, drop: base.drop },
     after: { dps: Math.round(fin.dps), gold: Math.round(fin.gold * 10) / 10, drop: Math.round(fin.drop * 10) / 10 },
     sets, near, seeds: tried, evals, ms: Math.round(performance.now() - t0),
+    compare: { base: Math.round(base.v), sets: Math.round(comboV), direct: Math.round(directRaw), directTuned: Math.round(vDirect), pick },
   };
 };
 

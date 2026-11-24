@@ -1015,6 +1015,7 @@ function cardsView(r, goal) {
         el('div', { class: 'lab-row' }, el('span', { class: 'chip' }, `DPS ${num(r.before.dps)} → ${num(r.after.dps)} (${pct(r.after.dps, r.before.dps)})`),
           r.after.gold ? el('span', { class: 'chip' }, `Gold +${r.after.gold}%`) : null, r.after.drop ? el('span', { class: 'chip' }, `Drop +${r.after.drop}%`) : null,
           r.seeds ? el('small', { class: 'hint' }, ` · ลอง ${r.seeds} จุดเริ่ม (ทุกคอมโบ) ${num(r.evals)} แบบ`) : null),
+    r.compare && r.compare.base ? el('div', { class: 'hint' }, `⚖ เทียบทั้งชุด (ดาเมจเพิ่มจากไม่ใส่การ์ด): เน้นเซ็ต +${Math.round((r.compare.sets / r.compare.base - 1) * 100)}% · การ์ดดาเมจตรงสายล้วน +${Math.round((r.compare.direct / r.compare.base - 1) * 100)}% (สลับปรับแล้ว +${Math.round((r.compare.directTuned / r.compare.base - 1) * 100)}%) → เลือก${r.compare.pick === 'direct' ? 'การ์ดตรงสาย' : 'ชุดที่มีเซ็ต'} เพราะดาเมจรวมสูงกว่า`) : null,
     r.sets && r.sets.length ? el('div', { class: 'lab-row' }, el('small', {}, '🔗 คอมโบที่ติด: '), ...r.sets.map((t) => el('span', { class: 'chip combo ' + t.kind, title: t.fx.join(' · ') }, `${t.name} ${t.count} ใบ: ${t.fx.join(', ')}`))) : null,
     r.near && r.near.length ? el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, 'ขาดอีก 1 ใบ: '), ...r.near.map((t) => el('span', { class: 'chip dim' }, `${t.name} ${t.count}/${t.need}`))) : null,
         el('div', { class: 'lab-cardlist' }, ...r.cards.map((c, i) => el('div', { class: 'lab-card1' },
