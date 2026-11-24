@@ -1103,31 +1103,23 @@ L.combos = async () => {
   return out;
 };
 
-// ---------- competition mode: skills and cards tuned together ----------
-// skills -> best cards -> skills again with those cards -> cards again, for the strongest paths
+// ---------- competition mode: the best skills first, then the best cards for them ----------
+const noAlbum = (lo) => (lo ? { ...lo, album: {} } : lo);
 const toAlbum = (cards, stars) => Object.fromEntries(cards.map((m, i) => ['s' + (i + 1), 'spirit_card' + ((stars[i] || 1) > 1 ? '+' + ((stars[i] || 1) - 1) : '') + '|' + m]));
 L.full = async (p) => {
   useSkillAdj(p);
   await load();
   const t0 = performance.now();
   const goal = p.goal || (p.mode === 'boss' ? 'boss' : 'farm');
-  const first = await L.run({ ...p, current: null });
+  // 1) the best skill builds on their own (no cards in the search), 2) the best cards for each of them. One way, no loop:
+  //    cards never change which skills are chosen, skills never wait for cards
+  const first = await L.run({ ...p, paths: p.paths && p.paths.length === 1 ? p.paths : undefined });
   const out = [];
   for (const res of first.results.slice(0, p.paths && p.paths.length === 1 ? 1 : 2)) {
-    const path = res.build.c2 || '';
-    let build = res.build; let cards = null; let lo = p.loadout ? { ...p.loadout } : {};
-    for (let round = 0; round < 2; round++) {
-      cards = await L.cards({ ...p, loadout: lo, build, goal });
-      lo = { ...lo, album: toAlbum(cards.cards.map((c) => c.id), cards.cards.map((c) => c.star)) };
-      const again = await L.run({ ...p, loadout: lo, paths: [path], current: null });
-      build = again.results[0].build;
-    }
-    cards = await L.cards({ ...p, loadout: lo, build, goal });
-    lo = { ...lo, album: toAlbum(cards.cards.map((c) => c.id), cards.cards.map((c) => c.star)) };
-    const fin = await L.run({ ...p, loadout: lo, paths: [path], current: p.current });
-    out.push({ result: fin.results[0], cards, current: fin.current, target: fin.target });
+    const cards = await L.cards({ ...p, build: res.build, goal });
+    out.push({ result: res, cards, current: first.current, target: first.target });
   }
-  out.sort((a, b) => b.result.score - a.result.score);
+  out.sort((a, b) => ((b.cards && b.cards.after && b.cards.after.dps) || b.result.score) - ((a.cards && a.cards.after && a.cards.after.dps) || a.result.score));
   return { mode: p.mode, goal, out, ms: Math.round(performance.now() - t0) };
 };
 
@@ -1200,7 +1192,9 @@ L.run = async (p) => {
   const t0 = performance.now();
   const target = pickTarget(p.mode, p.level, p.target);
   const tmob = G.mobs && G.mobs[target];
-  const base = { ...p, target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), c2Points: Math.max(0, Math.min(C2_POINTS, p.c2Points == null ? C2_POINTS : p.c2Points)), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
+  // skills are judged on their own: the character's cards stay out of the skill search (a skill build that only wins
+  // because of what the cards add is not the best skill build). Cards are chosen afterwards for the winning skills.
+  const base = { ...p, loadout: p.withCards ? p.loadout : noAlbum(p.loadout), target, targetLevel: targetLevelFor(target, p.mode, p.level), pack: Math.max(1, p.pack || 4), c2Job: Math.min(MAX_JOB, p.c2Job || 50), c2Points: Math.max(0, Math.min(C2_POINTS, p.c2Points == null ? C2_POINTS : p.c2Points)), jobLevel: Math.min(MAX_JOB, p.jobLevel || MAX_JOB) };
   const paths = p.paths && p.paths.length ? p.paths : ['', ...(G.c2opts[p.job] || [])];
   const yieldNow = () => new Promise((r) => setTimeout(r, 0));
   // fight length used to score builds (boss mode): set by the player, recorded from real fights,

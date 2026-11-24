@@ -817,19 +817,19 @@ async function openLab(opt = {}) {
   };
   // competition mode: skills -> cards -> skills -> cards for the 2 strongest paths, every hotbar order
   const fullStars = el('select', {}, ...[1, 2, 3, 4, 5].map((n) => el('option', { value: String(n) }, '★'.repeat(n))));
-  const full = el('button', { class: 'primary gold', title: 'ปรับสกิลกับการ์ดสลับกันจนนิ่ง + ลองลำดับช่องลัดทุกแบบ ใช้เวลา 30–90 วิ' }, '🏆 โหมดแข่ง (ละเอียดสุด)');
+  const full = el('button', { class: 'primary gold', title: 'หาชุดสกิลที่แรงที่สุดก่อน (ไม่นับการ์ด) แล้วหาการ์ดที่ดีที่สุดให้ชุดสกิลนั้น 2 คลาสที่แรงสุด ใช้เวลา 30–90 วิ' }, '🏆 โหมดแข่ง (ละเอียดสุด)');
   full.onclick = async () => {
     full.disabled = true; go.disabled = true;
     const t = Date.now();
-    const tick = setInterval(() => { res.firstChild && (res.firstChild.textContent = `🏆 กำลังปรับสกิล ⇄ การ์ด ทีละรอบ… ${Math.round((Date.now() - t) / 1000)} วิ (ราว 30–90 วิ)`); }, 1000);
-    res.replaceChildren(el('p', { class: 'hint' }, '🏆 กำลังปรับสกิล ⇄ การ์ด ทีละรอบ…'));
+    const tick = setInterval(() => { res.firstChild && (res.firstChild.textContent = `🏆 กำลังหาสกิลก่อน แล้วหาการ์ดให้… ${Math.round((Date.now() - t) / 1000)} วิ (ราว 30–90 วิ)`); }, 1000);
+    res.replaceChildren(el('p', { class: 'hint' }, '🏆 กำลังหาสกิลก่อน แล้วหาการ์ดให้…'));
     const p = { ...labParams(), stars: +fullStars.value, goal: mode.value === 'boss' ? 'boss' : 'farm' };
     lastLab = p;
     try {
       const f = await dash.invoke('lab-full', p);
       renderLab(res, { mode: p.mode, target: f.out[0].target, results: f.out.map((o) => o.result), current: f.out[0].current, evals: 0, ms: f.ms, loadout: !!p.loadout, full: true });
       res.querySelectorAll('.lab-card').forEach((cardEl, i) => { const box = cardEl.querySelector('.lab-cards'); if (box && f.out[i]) box.replaceChildren(...cardsView(f.out[i].cards, p.goal)); });
-      res.prepend(el('p', { class: 'hint' }, `🏆 โหมดแข่ง: สกิลกับการ์ดปรับร่วมกัน 2 รอบ + ลำดับช่องลัดทุกแบบ · ${(f.ms / 1000).toFixed(0)} วิ · DPS ในการ์ดผลลัพธ์รวมการ์ดชุดนี้แล้ว`));
+      res.prepend(el('p', { class: 'hint' }, `🏆 โหมดแข่ง: เลือกสกิลที่แรงที่สุดก่อน (ไม่นับการ์ด) แล้วค่อยหาการ์ดให้ชุดสกิลนั้น (การ์ดไม่เปลี่ยนสกิลที่เลือก) · ${(f.ms / 1000).toFixed(0)} วิ · DPS ในการ์ดผลลัพธ์รวมการ์ดชุดนี้แล้ว`));
     } catch (e) { res.replaceChildren(el('p', {}, '✖ ' + e.message)); }
     clearInterval(tick); full.disabled = false; go.disabled = false;
   };
