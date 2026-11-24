@@ -7,7 +7,7 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js && node --check src/preload-game.js && node --check src/preload-dashboard.js && node --check src/game-adapter.js && node --check src/store.js && node --check src/telegram.js && node --check src/session-data.js && node --check src/demo.js && node --check src/updater.js && node --check src/logger.js && node --check src/build-lab.js && node --check src/dashboard/dashboard.js && node --check src/dashboard/settings.js && node --check src/selftest.js && node --check src/icons.js && node --check src/mob-table.js && node --check src/game-names.js && node --check src/drop-names.js && node tools/check-page-scripts.js && node tools/session-data.test.js && node src/game-adapter.test.js",
+    "check": "node tools/check-syntax.js && node tools/check-page-scripts.js && node tools/session-data.test.js && node src/game-adapter.test.js",
     "dist": "electron-builder --win nsis",
     "dist:mac": "electron-builder --mac --universal"
   },
