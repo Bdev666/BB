@@ -23,7 +23,7 @@ const DEFAULTS = {
       disconnect: true, death: true, idle: true, whisper: true, party: true, itemLow: true,
       crash: true, maintenance: true, sound: true,
       card: true, valuable: true, rareDrop: true, potion: true, weight: true, premium: true, levelUp: false,
-      fieldBoss: true, worldBoss: true, event: true, daily: true, marketWatch: true,
+      fieldBoss: true, worldBoss: true, event: true, daily: true, marketWatch: true, deathRate: true,
     },
     statsLog: true, // numbers every 10 minutes into logs/stats (stays on this PC)
     autoBuy: { on: false, below: 50, rounds: 3, keepSilver: 5000 }, // buy potions by themselves when about to run out (rounds x 99)

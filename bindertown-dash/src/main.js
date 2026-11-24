@@ -1827,7 +1827,7 @@ function deathRateCheck(id, g) {
   const now = Date.now(); const map = mapOf(g);
   if (!map || WORLD_ARENAS.has(map) || g.bossTrip) return;
   const n = (g.deathLog || []).filter((t) => now - t < 3600000).length;
-  if (n < 20 || (g.deathWarnAt && now - g.deathWarnAt < 2 * 3600000)) return;
+  if (n < 20 || (g.deathWarnAt && now - g.deathWarnAt < 6 * 3600000) || store.data.settings.notify.deathRate === false) return;
   if (g.inGameAt && now - g.inGameAt < 45 * 60000) return; // an hour's worth first
   g.deathWarnAt = now;
   const lv = g.data.stats.level || 0;

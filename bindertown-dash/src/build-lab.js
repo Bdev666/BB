@@ -564,7 +564,7 @@ function uselessSkills(b, p, c2map, apply) {
     b.skills[sid] = keep; if (!keep) delete b.skills[sid];
     const valid = stillValid(b, p, c2map);
     let sv = 0; if (valid) { setHotbar(b); sv = score(b, p).v; }
-    if (valid && sv >= base * 0.998) out.push({ sid, name: (G.skills[sid] || {}).name || sid, points: lv - keep, c2: !!c2map[sid] });
+    if (valid && sv >= base * 0.998) out.push({ sid, name: (G.skills[sid] || {}).name || sid, points: lv - keep, c2: !!c2map[sid], why: !isPassive(sid) && !(hb || []).includes(sid) ? 'ไม่อยู่ในช่องลัด ไม่ถูกใช้' : 'ไม่เพิ่มดาเมจ' });
     if (!(apply && valid && sv >= base * 0.998)) { b.skills[sid] = lv; b.hotbar = hb; }
   }
   if (apply && out.length) setHotbar(b);
@@ -759,7 +759,7 @@ function describe(b, p) {
     hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(),
     // damaging hotbar skills this character has never been measured with: their numbers are the formula only
     unmeasured: Object.keys(SKILL_ADJ).length ? b.hotbar.filter((sid) => SKILL_ADJ[sid] == null).map(name) : [],
-    freed: (b.freed || []).map((x) => x.name + ' ' + x.points + ' แต้ม'),
+    freed: (b.freed || []).map((x) => x.name + ' ' + x.points + ' แต้ม (' + x.why + ')'),
     measured: Object.keys(SKILL_ADJ).length > 0,
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),
@@ -973,7 +973,7 @@ L.predict = async (p) => {
   } else { setHotbar(b); bestHotbar(b, q); }
   // the character's own points that add no boss damage (and nothing needs): worth moving elsewhere
   let useless = [];
-  try { const hb0 = b.hotbar.slice(); const c2map = Object.fromEntries((b.c2 ? c2Skills(b.c2) : []).map((x) => [x.sid, x])); useless = uselessSkills(b, q, c2map, false).map((x) => ({ name: x.name, points: x.points })); b.hotbar = hb0; } catch { useless = []; }
+  try { const hb0 = b.hotbar.slice(); const c2map = Object.fromEntries((b.c2 ? c2Skills(b.c2) : []).map((x) => [x.sid, x])); useless = uselessSkills(b, q, c2map, false).map((x) => ({ name: x.name, points: x.points, why: x.why })); b.hotbar = hb0; } catch { useless = []; }
   const r = calc(b);
   const rot0 = r.rotation || { dps: 0, share: [], seconds: 60 };
   const adj = dummyAdj(b, r);
