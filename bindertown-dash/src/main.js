@@ -1223,27 +1223,7 @@ const AUTO_RESPAWN_JS = (premium) => `(() => { const c = document.getElementById
 // death loop: up on the spot, killed again, again (seen: 8 deaths in a minute, 5,000 G each).
 // 4 deaths within 2 minutes = turn the game's "respawn in place" off for this account for 10 minutes,
 // so the next death goes back to town like normal, and say so
-function deathLoopCheck(id, g) {
-  return; // removed in 1.5.1 at the player's request: pausing respawn cost the farming spot; always get up at once
-  // eslint-disable-next-line no-unreachable
-  if (store.data.settings.autoRespawnHere === false || store.data.settings.deathLoopGuard === false) return;
-  const now = Date.now();
-  g.deathTimes = (g.deathTimes || []).filter((t) => now - t < 120000); g.deathTimes.push(now);
-  if (g.deathTimes.length < 4 || (g.respawnPausedUntil && now < g.respawnPausedUntil)) return;
-  // boss fights: dying often is part of it and getting up at once matters most (world boss = free).
-  // A world boss arena while the event is on counts too (respawn is sent before the death screen, so
-  // the "free" button is often never seen; seen in a real log: the guard paused respawn mid-fight)
-  const arena = WORLD_ARENAS.has(mapOf(g)) && [...bosses.world.values()].some((w) => w.state === 'live' || (w.endsAt && now - w.endsAt < 5 * 60 * 1000));
-  if (arena || g.bossTrip || (g.fight && now - g.fight.last < 30000) || (g.freeRespawnAt && now - g.freeRespawnAt < 5 * 60 * 1000)) return;
-  g.respawnPausedUntil = now + 10 * 60 * 1000; g.deathTimes = [];
-  // where it farmed: after the pause it is taken back there (a log: woke up in town and stood there 8 hours)
-  { const st = (g.data.world && g.data.world.self) || {}; const again = g.loopBack && now - g.loopBack.at < 60 * 60000; g.loopBack = again ? { ...g.loopBack, giveUp: true } : { map: mapOf(g), x: st.x, y: st.y, at: now, done: false }; }
-  selftest.count(id, 'deathLoops');
-  if (g.win && !g.win.isDestroyed()) g.win.webContents.executeJavaScript(`(() => { const c = document.getElementById('au-respawn'); if (c && c.checked && !c.disabled) { c.checked = false; c.dispatchEvent(new Event('change', { bubbles: true })); return true; } return false; })()`, true).catch(() => {});
-  log.info(`acc ${id}: death loop (4 deaths in 2 min) -> respawn in place off for 10 min`);
-  notify(id, 'death', '☠ ตายวนซ้ำ 4 ครั้งใน 2 นาที · ปิด "เกิดที่เดิม" ของบัญชีนี้ 10 นาที (ตายครั้งต่อไปกลับเมือง) · ลองเปลี่ยนจุดฟาร์มหรือเช็คยา/อุปกรณ์');
-  g.autoRespawnAt = 0; pushState();
-}
+function deathLoopCheck() { /* removed in 1.5.1 at the player's request: always respawn at once */ }
 async function ensureAutoRespawn(id) {
   const g = games.get(id);
   if (!g || !g.inGame || g.demo || !g.win || g.win.isDestroyed()) return;

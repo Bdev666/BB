@@ -513,7 +513,7 @@ async function optimize(p, onStep) {
         for (const s of path) { b.skills[s] -= 1; if (!b.skills[s]) delete b.skills[s]; }
         b.hotbar = hb;
       }
-      if (!best || !(best.gain > cur * 0.0002)) break; // nothing left that adds damage: keep the points
+      if (!best) break; // spend everything first (a skill can be worth it only after the one before it); pruneUseless takes back what adds nothing
       for (const s of best.path) b.skills[s] = (b.skills[s] || 0) + 1;
       b.hotbar = best.hotbar; cur = best.sv;
       if (cls === 1) left1 -= best.path.length; else left2 -= best.path.length;
