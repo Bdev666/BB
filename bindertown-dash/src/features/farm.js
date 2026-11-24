@@ -152,7 +152,7 @@ async function stuckCheck(id, g) {
   HUB.log.info(`acc ${id}: AUTO on but no hit for ${Math.round((now - last) / 60000)} min on ${HUB.mapOf(g)} -> AUTO off/on (${g.kicks.length} this hour)`);
   g.data.log('other', '🔧 AUTO เปิดอยู่แต่ไม่ได้ตี 3 นาที · ปิดแล้วเปิด AUTO ใหม่');
   HUB.selftest.count(id, 'stuckFix');
-  await HUB.gameCommand(id, 'auto', {}); await new Promise((r) => setTimeout(r, 1500));
+  await HUB.gameCommand(id, 'auto', {}); await HUB.sleep(1500);
   if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
   g.autoSeenOffAt = now; // give it 3 more minutes
 }
@@ -181,11 +181,11 @@ async function loopBackCheck(id, g) {
       let left = null;
       for (let i = 0; i < 70; i++) { // eslint-disable-line no-await-in-loop
         const st = (g.data.world && g.data.world.self) || {};
-        if (st.x == null) { await new Promise((r) => setTimeout(r, 1500)); continue; } // eslint-disable-line no-await-in-loop
+        if (st.x == null) { await HUB.sleep(1500); continue; } // eslint-disable-line no-await-in-loop
         left = Math.hypot(st.x - L.x, st.y - L.y);
         if (left <= 3 || HUB.mapOf(g) !== L.map) break;
         await HUB.sendInput(id, { type: 'moveTo', x: L.x, y: L.y }); // eslint-disable-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
+        await HUB.sleep(2500); // eslint-disable-line no-await-in-loop
       }
       HUB.log.info(`acc ${id}: walked back to ${Math.round(L.x)},${Math.round(L.y)} on ${L.map}${left != null ? ` (${Math.round(left)} tiles left)` : ' (position unknown)'}`);
     }
@@ -235,7 +235,7 @@ async function arrive(id, g, map, maxMs = 6 * 60000, keepRange = false) {
   while (Date.now() - t0 < maxMs) {
     if (!g.win || g.win.isDestroyed()) return false;
     if (HUB.mapOf(g) === map) {
-      await new Promise((r) => setTimeout(r, 2500));
+      await HUB.sleep(2500);
       g.travelling = null;
       if (keepRange) return true; // the caller walks to its spot and starts AUTO there
       await HUB.setFarmRange(g, 0);
@@ -244,7 +244,7 @@ async function arrive(id, g, map, maxMs = 6 * 60000, keepRange = false) {
       return true;
     }
     if ((Date.now() - t0) % 20000 < 2100) await HUB.answerWarpBox(id, g);
-    await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
   }
   g.travelling = null;
   return false;

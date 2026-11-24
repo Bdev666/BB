@@ -1609,7 +1609,6 @@ function renderSleep() {
   const accs = ((state && state.accounts) || []).filter((a) => a.status === 'online' || a.status === 'reconnecting' || a.status === 'disconnected');
   $('#sl-sub').textContent = accs.length ? `${accs.length} บัญชีกำลังเล่น · เกมยังเล่นต่อระหว่างพักจอ` : 'ยังไม่มีบัญชีที่เปิดเกมอยู่';
   const grid = $('#sl-grid');
-  const pct = (v, m) => (m ? Math.max(0, Math.min(100, (v / m) * 100)) : 0);
   const cards = accs.map((a) => {
     const s = a.summary || {}; const S = s.session || {};
     const hrs = Math.max(1 / 60, (s.playMs || 0) / 3600000);

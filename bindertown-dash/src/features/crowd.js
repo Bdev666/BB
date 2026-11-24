@@ -32,11 +32,11 @@ async function crowdCheck(id, g) {
   try {
     const asked = Date.now();
     await HUB.sendInput(id, { type: 'channelQuery' });
-    for (let i = 0; i < 20 && !(g.channels && g.channels.at >= asked); i++) await new Promise((r) => setTimeout(r, 250)); // eslint-disable-line no-await-in-loop
+    for (let i = 0; i < 20 && !(g.channels && g.channels.at >= asked); i++) await HUB.sleep(250); // eslint-disable-line no-await-in-loop
     const counts = (g.channels && g.channels.at >= asked && g.channels.counts) || [];
     if (!counts.length) { HUB.log.info(`acc ${id}: crowded, but the channel list did not come`); return; }
     if (g.channels.lockMs > 30000) { HUB.log.info(`acc ${id}: crowded, channel change locked for ${Math.ceil(g.channels.lockMs / 1000)} s`); return; }
-    if (g.channels.lockMs > 0) await new Promise((r) => setTimeout(r, g.channels.lockMs + 600)); // the game's short lock after arriving
+    if (g.channels.lockMs > 0) await HUB.sleep(g.channels.lockMs + 600); // the game's short lock after arriving
     const here = counts[c.ch - 1] ?? 999;
     let best = 0;
     for (let ch = 1; ch <= counts.length; ch++) { if (ch === c.ch || ch === PVP_CH) continue; if (!best || (counts[ch - 1] ?? 999) < (counts[best - 1] ?? 999)) best = ch; }
@@ -46,14 +46,14 @@ async function crowdCheck(id, g) {
     await HUB.sendInput(id, { type: 'switchChannel', channel: best });
     // wait for the new channel, then walk back to the same spot and fight there again
     let now = null;
-    for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 1000)); try { now = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { now = null; } if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
+    for (let i = 0; i < 40; i++) { await HUB.sleep(1000); try { now = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { now = null; } if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
     if (!now || now.ch !== best) { HUB.log.info(`acc ${id}: channel did not change (still CH ${now && now.ch})`); return; }
     if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // off while walking back (it would fight on the way)
     for (let i = 0; i < 15; i++) { // eslint-disable-line no-await-in-loop
       let p; try { p = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { p = null; } // eslint-disable-line no-await-in-loop
       if (!p || Math.hypot(p.x - c.x, p.y - c.y) <= 3) break;
       await HUB.sendInput(id, { type: 'moveTo', x: c.x, y: c.y }); // eslint-disable-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+      await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
     }
     if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
     HUB.selftest.count(id, 'crowdMoves');

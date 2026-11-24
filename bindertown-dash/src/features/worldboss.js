@@ -15,7 +15,7 @@ HUB.worldBossGo = HUB.worldBossGo = async function worldBossGo(kind, reason = '�
     HUB.log.info(`acc ${id}: world boss -> ${HUB.WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `asked the game to warp in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
     await HUB.sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
     out.push({ id, name, from: before });
-    await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(400); // eslint-disable-line no-await-in-loop
   }
   HUB.log.info(`world boss ${kind}: sent ${out.length} account(s) in (${reason})`);
   // once there: walk up to the boss first (AUTO only fights inside 16 tiles of where it was switched on,
@@ -31,7 +31,7 @@ HUB.worldBossGo = HUB.worldBossGo = async function worldBossGo(kind, reason = '�
       if (!g.bossTrip) return; // stopped meanwhile
       if (HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { await HUB.walkToBossThenAuto(o.id, kind); return; }
       if (i && i % 15 === 0) await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
-      await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+      await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
     }
     missed.push(o.name); g.bossTrip = null; HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 3 min`);
   })).then(() => { if (missed.length) HUB.notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 3 นาที)`); }).catch((e) => HUB.log.warn(`world boss go: ${e.message}`));
@@ -61,14 +61,14 @@ HUB.walkToBossThenAuto = HUB.walkToBossThenAuto = async function walkToBossThenA
     try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
     if (spot && spot.how === 'boss') break;
     if (i === 0) HUB.log.info(`acc ${id}: world boss not in sight yet -> waiting for it`);
-    await new Promise((r) => setTimeout(r, 3000)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(3000); // eslint-disable-line no-await-in-loop
   }
   for (let i = 0; i < 15; i++) { // up to ~30 s
     try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
-    if (!spot || spot.none) { await new Promise((r) => setTimeout(r, 2000)); continue; } // eslint-disable-line no-await-in-loop
+    if (!spot || spot.none) { await HUB.sleep(2000); continue; } // eslint-disable-line no-await-in-loop
     if (spot.d <= 5) break;
     await HUB.sendInput(id, { type: 'moveTo', x: spot.x + (spot.how === 'boss' ? 2 : 0), y: spot.y }); // eslint-disable-line no-await-in-loop
-    await new Promise((r) => setTimeout(r, 2000)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
   }
   HUB.log.info(`acc ${id}: world boss -> walked to the ${spot && spot.how ? spot.how : 'arena'}${spot && spot.d != null ? ` (${Math.round(spot.d)} tiles left)` : ''}, AUTO on`);
   if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
@@ -82,7 +82,7 @@ async function worldBossLeave(kind) {
     if (g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from)) g.loopBack = { map: g.bossTrip.from, x: g.bossTrip.x, y: g.bossTrip.y, at: Date.now(), done: false, why: 'boss' };
     g.bossTrip = null;
     setTimeout(async () => { if (!(await HUB.liveUi(id)).auto) HUB.gameCommand(id, 'auto', {}); }, 8000);
-    await new Promise((r) => setTimeout(r, 400)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(400); // eslint-disable-line no-await-in-loop
   }
 }
 

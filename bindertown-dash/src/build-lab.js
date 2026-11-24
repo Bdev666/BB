@@ -655,7 +655,16 @@ function sheetOf(r) {
 let SKILL_ADJ = {};
 const sAdj = (k) => SKILL_ADJ[k] || 1;
 function useSkillAdj(p) { SKILL_ADJ = (p && p.skillAdj && typeof p.skillAdj === 'object') ? p.skillAdj : {}; }
+// the same rotation is asked for several times for one calculator result (sustained DPS, ranking, opening): simulate once
+const ROT_CACHE = new WeakMap();
 function rotationOf(r, hotbar, DL = 60000, FROM = 0) {
+  if (!r || typeof r !== 'object') return rotationSim(r, hotbar, DL, FROM);
+  let m = ROT_CACHE.get(r); if (!m) { m = new Map(); ROT_CACHE.set(r, m); }
+  const key = hotbar.join(',') + '|' + DL + '|' + FROM + '|' + JSON.stringify(SKILL_ADJ);
+  let v = m.get(key); if (!v) { v = rotationSim(r, hotbar, DL, FROM); m.set(key, v); }
+  return v;
+}
+function rotationSim(r, hotbar, DL = 60000, FROM = 0) {
   const V = (r && r.skills) || [];
   const ae = hotbar.map((sid) => V.find((x) => x.sid === sid && x.damages && x.hit)).filter(Boolean);
   const st = new Map(ae.map((x) => [x.sid, { left: x.charges || 1, refill: 0, first: true }]));

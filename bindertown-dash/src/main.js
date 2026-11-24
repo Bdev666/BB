@@ -633,7 +633,7 @@ HUB.gameCommand = HUB.gameCommand = async function gameCommand(id, cmd, arg) {
   // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
   const g = rt(id);
   const sentAt = Date.now();
-  await new Promise((res) => setTimeout(res, 1500));
+  await HUB.sleep(1500);
   if (g.lastNotice && g.lastNotice.at >= sentAt) return { ok: false, error: g.lastNotice.text };
   return r;
 };;
@@ -651,7 +651,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
       const before = await HUB.liveUi(id);
       ok = await click(cmd === 'auto' ? '#autobig' : '#autoeco');
       if (ok) {
-        await new Promise((res) => setTimeout(res, 400));
+        await HUB.sleep(400);
         const after = await HUB.liveUi(id);
         Object.assign(g.data.stats, { auto: after.auto, sleeping: after.sleeping });
         if (cmd === 'auto' && after.auto === before.auto) return { ok: false, error: `เกมไม่${before.auto ? 'ปิด' : 'เปิด'} AUTO ให้ (เช่น อยู่ในเมือง ตัวละครตาย หรือกำลังวาร์ป)` };
@@ -679,7 +679,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
         // eslint-disable-next-line no-await-in-loop
         await js(`window.__game.sell(${JSON.stringify(itemId)}, ${qty}), true`); n++;
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 250));
+        await HUB.sleep(250);
       }
       HUB.log.info(`acc ${id}: sold ${n} item stack(s) to the NPC (chosen in the dashboard)`);
       ok = n > 0;
@@ -705,7 +705,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
         // eslint-disable-next-line no-await-in-loop
         await HUB.requestPrice(id, itemId, true);
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 350));
+        await HUB.sleep(350);
       }
       return { ok: true, count: ids.length };
     }
@@ -723,7 +723,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
       if (!(await HUB.sendInput(id, { type: 'marketList', itemId, qty, price: qty * unit }))) return { ok: false, error: 'เกมยังไม่พร้อม' };
       for (let i = 0; i < 20; i++) {
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 200));
+        await HUB.sleep(200);
         const m = g.lastMarket;
         if (m && m.at >= sentAt) {
           HUB.log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> ${m.ok ? 'listed' : 'refused: ' + m.reason}`);
@@ -769,7 +769,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
         let got = 0;
         for (let i = 0; i < 25 && !got; i++) {
           // eslint-disable-next-line no-await-in-loop
-          await new Promise((r) => setTimeout(r, 120));
+          await HUB.sleep(120);
           got = have() - before;
           if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
         }
@@ -791,7 +791,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
         // eslint-disable-next-line no-await-in-loop
         ok = (await HUB.sendInput(id, { type: 'salvage', itemId })) || ok;
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 250));
+        await HUB.sleep(250);
       }
       break;
     }
@@ -996,8 +996,8 @@ async function priceGear(id, ids) {
   const t0 = Date.now();
   let missing = todo;
   for (let round = 0; round < 3 && missing.length; round++) {
-    for (const x of missing) { await HUB.requestPrice(id, x, true); await new Promise((r) => setTimeout(r, round ? 800 : 450)); } // eslint-disable-line no-await-in-loop
-    await new Promise((r) => setTimeout(r, 2500)); // eslint-disable-line no-await-in-loop
+    for (const x of missing) { await HUB.requestPrice(id, x, true); await HUB.sleep(round ? 800 : 450); } // eslint-disable-line no-await-in-loop
+    await HUB.sleep(2500); // eslint-disable-line no-await-in-loop
     missing = missing.filter((x) => !g.data.itemPrices.has(x) || g.data.itemPrices.get(x).at < t0 - 1000);
   }
   HUB.selftest.count(id, 'priceAsked', todo.length); HUB.selftest.count(id, 'priceMissed', missing.length);
@@ -1041,7 +1041,7 @@ async function commandAll(cmd, arg) {
     }
     results.push({ id, name, ...r });
     // eslint-disable-next-line no-await-in-loop
-    await new Promise((res) => setTimeout(res, 300)); // one after another, like a person clicking
+    await HUB.sleep(300); // one after another, like a person clicking
   }
   HUB.log.info(`all accounts: ${cmd} -> ${results.map((r) => `${r.id}:${r.ok ? (r.skipped ? 'skip' : 'ok') : 'fail'}`).join(' ') || 'no account in game'}`);
   return results;
@@ -1134,7 +1134,7 @@ async function remoteCommand(text) {
         const r = await HUB.gameCommand(id, cmd === '/auto' ? 'auto' : 'sleep', {});
         out.push(`${r.ok ? '✔' : '✖'} ${name}${r.ok ? (cmd === '/auto' ? `: AUTO ${want ? 'เปิด' : 'ปิด'}แล้ว` : ': พักจอแล้ว') : `: ${r.error}`}`);
         // eslint-disable-next-line no-await-in-loop
-        await new Promise((res) => setTimeout(res, 300));
+        await HUB.sleep(300);
       }
       return out.join('\n') || 'ไม่มีบัญชีที่เลือก';
     }
@@ -1684,7 +1684,7 @@ function registerIpc() {
     const itemId = base + (o.gear === false ? '' : (HUB.GRADE_SUFFIX[o.grade] || ''));
     const g = acc[1]; const t0 = Date.now();
     await HUB.requestPrice(acc[0], itemId, true);
-    for (let i = 0; i < 30; i++) { await new Promise((r) => setTimeout(r, 150)); const p = g.data.itemPrices.get(itemId); if (p && p.at >= t0 - 1000) return { ok: true, itemId, ...p }; } // eslint-disable-line no-await-in-loop
+    for (let i = 0; i < 30; i++) { await HUB.sleep(150); const p = g.data.itemPrices.get(itemId); if (p && p.at >= t0 - 1000) return { ok: true, itemId, ...p }; } // eslint-disable-line no-await-in-loop
     return { ok: false, error: 'ตลาดไม่ตอบ' };
   });
   handle('lab-combos', () => HUB.labCall('window.__bdLab.combos()'));

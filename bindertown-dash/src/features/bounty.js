@@ -23,7 +23,7 @@ HUB.answerWarpBox = HUB.answerWarpBox = async function answerWarpBox(id, g) {
   for (let i = 0; i < 8; i++) { // the box comes after the server answers (a moment)
     let r; try { r = await g.win.webContents.executeJavaScript(WARP_CONFIRM_JS, true); } catch { r = null; } // eslint-disable-line no-await-in-loop
     if (r && r.pressed) { HUB.log.info(`acc ${id}: travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
-    await new Promise((res) => setTimeout(res, 500)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(500); // eslint-disable-line no-await-in-loop
   }
   return null;
 };;
@@ -31,7 +31,7 @@ HUB.answerWarpBox = HUB.answerWarpBox = async function answerWarpBox(id, g) {
 // keep only the bounty monster on, or put back the ones BinderDash switched off. Bosses are left alone.
 const MOB_FILTER_JS = (mode, names) => `(async () => { const win = document.getElementById('autoopts'); const open = document.getElementById('autoopt'); if (!win || !open) return { ok: false, why: 'no auto settings' };
   const was = win.style.display === 'block'; if (!was) open.click();
-  await new Promise((r) => setTimeout(r, 400));
+  await HUB.sleep(400);
   const mode = ${JSON.stringify(mode)}; const names = ${JSON.stringify(names)}; const changed = []; let found = false;
   for (let guard = 0; guard < 40; guard++) {
     const btns = [...document.querySelectorAll('#au-targets .autg')];
@@ -42,7 +42,7 @@ const MOB_FILTER_JS = (mode, names) => `(async () => { const win = document.getE
     if (!pick) break;
     const nm = ((pick.querySelector('.autgn b') || {}).textContent || '').trim();
     pick.click(); if (!(mode === 'only' && nm === names[0])) changed.push(nm);
-    await new Promise((r) => setTimeout(r, 60));
+    await HUB.sleep(60);
   }
   if (!was) win.style.display = 'none';
   return { ok: true, changed, found: mode === 'only' ? found || [...document.querySelectorAll('#au-targets .autg .autgn b')].some((b) => b.textContent.trim() === names[0]) : true }; })()`;
@@ -89,7 +89,7 @@ async function bountyClaimDone(id, list) {
     if (!b.id || b.claimed || b.prog < b.need) continue;
     HUB.farmDirty(g); await HUB.sendInput(id, { type: 'bountyClaim', id: b.id }); // eslint-disable-line no-await-in-loop
     n++; HUB.log.info(`acc ${id}: bounty claimed ${b.id} (${b.name || b.map || ''})`);
-    await new Promise((r) => setTimeout(r, 500)); // eslint-disable-line no-await-in-loop
+    await HUB.sleep(500); // eslint-disable-line no-await-in-loop
   }
   if (n) { if (g.bounty) g.bounty.claimedN = (g.bounty.claimedN || 0) + n; HUB.selftest.count(id, 'bountyClaims', n); await HUB.sendInput(id, { type: 'huntQuery' }); }
   return n;
@@ -153,7 +153,7 @@ async function bountyStep(id) {
         looking = false;
         if (m === to) { clearInterval(watch); g.travelling = null;
           // AUTO on the moment it lands; the bounty step then keeps it to the bounty monster
-          await new Promise((r) => setTimeout(r, 800)); { const prev = await HUB.setFarmRange(g, 0); if (prev != null && prev !== 0 && g.bounty && g.bounty.prevFarm == null) g.bounty.prevFarm = prev; } if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); g.bountyArrivedAt = Date.now(); HUB.log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
+          await HUB.sleep(800); { const prev = await HUB.setFarmRange(g, 0); if (prev != null && prev !== 0 && g.bounty && g.bounty.prevFarm == null) g.bounty.prevFarm = prev; } if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); g.bountyArrivedAt = Date.now(); HUB.log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
       }, 1000);
       return;
     }
