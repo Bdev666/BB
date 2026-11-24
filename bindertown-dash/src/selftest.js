@@ -452,7 +452,7 @@ function create(deps) {
         const H = ws && inv ? ws / inv : 1;
         for (const sid of Object.keys(rel)) rel[sid] = +(rel[sid] / H).toFixed(3); }
       // whole-DPS ratio and pack: only records made the way the app counts them now (1.2.2+)
-      const newer = list.filter((r) => ver(r.app) >= ver('1.2.2'));
+      const newer = g.kind === 'world' ? list.filter((r) => (r.activeSec || 0) >= 60 && r.ratio > 0) : list.filter((r) => ver(r.app) >= ver('1.2.2'));
       const pack = med(newer.map((r) => r.pack));
       const d = med(newer.map((r) => r.ratio));
       const mobs = {}; for (const r of list.slice(-30)) if (r.mainMob) mobs[r.mainMob] = (mobs[r.mainMob] || 0) + 1;

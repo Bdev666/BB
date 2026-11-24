@@ -1387,10 +1387,10 @@ function fightEnd(g, killed = false) {
   const sec = Math.round((f.last - f.start) / 1000);
   if (sec < 5) return;
   const list = store.data.fights || (store.data.fights = []);
-  list.push({ mob: f.mob, sec, dmg: f.dmg, killed, at: Date.now() });
-  if (list.length > 200) list.splice(0, list.length - 200);
+  list.push({ acc: g.accId, mob: f.mob, sec, dmg: f.dmg, dps: Math.round(f.dmg / sec), killed, at: Date.now() });
+  if (list.length > 600) list.splice(0, list.length - 600);
   store.save();
-  log.info(`boss fight: ${f.mob} ${sec}s ${f.dmg} dmg${killed ? ' (killed)' : ''}`);
+  log.info(`boss fight: acc ${g.accId} ${f.mob} ${sec}s ${f.dmg} dmg (${Math.round(f.dmg / sec)}/s)${killed ? ' (killed)' : ''}`);
 }
 function fightTick() {
   for (const [, g] of games) if (g.fight && Date.now() - g.fight.last > 20000) fightEnd(g);
@@ -2670,7 +2670,8 @@ function registerIpc() {
   const calibFor = (p) => {
     if (!p || p.acc == null) return null;
     const all = store.data.calib || {};
-    const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test(p.target || '') ? 'world' : 'field';
+    const role = (MOB_ROLES[p.target || ''] || [])[0];
+    const kind = /^(wraithroot_colossus|pearlheart_titan)$/.test(p.target || '') || role === 'boss' || role === 'mini-boss' || p.mode === 'boss' ? 'world' : 'field';
     const c = all[`${p.acc}:mob:${p.target}`] || all[`${p.acc}:${kind}`];
     return c && c.job === p.job && c.v === 3 ? { ...c, kind } : null; // older ones were learned without class-2 traits
   };
@@ -2903,6 +2904,28 @@ app.whenReady().then(() => {
       if (n) { store.save(); log.info(`calibration from the combat history: ${n} entr${n === 1 ? 'y' : 'ies'} · ${Object.entries(h).filter(([k]) => !k.includes(':mob:')).map(([k, c]) => `${k} k=${c.k} pack=${c.pack} n=${c.n}`).join(', ')}`); }
     } catch (e) { log.warn(`calibration from history: ${e.message}`); }
   };
+  // boss fights (field and world bosses): real damage per second against the lab's prediction for that boss,
+  // per account + boss (needs the character in game for its build); 3 fights at least
+  const calibFromBossFights = async () => {
+    const all = store.data.calib || (store.data.calib = {}); const since = Date.now() - 30 * 864e5;
+    const by = {};
+    for (const f of store.data.fights || []) if (f.acc != null && f.at >= since && f.sec >= 20 && f.dps > 0) (by[`${f.acc}|${f.mob}`] || (by[`${f.acc}|${f.mob}`] = [])).push(f);
+    for (const [key, fs] of Object.entries(by)) {
+      if (fs.length < 3) continue;
+      const [acc, mob] = [Number(key.split('|')[0]), key.split('|')[1]];
+      const g = games.get(acc); if (!g || !g.inGame || g.demo || !labMeRef) continue;
+      let me; try { me = await labMeRef(acc); } catch { me = null; } if (!me) continue;
+      let pr; try { pr = await labCall(`window.__bdLab.predict(${JSON.stringify({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target: mob, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50, loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } })})`); } catch { pr = null; }
+      if (!pr || !(pr.withCombos > 0)) continue;
+      const xs = fs.map((f) => f.dps).sort((a, b) => a - b); const real = xs[xs.length >> 1];
+      const base = all[`${acc}:world`] || {};
+      all[`${acc}:mob:${mob}`] = { ...base, v: 3, job: me.job, kind: 'world', d: +(real / pr.withCombos).toFixed(3), k: base.k || 1, mob, n: fs.length, runs: fs.length, fromBossFights: true, realDps: real, at: Date.now() };
+      log.info(`boss calibration acc ${acc} ${mob}: real ${real}/s over ${fs.length} fights vs lab ${pr.withCombos}/s -> x${(real / pr.withCombos).toFixed(2)}`);
+    }
+    store.save();
+  };
+  setTimeout(() => calibFromBossFights().catch((e) => log.warn(`boss calibration: ${e.message}`)), 90000);
+  setInterval(() => calibFromBossFights().catch(() => {}), 60 * 60000);
   setTimeout(calibFromHistory, 8000);
   setInterval(calibFromHistory, 60 * 60000);
   applyStartWithWindows();
