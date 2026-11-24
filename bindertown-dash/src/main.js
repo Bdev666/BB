@@ -390,7 +390,7 @@ async function pollSnapshots() {
         const m = Math.floor(Date.now() / 60000); const B = g.balHist || (g.balHist = []);
         if (!B.length || B[B.length - 1][0] !== m) { B.push([m, Number(g.data.stats.silver)]); while (B.length > 61) B.shift(); }
       }
-      if (snap && snap.ready) { if (!g.inGame) g.inGameAt = Date.now(); g.inGame = true; }
+      if (snap && snap.ready) { if (!g.inGame) { g.inGameAt = Date.now(); setTimeout(() => uiCheck(id, g).catch(() => {}), 25000); } g.inGame = true; }
       else if (g.status === 'loading' && Date.now() - g.loadedAt > 5000) { g.status = 'lobby'; pushState(); }
       watchScreen(id, snap);
       if (g.data.stats.name !== prevName) g.win.setTitle(windowTitle(id));
@@ -1556,6 +1556,25 @@ function farmSummaryLedger(accId, level, sinceMin = 0) {
   return out.sort((p, q) => q.netHr - p.netHr);
 }
 function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; store.save(); } }
+
+// ---------- does this game build still have what each automation uses? ----------
+const UI_CHECK_JS = `(async () => { const g = window.__game; const has = (id) => !!document.getElementById(id);
+  const fn = (k) => !!(g && typeof g[k] === 'function');
+  let world = false; try { if (window.__bdOpenWorld) world = true; else { const urls = [...new Set([...performance.getEntriesByType('resource').map((e) => e.name), ...[...document.scripts].map((x) => x.src)].filter((u) => /\\/assets\\/main-[\\w-]+\\.js(\\?|$)/.test(u || '')))]; for (const u of urls) { try { const m = await import(u); if (m && typeof m.openWorldMap === 'function') { window.__bdOpenWorld = m.openWorldMap; world = true; break; } } catch (e) {} } } } catch (e) {}
+  return { api: fn('me') && fn('state') && fn('mapId'), sell: fn('sell'), autoPanel: has('autoopt') && has('autoopts'), farmRange: has('au-farm'), targets: has('au-targets'), respawnBox: has('au-respawn'),
+    hunt: has('openhunt') && has('huntwin'), channel: has('chbtn'), worldMap: world, worldBtn: has('worldbtn') }; })()`;
+const UI_USES = { api: 'อ่านข้อมูลตัวละคร (ทุกระบบ)', sell: 'ขายของให้ NPC', autoPanel: 'ตั้งค่า AUTO (ระยะฟาร์ม, เลือกมอน, เกิดที่เดิม)', farmRange: 'ระยะฟาร์ม (ค่าหัว / หาที่ฟาร์ม)', targets: 'ตีเฉพาะมอนค่าหัว', respawnBox: 'เปิดเกิดที่เดิมอัตโนมัติ', hunt: 'ทำค่าหัว', channel: 'ย้าย CH เมื่อคนเยอะ', worldMap: 'เดินทางไปแมพ (หาที่ฟาร์ม / ไปฟาร์ม / กลับจุดเดิม)', worldBtn: 'แผนที่โลก' };
+async function uiCheck(id, g) {
+  if (!g.win || g.win.isDestroyed() || !g.inGame || g.demo) return;
+  let r; try { r = await g.win.webContents.executeJavaScript(UI_CHECK_JS, true); } catch { return; }
+  if (!r) return;
+  const missing = Object.entries(r).filter(([, ok]) => !ok).map(([k]) => k);
+  g.uiMissing = missing;
+  if (missing.length) {
+    log.warn(`acc ${id}: this game build lacks what some automations use: ${missing.join(', ')}`);
+    setAlert(id, 'uiMissing', true, `⚠ เกมอัปเดต: ระบบเหล่านี้อาจใช้ไม่ได้ · ${missing.map((k) => UI_USES[k] || k).join(' · ')} · ส่ง log ให้ผู้พัฒนา`);
+  } else { if (g.alerts.has('uiMissing')) setAlert(id, 'uiMissing', false); log.info(`acc ${id}: game buttons used by the automations: all there`); }
+}
 
 // ---------- who drives this character now ----------
 // Every system that walks, travels or presses AUTO asks mayAct() first. Order: world boss (and the way back
