@@ -556,9 +556,11 @@ async function optimize(p, onStep) {
 // and so does anything another skill needs). Returns what was taken back.
 function uselessSkills(b, p, c2map, apply) {
   const free = new Set(c1Lines(p.job).filter((l) => l.id && l.id !== 'basics').map((l) => l.skills[0]));
+  for (const sid of ((G.jobs.novice || {}).skills || [])) free.add(sid); // the Binder basics: every character has them
   const base = score(b, p).v; const out = [];
   for (const sid of Object.keys(b.skills)) {
     const lv = b.skills[sid]; if (!(lv > 0)) continue;
+    if (((G.jobs.novice || {}).skills || []).includes(sid)) continue; // basics are not part of the build's points
     const keep = free.has(sid) ? 1 : 0; if (lv <= keep) continue;
     const hb = b.hotbar;
     b.skills[sid] = keep; if (!keep) delete b.skills[sid];
@@ -1019,6 +1021,8 @@ L.predict = async (p) => {
   }
   return {
     useless,
+    // what adds most to this character right now if raised a little (the game's caps applied by its calculator)
+    weights: p.weights ? (() => { try { return statWeights(b, q).filter((w) => w.gain != null).slice(0, 6); } catch { return []; } })() : undefined,
     withCombos: Math.round(rot.dps * cmb.mult), packDps, pack: packDps ? pack : null, packCurve, combos: cmb.parts, sheet: sheetOf(r),
     gear: Object.entries(b.gear || {}).map(([slot, it]) => ({ slot, id: it.id, name: (G.mobs && false) || it.id, affixes: it.affixes || [], refine: it.refine || 0 })),
     cards: (b.cards || []).map((c, i) => ({ id: c, star: (b.cardStars || [])[i] || 1 })),

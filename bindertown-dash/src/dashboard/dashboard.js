@@ -747,7 +747,7 @@ async function openLab(opt = {}) {
   // class 1: Job Lv 50 (all skill points) by default, like class 2; untick to use the character's own Job Lv
   const jlvReal = me && me.job === myJob ? Math.min(50, me.jobLevel) : 50;
   const jlv = num_(50, 1, 50);
-  const c1Full = el('input', { type: 'checkbox', checked: '' });
+  const c1Full = el('input', { type: 'checkbox', checked: me && me.job === myJob ? null : '' }); // a real character: its own Job Lv
   const c1Sync = () => { jlv.disabled = c1Full.checked; jlv.value = String(c1Full.checked ? 50 : jlvReal); };
   c1Full.addEventListener('change', c1Sync); c1Sync();
   const c2i = (me && me.c2info) || {};
@@ -755,7 +755,7 @@ async function openLab(opt = {}) {
   // class 2: Job Lv 50 and all 70 points by default, so every result is compared on a full class 2
   const c2lv = num_(50, 1, 50);
   const c2pts = num_(70, 0, 70);
-  const c2Full = el('input', { type: 'checkbox', checked: '' });
+  const c2Full = el('input', { type: 'checkbox', checked: me && me.c2 ? null : '' }); // a real character: its own class-2 Job Lv and points
   const c2Real = me && me.c2 ? { lv: c2i.jobLevel || 0, pts: c2SkillPts + (c2i.points || 0) } : null;
   const c2Sync = () => {
     c2lv.disabled = c2pts.disabled = c2Full.checked;
@@ -787,7 +787,7 @@ async function openLab(opt = {}) {
   const ftNote = el('small', { class: 'hint' });
   const updFt = () => { const f = realOf(); const wl = ft.world[boss.value]; ftNote.textContent = f ? ` · ตีจริง ${f.n} ครั้ง ค่ากลาง ${f.sec} วิ` : wl ? ` · กิจกรรมยาว ${Math.round(wl / 60)} นาที` : ''; };
   boss.addEventListener('change', updFt); updFt();
-  const bossRow = el('label', {}, 'เป้า ', boss, ' · ระยะเวลาสู้ ', win, ' · ตีกี่คน ', party, ftNote);
+  const bossRow = el('label', {}, me && me.job === myJob ? '' : 'เป้า ', me && me.job === myJob ? '' : boss, ' · ระยะเวลาสู้ ', win, ' · ตีกี่คน ', party, me && me.job === myJob ? '' : ftNote);
   mode.addEventListener('change', () => { packRow.hidden = mode.value !== 'farm'; bossRow.hidden = mode.value !== 'boss'; });
   const go = el('button', { class: 'primary' }, me && me.job === myJob ? `🧪 วิเคราะห์ ${me.name || 'ตัวละคร'} (สกิล + การ์ด)` : 'คำนวณหาบิลด์ที่ดีที่สุด');
   const res = el('div', { class: 'lab-res' });
@@ -851,7 +851,24 @@ async function openLab(opt = {}) {
   } }, '📖 คอมโบการ์ดทั้งหมด');
   const skillPane = el('div', {}, ...[
     el('p', { class: 'hint' }, 'ใช้สูตรดาเมจของเกมเอง (ตัวเดียวกับหน้าบิลด์แนะนำในเกม) ลองลงแต้มสกิล · Evolution A/B · Trait ของสาย · ลำดับช่องลัด แล้วจัดอันดับ คลาส 1 อย่างเดียว เทียบกับคลาส 2 ทั้งสองสาย'),
+    me && me.job === myJob ? el('div', { class: 'lab-real' }, el('b', {}, `📊 ใช้ข้อมูลจริงของ ${me.name || 'ตัวละคร'} (อ่านจากเกมตอนนี้)`),
+      el('div', { class: 'hint' }, `${labPretty(me.job)} Lv ${me.level} · Job ${me.jobLevel}${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)} Job ${(me.c2info && me.c2info.jobLevel) || '-'} (${c2Real ? c2Real.pts : 0} แต้ม)` : ''} · ` +
+        ['str', 'agi', 'vit', 'int', 'dex', 'luk'].map((k) => `${k.toUpperCase()} ${(me.stats || {})[k] || 0}`).join(' ') +
+        ` · เกียร์ ${Object.keys((lo && lo.equip) || {}).length} ชิ้น · การ์ด ${Object.keys((lo && lo.album) || {}).length} ใบ · สกิล ${Object.values(me.skills || {}).filter((v) => v > 0).length} ตัว · Trait ${Object.keys(me.traits || {}).length + Object.keys(me.c2tr || {}).length} สาย`),
+      el('div', { class: 'lab-form' }, el('label', {}, 'เป้า ', boss), ftNote)) : null,
+    me && me.job === myJob ? el('details', { class: 'lab-adv' }, el('summary', {}, '⚙ สมมติค่าเอง (ไม่ใช่ค่าจริง: ลองเปลี่ยนอาชีพ เลเวล สเตตัส Job เต็ม ฯลฯ)'),
     el('div', { class: 'lab-form' },
+      el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', { title: 'ตามเกม: Job คลาส 1 สูงสุด 50 · แต้มสกิลเต็ม' }, c1Full, ' คลาส 1 Job เต็ม'), el('label', {}, 'Job Lv ', jlv),
+      el('label', { title: 'ตามเกม: Job คลาส 2 สูงสุด 50 ได้แต้มรวม 70 (ใช้ร่วมกันทั้งสองสาย)' }, c2Full, ' คลาส 2 Job เต็ม (Lv 50 · 70 แต้ม)'),
+      el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
+      el('div', { class: 'lab-stats' }, ...Object.entries(st).map(([k, i]) => el('label', {}, k.toUpperCase() + ' ', i))),
+      el('label', {}, 'โหมด ', mode), bossRow, packRow,
+      el('label', { title: 'นับคอมโบตามกลไกเกม: เป้าติดสถานะ (สโลว์/ตรึง/หนาว กับเกียร์-การ์ด-สกิลที่แรงขึ้น), Hunter\'s Mark ของ Scout, Chill → Shatter ของ Mage' }, useCombos, ' นับคอมโบ (สถานะ · Mark · Shatter)'),
+      me ? el('label', {}, useCur, ' เทียบกับบิลด์ปัจจุบันของตัวละคร') : null,
+      el('label', { title: hasLo ? 'อาวุธ/ชุด/ตีบวก/affix และการ์ดที่ใส่อยู่ จากเกม' : 'เปิดเกมของบัญชีนี้ก่อน (ต้องเข้าเกมแล้ว) จึงจะอ่านเกียร์และการ์ดได้' }, useGear,
+        hasLo ? ` ใส่เกียร์ ${Object.keys(lo.equip || {}).length} ชิ้น + การ์ด ${Object.keys(lo.album || {}).length} ใบของตัวละคร (แม่นขึ้น)` : ' ใส่เกียร์+การ์ดของตัวละคร (ต้องเปิดเกมบัญชีนี้)'),
+      me ? el('small', { class: 'hint' }, ` · มีการ์ด ${owned.length} ชนิด${me.c2 ? ` · คลาส 2 ${labPretty(me.c2)}` : ''}`) : null)) : null,
+    me && me.job === myJob ? null : el('div', { class: 'lab-form' },
       el('label', {}, 'อาชีพ ', job), el('label', {}, 'Lv ', lv), el('label', { title: 'ตามเกม: Job คลาส 1 สูงสุด 50 · แต้มสกิลเต็ม' }, c1Full, ' คลาส 1 Job เต็ม'), el('label', {}, 'Job Lv ', jlv),
       el('label', { title: 'ตามเกม: Job คลาส 2 สูงสุด 50 ได้แต้มรวม 70 (ใช้ร่วมกันทั้งสองสาย)' }, c2Full, ' คลาส 2 Job เต็ม (Lv 50 · 70 แต้ม)'),
       el('label', {}, 'Job คลาส 2 ', c2lv), el('label', { title: c2Real ? 'เอาติ๊ก "Job เต็ม" ออกเพื่อใช้ค่าของตัวละคร' : 'แต้มคลาส 2 ทั้งหมด (สูงสุด 70)' }, 'แต้มคลาส 2 ', c2pts),
@@ -882,7 +899,7 @@ async function openLab(opt = {}) {
     cGo.onclick = async () => {
       cGo.disabled = true; cOut.replaceChildren(el('p', { class: 'hint' }, 'กำลังอ่านตัวละครล่าสุดและลองการ์ดทุกคอมโบ…'));
       const meNow = (await dash.invoke('lab-me', accId)) || me;
-      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: 70, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4, packSet: pack.dataset.touched === '1',
+      const q = { job: meNow.job, level: meNow.level, jobLevel: meNow.jobLevel, stats: meNow.stats, c2Job: (meNow.c2info && meNow.c2info.jobLevel) || 50, c2Points: meNow.c2 ? Object.entries(meNow.skills || {}).filter(([k]) => k.startsWith(meNow.c2 + '_')).reduce((t, [, v]) => t + v, 0) + ((meNow.c2info && meNow.c2info.points) || 0) : 0, guild: meNow.guildLevel || 0, basics: meNow.skills, mode: cGoal.value === 'boss' ? 'boss' : 'farm', pack: +pack.value || 4, packSet: pack.dataset.touched === '1',
         target: cGoal.value === 'boss' ? cBoss.value : '', goal: cGoal.value, stars: +cStars.value, combos: true, acc: accId,
         loadout: { ...(meNow.loadout || {}), wRefine: meNow.wRefine, sRefine: meNow.sRefine },
         build: { skills: meNow.skills, evo: meNow.evo, traits: meNow.traits, c2tr: meNow.c2tr || {}, hotbar: [], c2: meNow.c2 || '' } };
@@ -899,26 +916,27 @@ async function openLab(opt = {}) {
       cGo, cOut);
 
     // ---- tab: the character as it is right now, re-read every 10 s ----
-    const lBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value, selected: o.value === 'training_dummy' ? '' : null }, o.textContent)));
+    const lBoss = el('select', {}, ...[...boss.options].map((o) => el('option', { value: o.value }, o.textContent)));
     const lOut = el('div', {}); let lPrev = null; let lTimer = null;
     const lTick = async () => {
       if (livePane.hidden || $('#modal').hidden) return;
       const m2 = await dash.invoke('lab-me', accId); if (!m2) { lOut.replaceChildren(el('p', {}, 'ตัวละครไม่ได้ออนไลน์')); return; }
-      let pr; try { pr = await dash.invoke('lab-predict', { job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, c2Job: (m2.c2info && m2.c2info.jobLevel) || 50, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2, c2tr: m2.c2tr || {} } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
+      let pr; try { pr = await dash.invoke('lab-predict', { weights: true, job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, c2Job: (m2.c2info && m2.c2info.jobLevel) || 50, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2, c2tr: m2.c2tr || {} } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
       const sh = pr.sheet || {};
-      lOut.replaceChildren(
+      lOut.replaceChildren(...[
         pr.useless && pr.useless.length ? el('div', { class: 'hint warnline' }, `⚠ แต้มที่ไม่เพิ่มดาเมจตอนตีบอส: ${pr.useless.map((x) => `${x.name} ${x.points} แต้ม (${x.why || 'ไม่เพิ่มดาเมจ'})`).join(' · ')} · ย้ายไปลงสกิลที่ใช้ตีได้ (ดูผล "หาบิลด์" ด้านล่าง) · ถ้าเป็นสกิลเอาตัวรอด (HP/ป้องกัน) อาจตั้งใจเก็บไว้`) : null,
         el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}${pr.packDps ? ` · ตีทั้งฝูง ${pr.pack} ตัว ≈ ${num(pr.packDps)}` : ''}`),
           d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
         pr.calib ? el('div', { class: 'lab-row' }, el('span', { class: 'chip ok' }, `ปรับตามดาเมจจริงของตัวละครนี้ ≈ ${num(pr.calib.withCombos)} DPS`), el('small', { class: 'hint' }, ` · ${pr.calib.kind === 'world' ? 'บอสโลก' : 'มอนทั่วไป'}: ดาเมจต่อฮิตจริง ×${pr.calib.k} ของสูตรเกม (รวมคริ)${pr.calib.d ? ` · DPS รวมจริง ×${pr.calib.d}` : ''} · จาก ${pr.calib.runs} รอบบันทึก · การจัดอันดับบิลด์ใช้สูตรเกม`)) : null,
         el('div', { class: 'lab-row' }, ...[['ATK', sh.atk], ['MATK', sh.matk], ['Spell Amp', sh.spellAmp, '%'], ['ลดคูลดาวน์', sh.cdr, '%'], ['ร่ายเร็ว', sh.castSpd, '%'], ['คริ', sh.crit, '%'], ['ดาเมจคริ', sh.critDmg, '%'], ['เจาะเกราะ', sh.armorPen, '%']].filter((x) => x[1] != null).map(([l, v, u]) => el('span', { class: 'chip' }, `${l} ${Number.isInteger(v) ? num(v) : v}${u || ''}`))),
+        pr.weights && pr.weights.length ? el('div', { class: 'lab-row' }, el('small', {}, '📈 ควรเพิ่มอะไรต่อ (ตัวละครตอนนี้ หักเพดานเกมแล้ว): '), ...pr.weights.map((w) => el('span', { class: 'chip' + (w.gain > 0.05 ? ' ok' : ''), title: w.note || '' }, `${w.label} → ${w.gain > 0 ? '+' : ''}${w.gain}%`))) : null,
         comboBox(pr.combos) || el('span'),
         el('table', { class: 'lab-maps' }, el('tr', {}, el('th', {}, 'สกิล'), el('th', {}, 'DPS'), el('th', {}, '%')),
           ...pr.perSkill.map((x) => el('tr', {}, el('td', {}, x.name), el('td', {}, num(x.dps)), el('td', {}, pr.dps ? Math.round(x.dps / pr.dps * 100) + '%' : '-')))),
         el('div', { class: 'lab-row' }, el('small', {}, 'เกียร์: '), ...pr.gear.map((g) => el('span', { class: 'chip', title: g.affixes.join(', ') }, `${g.slot}: ${labPretty(g.id)}${g.refine ? ' +' + g.refine : ''}${g.affixes.length ? ` · ${g.affixes.length} affix` : ''}`))),
         el('div', { class: 'lab-row' }, el('small', {}, 'การ์ดที่ใส่: '), ...(pr.cards.length ? pr.cards.map((c) => el('span', { class: 'chip' }, `${labPretty(c.id)} ${'★'.repeat(c.star)}`)) : [el('small', { class: 'hint' }, 'ไม่มี')])),
-        el('p', { class: 'hint' }, 'อ่านเกียร์ affix ตีบวก การ์ด สเตตัส สกิล Evolution ของตัวละครจากเกมทุก 10 วิ แล้วคำนวณใหม่ · เปลี่ยนของในเกมแล้วดูตัวเลขขยับได้ทันที'));
+        el('p', { class: 'hint' }, 'อ่านเกียร์ affix ตีบวก การ์ด สเตตัส สกิล Evolution ของตัวละครจากเกมทุก 10 วิ แล้วคำนวณใหม่ · เปลี่ยนของในเกมแล้วดูตัวเลขขยับได้ทันที')].filter(Boolean));
     };
     lBoss.addEventListener('change', () => { lPrev = null; lTick(); });
     livePane.append(el('div', { class: 'lab-form' }, el('label', {}, 'เป้า ', lBoss)), lOut, abBox(accId));
@@ -927,8 +945,8 @@ async function openLab(opt = {}) {
     cardPane.append(el('p', { class: 'hint' }, 'เลือกตัวละครที่ออนไลน์อยู่ เพื่อจัดการ์ดจากการ์ดที่มี'));
     livePane.append(el('p', { class: 'hint' }, 'เลือกตัวละครที่ออนไลน์อยู่เพื่อดูบิลด์ปัจจุบันแบบสด'));
   }
-  const tabs = [['skills', '🧪 สกิล', skillPane], ['cards', '🃏 การ์ด', cardPane], ['live', '📡 บิลด์ปัจจุบัน (สด)', livePane]];
-  const tabBar = el('div', { class: 'lab-tabs' }, ...tabs.map(([k, label, pane]) => el('button', { class: 'tab' + (k === 'skills' ? ' on' : ''), 'data-k': k, onclick: (e) => {
+  const tabs = me ? [['live', '📡 บิลด์ตอนนี้ (สด)', livePane], ['skills', '🧪 หาบิลด์สกิล', skillPane], ['cards', '🃏 จัดการ์ด', cardPane]] : [['skills', '🧪 สกิล', skillPane], ['cards', '🃏 การ์ด', cardPane], ['live', '📡 บิลด์ปัจจุบัน (สด)', livePane]];
+  const tabBar = el('div', { class: 'lab-tabs' }, ...tabs.map(([k, label, pane]) => el('button', { class: 'tab' + (k === tabs[0][0] ? ' on' : ''), 'data-k': k, onclick: (e) => {
     for (const [, , p2] of tabs) p2.hidden = p2 !== pane;
     for (const t of tabBar.children) t.classList.toggle('on', t === e.currentTarget);
     if (pane === livePane && livePane.start) livePane.start();
@@ -937,7 +955,8 @@ async function openLab(opt = {}) {
     el('div', { class: 'lab-form' }, el('label', { title: 'ตัวละครที่ออนไลน์อยู่ · อ่านเลเวล สเตตัส สกิล คลาส 2 เกียร์ และการ์ดจากเกม' }, '👤 ตัวละคร ', accSel),
       me && !jobs.some((j) => j.id === me.job) ? el('small', { class: 'hint' }, `(${labPretty(me.job)} ยังไม่มีอาชีพคลาส 1 · เลือกอาชีพเพื่อจำลอง)`) : null),
     tabBar, skillPane, cardPane, livePane);
-  if (opt.auto && me) go.click();
+  // a real character: the live view first (what it does right now, re-read every 10 s); the others on their tab
+  if (me) { skillPane.hidden = true; cardPane.hidden = true; livePane.hidden = false; if (livePane.start) livePane.start(); }
 }
 
 // real test: measure this character's own damage for 60 s (training dummy) and compare with the prediction
