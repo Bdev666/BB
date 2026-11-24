@@ -923,11 +923,18 @@ async function openLab(opt = {}) {
       const m2 = await dash.invoke('lab-me', accId); if (!m2) { lOut.replaceChildren(el('p', {}, 'ตัวละครไม่ได้ออนไลน์')); return; }
       let pr; try { pr = await dash.invoke('lab-predict', { weights: true, job: m2.job, level: m2.level, jobLevel: m2.jobLevel, stats: m2.stats, basics: m2.skills, target: lBoss.value, guild: m2.guildLevel || 0, c2Job: (m2.c2info && m2.c2info.jobLevel) || 50, acc: accId, loadout: { ...(m2.loadout || {}), wRefine: m2.wRefine, sRefine: m2.sRefine }, current: { skills: m2.skills, evo: m2.evo, traits: m2.traits, c2: m2.c2, c2tr: m2.c2tr || {} } }); } catch (e) { lOut.replaceChildren(el('p', {}, '✖ ' + e.message)); return; }
       const d = lPrev ? pr.withCombos - lPrev : 0; lPrev = pr.withCombos;
+      // the real damage per second the character is doing right now (its own hits over the last minute)
+      let det = null; try { det = await dash.invoke('detail', accId); } catch { det = null; }
+      const realNow = det && det.rates ? Math.round(det.rates.dpsNow || 0) : 0;
+      const calcNow = (pr.calib && pr.calib.withCombos) || pr.packDps || pr.withCombos;
+      const tgt = det && det.stats ? (det.stats.target || '') : '';
       const sh = pr.sheet || {};
       lOut.replaceChildren(...[
         pr.useless && pr.useless.length ? el('div', { class: 'hint warnline' }, `⚠ แต้มที่ไม่เพิ่มดาเมจตอนตีบอส: ${pr.useless.map((x) => `${x.name} ${x.points} แต้ม (${x.why || 'ไม่เพิ่มดาเมจ'})`).join(' · ')} · ย้ายไปลงสกิลที่ใช้ตีได้ (ดูผล "หาบิลด์" ด้านล่าง) · ถ้าเป็นสกิลเอาตัวรอด (HP/ป้องกัน) อาจตั้งใจเก็บไว้`) : null,
         el('div', { class: 'lab-row' }, el('b', { class: 'lab-score' }, `DPS ตอนนี้ ${num(pr.withCombos)}`), el('small', { class: 'hint' }, ` · ไม่รวมคอมโบ ${num(pr.dps)} · เป้า ${labPretty(pr.target.id)}${pr.packDps ? ` · ตีทั้งฝูง ${pr.pack} ตัว ≈ ${num(pr.packDps)}` : ''}`),
           d ? el('span', { class: 'chip ' + (d > 0 ? 'ok' : 'warnc') }, `${d > 0 ? '▲' : '▼'} ${num(Math.abs(d))} จากรอบก่อน`) : null, el('small', { class: 'hint' }, ` · อ่านเมื่อ ${new Date().toLocaleTimeString('th-TH')}`)),
+        el('div', { class: 'lab-row lab-realnow' }, el('b', {}, realNow ? `⚔ ตีจริงตอนนี้ ${num(realNow)}/วิ` : '⚔ ตีจริงตอนนี้: ยังไม่ได้ตีใน 1 นาทีล่าสุด'),
+          el('small', { class: 'hint' }, realNow ? ` · ดาเมจของตัวเองใน 1 นาทีล่าสุด (รวมทุกตัวที่โดน และช่วงเดิน/ไม่ได้ตี)${tgt ? ' · กำลังตี ' + tgt : ''} · เทียบที่คำนวณ ${num(calcNow)} = ${Math.round(realNow / Math.max(1, calcNow) * 100)}%` : ' · เปิด AUTO ให้ตีสักพัก ตัวเลขจริงจะขึ้นที่นี่')),
         pr.calib ? el('div', { class: 'lab-row' }, el('span', { class: 'chip ok' }, `ปรับตามดาเมจจริงของตัวละครนี้ ≈ ${num(pr.calib.withCombos)} DPS`), el('small', { class: 'hint' }, ` · ${pr.calib.kind === 'world' ? 'บอสโลก' : 'มอนทั่วไป'}: ดาเมจต่อฮิตจริง ×${pr.calib.k} ของสูตรเกม (รวมคริ)${pr.calib.d ? ` · DPS รวมจริง ×${pr.calib.d}` : ''} · จาก ${pr.calib.runs} รอบบันทึก · การจัดอันดับบิลด์ใช้สูตรเกม`)) : null,
         el('div', { class: 'lab-row' }, ...[['ATK', sh.atk], ['MATK', sh.matk], ['Spell Amp', sh.spellAmp, '%'], ['ลดคูลดาวน์', sh.cdr, '%'], ['ร่ายเร็ว', sh.castSpd, '%'], ['คริ', sh.crit, '%'], ['ดาเมจคริ', sh.critDmg, '%'], ['เจาะเกราะ', sh.armorPen, '%']].filter((x) => x[1] != null).map(([l, v, u]) => el('span', { class: 'chip' }, `${l} ${Number.isInteger(v) ? num(v) : v}${u || ''}`))),
         pr.weights && pr.weights.length ? el('div', { class: 'lab-row' }, el('small', {}, '📈 ควรเพิ่มอะไรต่อ (ตัวละครตอนนี้ หักเพดานเกมแล้ว): '), ...pr.weights.map((w) => el('span', { class: 'chip' + (w.gain > 0.05 ? ' ok' : ''), title: w.note || '' }, `${w.label} → ${w.gain > 0 ? '+' : ''}${w.gain}%`))) : null,

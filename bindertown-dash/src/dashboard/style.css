@@ -595,3 +595,4 @@ body.sleeping-view .layout, body.sleeping-view .topbar, body.sleeping-view foote
 .lab-real { background: rgba(60, 207, 145, .07); border: 1px solid rgba(60, 207, 145, .3); border-radius: 12px; padding: 10px 12px; margin: 6px 0 10px; }
 .lab-real .hint { margin: 4px 0 8px; line-height: 1.6; }
 .lab-adv { margin: 4px 0 10px; } .lab-adv > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.lab-realnow b { color: #3ccf91; font-size: 15px; }
