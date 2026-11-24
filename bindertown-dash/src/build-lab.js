@@ -685,6 +685,20 @@ function rotationSim(r, hotbar, DL = 60000, FROM = 0) {
     }
     if (t >= nextBasic && basic.cdMs) { if (t >= FROM) { const bd = (basic.vsTarget || 0) * sAdj('basic'); total += bd; const q = per.basic || (per.basic = { n: 0, dmg: 0 }); q.n++; q.dmg += bd; } nextBasic = Math.max(t, nextBasic) + basic.cdMs; }
   }
+  // A long fight is cut at a fixed second, so a skill with a long cooldown is cast a whole number of times in it:
+  // a 3% shorter cooldown can add a whole cast (+30%) or nothing. That is the size of the window, not of the build,
+  // and the card search would chase it. For the sustained window the number of casts per skill is taken from its
+  // real cycle (the average gap between its casts) instead of from how many fit before the cut.
+  if (FROM > 0 && DL - FROM >= 60000) {
+    const win = DL - FROM; const times = new Map();
+    for (const c of casts) if (c.t >= FROM) (times.get(c.sid) || times.set(c.sid, []).get(c.sid)).push(c.t);
+    for (const [sid, ts] of times) {
+      const q = per[sid]; if (!q || ts.length < 3) continue;
+      const cycle = (ts[ts.length - 1] - ts[0]) / (ts.length - 1);
+      const n = win / cycle;
+      if (cycle > 0 && Math.abs(n - q.n) < 1.5) { total += q.dmg * (n / q.n - 1); q.dmg *= n / q.n; q.n = n; }
+    }
+  }
   return { casts, per, total, ae, secs: (DL - FROM) / 1000 };
 }
 // long-fight damage: minutes 2-3 of a 3-minute rotation (no opening burst where every skill is ready at once)
@@ -898,7 +912,7 @@ L.cards = async (p) => {
           if (id === old || used() - cardLoad(old) + cardLoad(id) > cap) continue;
           b.cards[i] = id; b.cardStars[i] = starOf(id);
           const okDup = p.allowDup || b.cards.filter((c, j) => j !== i && grp(c) === grp(id)).length === 0;
-          if (okDup && (haveLeft(id) || b.cards.filter((c) => c === id).length <= ((owned && owned[id] && owned[id].n) || 99))) { const nv = sc(); if (nv > v * 1.0005 && (!best || nv > best.v)) best = { id, v: nv }; }
+          if (okDup && (haveLeft(id) || b.cards.filter((c) => c === id).length <= ((owned && owned[id] && owned[id].n) || 99))) { const nv = sc(); if (nv > v * 1.005 && (!best || nv > best.v)) best = { id, v: nv }; }
           b.cards[i] = old; b.cardStars[i] = oldStar;
         }
         if (best) { b.cards[i] = best.id; b.cardStars[i] = starOf(best.id); v = best.v; moved = true; }
@@ -935,7 +949,9 @@ L.cards = async (p) => {
   for (const x of single) { if (b.cards.length >= slots || !(x.v > 0)) break; if (used() + cardLoad(x.id) > cap || !haveLeft(x.id)) continue; b.cards.push(x.id); b.cardStars.push(starOf(x.id)); }
   const directRaw = sc();
   const vDirect = fill(C, true);
-  const pick = !best || vDirect > best.v ? 'direct' : 'sets';
+  // the rotation simulation moves by about half a percent for no real reason, so a set (which needs several cards to
+  // change together) has to win by 2% to be chosen over the plain best cards
+  const pick = !best || vDirect * 1.02 > best.v ? 'direct' : 'sets';
   if (pick === 'direct') best = { v: vDirect, cards: b.cards.slice(), stars: b.cardStars.slice() };
   b.cards = best ? best.cards : []; b.cardStars = best ? best.stars : [];
   // 3) last polish over every card in the game (or every card owned)
@@ -948,19 +964,20 @@ L.cards = async (p) => {
   // why each card: damage lost without it, and the skill it lifts the most
   const shareOf = (r) => Object.fromEntries((((r && r.rotation) || {}).share || []).map((x) => [x.key, x.dmg]));
   const fullShare = shareOf(fin.r);
+  const qGame = { ...q, combos: false }; const finGame = cardScore(b, qGame); // the game's calculator alone, without the program's own estimates
   const setsOf = (r) => ((((r && r.album) || {}).res) || []).filter((x) => x.kind === 'region' && x.count >= 3).map((x) => ({ name: x.name, tier: x.count >= 5 ? 5 : 3 }));
   const fullSets = setsOf(fin.r);
   const keepC = b.cards; const keepS = b.cardStars;
   const why = keepC.map((id, i) => {
     b.cards = keepC.filter((_, j) => j !== i); b.cardStars = keepS.filter((_, j) => j !== i);
-    const w = cardScore(b, q);
+    const w = cardScore(b, q); const wGame = cardScore(b, qGame);
     b.cards = keepC; b.cardStars = keepS;
     const lost = fullSets.filter((x) => !setsOf(w.r).some((y) => y.name === x.name && y.tier === x.tier)).map((x) => x.name + ' ' + x.tier + ' ใบ');
     const ws = shareOf(w.r);
     let top = null;
     for (const [k, v] of Object.entries(fullShare)) { const g = v - (ws[k] || 0); if (!top || g > top.g) top = { k, g, base: ws[k] || 0 }; }
     const name = top ? (top.k === 'basic' ? 'โจมตีปกติ' : (G.skills[top.k] || {}).name || top.k) : '';
-    return { set: lost.join(', '), pct: fin.v ? Math.round((fin.v - w.v) / fin.v * 1000) / 10 : 0, skill: top && top.g > 0 ? name : '', skillPct: top && top.base ? Math.round(top.g / top.base * 100) : 0 };
+    return { set: lost.join(', '), pct: fin.v ? Math.round((fin.v - w.v) / fin.v * 1000) / 10 : 0, pctGame: finGame.v ? Math.round((finGame.v - wGame.v) / finGame.v * 1000) / 10 : 0, skill: top && top.g > 0 ? name : '', skillPct: top && top.base ? Math.round(top.g / top.base * 100) : 0 };
   });
   const lineGain = keepC.map((id) => {
     const def = G.cardDefs[id]; const fx0 = (def && def.fx) || [];
