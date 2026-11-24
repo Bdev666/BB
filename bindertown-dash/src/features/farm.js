@@ -86,10 +86,17 @@ function farmSummaryLedger(accId, level, sinceMin = 0) {
 }
 HUB.farmSaveTick = HUB.farmSaveTick = function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; HUB.store.save(); } };;
 
+// The game's own "open the world map on this map" (its main module exports it as openWorldMap), found once per page.
+// Text for page scripts: an async function that returns true once window.__bdOpenWorld is there.
+const FIND_WORLD_MAP = `async () => { if (window.__bdOpenWorld) return true;
+  const urls = [...new Set([...performance.getEntriesByType('resource').map((e) => e.name), ...[...document.scripts].map((x) => x.src)].filter((u) => /\\/assets\\/main-[\\w-]+\\.js(\\?|$)/.test(u || '')))];
+  for (const u of urls) { try { const m = await import(u); if (m && typeof m.openWorldMap === 'function') { window.__bdOpenWorld = m.openWorldMap; return true; } } catch (e) {} }
+  return false; }`;
+
 // ---------- does this game build still have what each automation uses? ----------
 const UI_CHECK_JS = `(async () => { const g = window.__game; const has = (id) => !!document.getElementById(id);
   const fn = (k) => !!(g && typeof g[k] === 'function');
-  let world = false; try { if (window.__bdOpenWorld) world = true; else { const urls = [...new Set([...performance.getEntriesByType('resource').map((e) => e.name), ...[...document.scripts].map((x) => x.src)].filter((u) => /\\/assets\\/main-[\\w-]+\\.js(\\?|$)/.test(u || '')))]; for (const u of urls) { try { const m = await import(u); if (m && typeof m.openWorldMap === 'function') { window.__bdOpenWorld = m.openWorldMap; world = true; break; } } catch (e) {} } } } catch (e) {}
+  const world = await (${FIND_WORLD_MAP})();
   return { api: fn('me') && fn('state') && fn('mapId'), sell: fn('sell'), autoPanel: has('autoopt') && has('autoopts'), farmRange: has('au-farm'), targets: has('au-targets'), respawnBox: has('au-respawn'),
     hunt: has('openhunt') && has('huntwin'), channel: has('chbtn'), worldMap: world, worldBtn: has('worldbtn') }; })()`;
 const UI_USES = { api: 'อ่านข้อมูลตัวละคร (ทุกระบบ)', sell: 'ขายของให้ NPC', autoPanel: 'ตั้งค่า AUTO (ระยะฟาร์ม, เลือกมอน, เกิดที่เดิม)', farmRange: 'ระยะฟาร์ม (ค่าหัว / หาที่ฟาร์ม)', targets: 'ตีเฉพาะมอนค่าหัว', respawnBox: 'เปิดเกิดที่เดิมอัตโนมัติ', hunt: 'ทำค่าหัว', channel: 'ย้าย CH เมื่อคนเยอะ', worldMap: 'เดินทางไปแมพ (หาที่ฟาร์ม / ไปฟาร์ม / กลับจุดเดิม)', worldBtn: 'แผนที่โลก' };
@@ -198,13 +205,7 @@ async function loopBackCheck(id, g) {
 // Fallback when the module cannot be reached: a hunt-window "ไปที่แมพ" button pointed at the map (needs a bounty left).
 const TRAVEL_JS = (map) => `(async () => { const MAP = ${JSON.stringify(map)}; const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let how = '';
-  try {
-    if (!window.__bdOpenWorld) {
-      const urls = [...new Set([...performance.getEntriesByType('resource').map((e) => e.name), ...[...document.scripts].map((x) => x.src)].filter((u) => /\\/assets\\/main-[\\w-]+\\.js(\\?|$)/.test(u || '')))];
-      for (const u of urls) { try { const m = await import(u); if (m && typeof m.openWorldMap === 'function') { window.__bdOpenWorld = m.openWorldMap; break; } } catch (e) {} }
-    }
-    if (window.__bdOpenWorld) { window.__bdOpenWorld(MAP, true); how = 'worldmap'; }
-  } catch (e) {}
+  try { if (await (${FIND_WORLD_MAP})()) { window.__bdOpenWorld(MAP, true); how = 'worldmap'; } } catch (e) {}
   if (!how) {
     const win = document.getElementById('huntwin'); const open = document.getElementById('openhunt'); if (!win || !open) return { ok: false, why: 'no world map and no hunt window' };
     if (win.style.display !== 'block') open.click();
@@ -217,6 +218,7 @@ const TRAVEL_JS = (map) => `(async () => { const MAP = ${JSON.stringify(map)}; c
   let go = null; for (let i = 0; i < 10 && !go; i++) { await wait(300); go = document.querySelector('.wdgo'); }
   if (!go) return { ok: false, why: 'no travel button (' + how + ')' };
   go.click(); return { ok: true, how }; })()`;
+HUB.travelTo = travelTo; // the bounty travels the same way
 async function travelTo(id, g, map) {
   if (HUB.mapOf(g) === map) return { ok: true, here: true };
   if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // the game's travel walks; AUTO would fight on the way

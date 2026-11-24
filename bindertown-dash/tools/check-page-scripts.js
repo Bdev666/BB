@@ -10,7 +10,8 @@ const HUB = new Proxy({}, { get: () => (...a) => '' });
 let bad = 0; let n = 0;
 for (const file of files) {
 const s = fs.readFileSync(file, 'utf8');
-const re = /^(?:const |HUB\.)([A-Z0-9_]+_JS) = /gm;
+const re = /^(?:const |HUB\.)([A-Z0-9_]+) = (?=`|\([a-z, ]*\) => `)/gm;
+const scope = {}; // helpers earlier in the file (e.g. FIND_WORLD_MAP) that later page scripts include
 let m;
 while ((m = re.exec(s))) {
   const start = m.index; const i = s.indexOf('`', start); let j = i + 1;
@@ -21,10 +22,13 @@ while ((m = re.exec(s))) {
     const top = stack[stack.length - 1];
     if (top === '`') { if (c === '`') stack.pop(); else if (c === '$' && s[j + 1] === '{') { stack.push('{'); j++; } } else if (c === '{') stack.push('{'); else if (c === '}') stack.pop(); else if (c === '`') stack.push('`');
   }
-  const src = s.slice(start, j).replace(/^(?:const |HUB\.)[A-Z0-9_]+_JS = /, '');
+  const src = s.slice(start, j).replace(/^(?:const |HUB\.)[A-Z0-9_]+ = /, '');
   n++;
   try {
-    let val = new Function('JSON', 'WORLD_TYPES', 'HUB', 'return ' + src)(JSON, {}, HUB);
+    const names = Object.keys(scope);
+    let val = new Function('JSON', 'WORLD_TYPES', 'HUB', ...names, 'return ' + src)(JSON, {}, HUB, ...names.map((k) => scope[k]));
+    scope[m[1]] = val;
+    if (!/_JS$/.test(m[1])) { if (typeof val === 'string') new Function('return (' + val + ')'); n++; continue; }
     if (typeof val === 'function') { for (const args of [['x', 'y', 'z'], [true], [false]]) new Function('return ' + val(...args)); } else new Function('return ' + val);
   } catch (e) { bad++; console.error(`page script ${m[1]} (${path.basename(file)}): ${e.message}`); }
 }

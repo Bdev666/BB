@@ -14,11 +14,6 @@ const BOUNTY_LIST_JS = `(() => { const win = document.getElementById('huntwin');
       lo: band ? +band[1] : 0, hi: band ? +band[2] : 0, prog: pr ? +pr[1] : 0, need: pr ? +pr[2] : 40, claimed: x.classList.contains('claimed'), done: x.classList.contains('done') }; });
   if (!wasOpen) win.style.display = 'none';
   return out; })()`;
-const BOUNTY_GO_JS = (map) => `(async () => { const win = document.getElementById('huntwin'); if (win.style.display !== 'block') document.getElementById('openhunt').click();
-  await new Promise((r) => setTimeout(r, 600));
-  const b = document.querySelector('#huntbody [data-goto="' + ${JSON.stringify(map)} + '"]'); if (!b) return { ok: false, why: 'no button' }; b.click();
-  await new Promise((r) => setTimeout(r, 900));
-  const go = document.querySelector('.wdgo'); if (!go) return { ok: false, why: 'no travel button' }; go.click(); return { ok: true }; })()`;
 // the game's "warp to X (then walk on)?" box: warp when it is free (Premium), else walk (never pays Gold)
 const WARP_CONFIRM_JS = `(() => { const box = document.getElementById('buyconfirm'); if (!box || box.style.display === 'none' || !box.offsetParent && getComputedStyle(box).display === 'none') return { box: false };
   const text = box.innerText || ''; if (!/วาร์ป/.test(text)) return { box: true, warp: false };
@@ -144,12 +139,10 @@ async function bountyStep(id) {
       if (B.phase === 'travel' && Date.now() - B.travelAt < 6 * 60 * 1000) { B.note = `กำลังเดินทางไป ${HUB.mapName(cur.map)}`; await HUB.answerWarpBox(id, g); return; }
       if (B.phase === 'travel') { B.skip.push(cur.id); B.cur = null; B.note = `ไป ${HUB.mapName(cur.map)} ไม่ถึงใน 6 นาที · ข้ามใบนี้`; HUB.log.info(`acc ${id}: bounty travel timed out -> skip ${cur.id}`); return; }
       await bountyFilterOff(id, g); // the targets switched off on this map come back before leaving it
-      if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // AUTO off: the game's travel walks
-      let r; try { r = await g.win.webContents.executeJavaScript(BOUNTY_GO_JS(cur.map), true); } catch (e) { r = { ok: false, why: e.message }; }
-      if (!r || !r.ok) { B.skip.push(cur.id); B.cur = null; B.note = `เดินทางไม่ได้ (${(r && r.why) || '?'}) · ข้ามใบนี้`; return; }
+      const r = await HUB.travelTo(id, g, cur.map); // AUTO off, the game's world-map travel, free warp or walk
+      if (!r.ok) { B.skip.push(cur.id); B.cur = null; B.note = `${r.error} · ข้ามใบนี้`; return; }
       B.phase = 'travel'; B.travelAt = Date.now(); B.note = `กำลังเดินทางไป ${HUB.mapName(cur.map)}`;
       HUB.log.info(`acc ${id}: bounty travel ${here} -> ${cur.map}`);
-      await HUB.answerWarpBox(id, g);
       // the moment it is on the map: the next step at once (the 20-s tick left it standing there)
       const to = cur.map; const t0 = Date.now();
       let looking = false;
@@ -158,7 +151,7 @@ async function bountyStep(id) {
         if (looking) return; looking = true;
         let m = HUB.mapOf(g); try { m = await g.win.webContents.executeJavaScript('window.__game && window.__game.mapId()', true); } catch { /* page busy: use the last snapshot */ }
         looking = false;
-        if (m === to) { clearInterval(watch);
+        if (m === to) { clearInterval(watch); g.travelling = null;
           // AUTO on the moment it lands; the bounty step then keeps it to the bounty monster
           await new Promise((r) => setTimeout(r, 800)); { const prev = await HUB.setFarmRange(g, 0); if (prev != null && prev !== 0 && g.bounty && g.bounty.prevFarm == null) g.bounty.prevFarm = prev; } if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); g.bountyArrivedAt = Date.now(); HUB.log.info(`acc ${id}: bounty arrived at ${to} (${Math.round((Date.now() - t0) / 1000)} s)`); const kick = (n) => { if (g.bounty && g.bounty.busy && n < 40) { setTimeout(() => kick(n + 1), 500); return; } bountyStep(id).catch(() => {}); }; setTimeout(() => kick(0), 300); } // the step may be busy (another tick): try again shortly
       }, 1000);

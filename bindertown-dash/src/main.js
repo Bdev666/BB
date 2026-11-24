@@ -1198,6 +1198,7 @@ require('./features/crowd');
 require('./features/bounty');
 
 require('./features/worldboss');
+require('./features/calibration');
 
 // ---------- problem report ----------
 function makeReport() {
@@ -1827,53 +1828,35 @@ app.whenReady().then(() => {
       quitting = true;
     },
   });
-  setInterval(tick, 15 * 1000);
-  setInterval(() => HUB.selftest.statsTick(), 10 * 60 * 1000);
-  setInterval(demoTick, 500);
-  setInterval(pollSnapshots, 1000);
-  setInterval(HUB.bossTick, 15 * 1000);
-  setInterval(reconnectTick, 5000);
-  setInterval(marketTick, 15 * 1000);
-  setInterval(HUB.fightTick, 5000);
-  setInterval(HUB.marketWatchTick, 1000);
-  setInterval(HUB.autoRespawnTick, 15000);
-  setInterval(HUB.bountyTick, 20000);
-  setInterval(HUB.crowdTick, 20000);
-  setInterval(HUB.farmTick, 15000);
-  setInterval(HUB.farmSaveTick, 5 * 60000);
-  // Build Lab numbers from every real-damage record kept, at start and every hour
-  const calibFromHistory = () => {
-    try {
-      const h = HUB.selftest.calibHistory(45); const all = HUB.store.data.calib || (HUB.store.data.calib = {});
-      let n = 0;
-      for (const [key, c] of Object.entries(h)) { const old = all[key]; if (!old || old.v !== 3 || old.job !== c.job || (old.runs || 0) <= c.runs) { all[key] = c; n++; } }
-      if (n) { HUB.store.save(); HUB.log.info(`calibration from the combat history: ${n} entr${n === 1 ? 'y' : 'ies'} · ${Object.entries(h).filter(([k]) => !k.includes(':mob:')).map(([k, c]) => `${k} k=${c.k} pack=${c.pack} n=${c.n}`).join(', ')}`); }
-    } catch (e) { HUB.log.warn(`calibration from history: ${e.message}`); }
-  };
-  // boss fights (field and world bosses): real damage per second against the lab's prediction for that boss,
-  // per account + boss (needs the character in game for its build); 3 fights at least
-  const calibFromBossFights = async () => {
-    const all = HUB.store.data.calib || (HUB.store.data.calib = {}); const since = Date.now() - 30 * 864e5;
-    const by = {};
-    for (const f of HUB.store.data.fights || []) if (f.acc != null && f.at >= since && f.sec >= 20 && f.dps > 0) (by[`${f.acc}|${f.mob}`] || (by[`${f.acc}|${f.mob}`] = [])).push(f);
-    for (const [key, fs] of Object.entries(by)) {
-      if (fs.length < 3) continue;
-      const [acc, mob] = [Number(key.split('|')[0]), key.split('|')[1]];
-      const g = HUB.games.get(acc); if (!g || !g.inGame || g.demo || !HUB.labMeRef) continue;
-      let me; try { me = await HUB.labMeRef(acc); } catch { me = null; } if (!me) continue;
-      let pr; try { pr = await HUB.labCall(`window.__bdLab.predict(${JSON.stringify({ job: me.job, level: me.level, jobLevel: me.jobLevel, stats: me.stats, basics: me.skills, target: mob, guild: me.guildLevel || 0, c2Job: (me.c2info && me.c2info.jobLevel) || 50, loadout: { ...(me.loadout || {}), wRefine: me.wRefine, sRefine: me.sRefine }, current: { skills: me.skills, evo: me.evo, traits: me.traits, c2: me.c2, c2tr: me.c2tr } })})`); } catch { pr = null; }
-      if (!pr || !(pr.withCombos > 0)) continue;
-      const xs = fs.map((f) => f.dps).sort((a, b) => a - b); const real = xs[xs.length >> 1];
-      const base = all[`${acc}:world`] || {};
-      all[`${acc}:mob:${mob}`] = { ...base, v: 3, job: me.job, kind: 'world', d: +(real / pr.withCombos).toFixed(3), k: base.k || 1, mob, n: fs.length, runs: fs.length, fromBossFights: true, realDps: real, at: Date.now() };
-      HUB.log.info(`boss calibration acc ${acc} ${mob}: real ${real}/s over ${fs.length} fights vs lab ${pr.withCombos}/s -> x${(real / pr.withCombos).toFixed(2)}`);
-    }
-    HUB.store.save();
-  };
-  setTimeout(() => calibFromBossFights().catch((e) => HUB.log.warn(`boss calibration: ${e.message}`)), 90000);
-  setInterval(() => calibFromBossFights().catch(() => {}), 60 * 60000);
-  setTimeout(calibFromHistory, 8000);
-  setInterval(calibFromHistory, 60 * 60000);
+  // ---------- everything that runs on a timer, in one place, most frequent first ----------
+  // [what, function, every ms, first run after ms]. Each run is guarded: one failing never stops the others.
+  const SCHEDULE = [
+    ['read the game pages', pollSnapshots, 1000],
+    ['market watch', HUB.marketWatchTick, 1000],
+    ['demo data', demoTick, 500],
+    ['reconnect lost games', reconnectTick, 5000],
+    ['boss fight timer', HUB.fightTick, 5000],
+    ['alerts, idle, RAM', tick, 15000],
+    ['boss clocks', HUB.bossTick, 15000],
+    ['market listings', marketTick, 15000],
+    ['respawn in place', HUB.autoRespawnTick, 15000],
+    ['farm: ledger, stuck AUTO, way back, finder', HUB.farmTick, 15000],
+    ['bounties', HUB.bountyTick, 20000],
+    ['crowded channel', HUB.crowdTick, 20000],
+    ['save the farm ledger', HUB.farmSaveTick, 5 * 60000],
+    ['stats line', () => HUB.selftest.statsTick(), 10 * 60000],
+    ['Build Lab calibration from history', HUB.calibFromHistory, 60 * 60000, 8000],
+    ['Build Lab calibration from boss fights', HUB.calibFromBossFights, 60 * 60000, 90000],
+  ];
+  const failed = new Map();
+  for (const [name, fn, every, first] of SCHEDULE) {
+    const run = () => {
+      try { const r = fn(); if (r && typeof r.catch === 'function') r.catch((e) => report(e)); } catch (e) { report(e); }
+      function report(e) { const n = (failed.get(name) || 0) + 1; failed.set(name, n); if (n <= 3 || n % 100 === 0) HUB.log.warn(`timer "${name}" failed (${n}x): ${e && e.message}`); }
+    };
+    if (first) setTimeout(run, first);
+    setInterval(run, every);
+  }
   applyStartWithWindows();
   syncRemote();
 });
