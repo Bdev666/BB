@@ -1152,8 +1152,8 @@ function orderBox(o) {
     el('table', { class: 'lab-maps' },
       el('tr', {}, ...['#', 'สกิล', 'ช่อง', '% ดาเมจ', 'ดาเมจ/ครั้ง', 'ครั้ง/นาที', 'คูลดาวน์', 'ร่าย', 'ชาร์จ'].map((h) => el('th', {}, h))),
       ...o.rank.map((r, i) => el('tr', {}, el('td', {}, String(i + 1)), el('td', {}, r.name), el('td', {}, r.slot > 0 ? String(r.slot) : '-'),
-        el('td', { class: 'gold' }, r.share + '%'), el('td', {}, num(r.perCast)), el('td', {}, String(r.casts)), el('td', {}, sec(r.cdMs)), el('td', {}, sec(r.castMs)), el('td', {}, String(r.charges))))),
-    el('p', { class: 'hint' }, 'อันดับและครั้ง/นาทีคิดจากนาทีที่ 2–3 (ตีบอสยาว) · ลำดับช่วงเปิดคือ 15 วิแรก · จำลองแบบเดียวกับเครื่องคิดเลขของเกม: ทุก 50 ms ถ้าไม่ได้ร่ายอยู่ กดสกิลแรกในช่องลัดที่พร้อม ไม่งั้นตีปกติ · ชาร์จที่ 2 ขึ้นไปแรง 50% · ลำดับช่องลัดที่แสดงคือแบบที่ดีที่สุดจากการลองทุกลำดับ'));
+        el('td', { class: 'gold' }, r.share + '%'), el('td', {}, num(r.perCast), r.dot ? el('small', { class: 'hint' }, ` (DoT ${r.dot}%)`) : ''), el('td', {}, String(r.casts)), el('td', {}, sec(r.cdMs)), el('td', {}, sec(r.castMs)), el('td', {}, String(r.charges))))),
+    el('p', { class: 'hint' }, 'อันดับและครั้ง/นาทีคิดจากนาทีที่ 2–3 (ตีบอสยาว) · ลำดับช่วงเปิดคือ 15 วิแรก · จำลองแบบเดียวกับเครื่องคิดเลขของเกม: ทุก 50 ms ถ้าไม่ได้ร่ายอยู่ กดสกิลแรกในช่องลัดที่พร้อม ไม่งั้นตีปกติ · ชาร์จที่ 2 ขึ้นไปแรง 50% · ดาเมจ/ครั้งรวม DoT (เลือดไหล/พิษ/เผา ทุกติ๊กจนหมดเวลา) แล้ว วงเล็บคือส่วนที่มาจาก DoT · ลำดับช่องลัดที่แสดงคือแบบที่ดีที่สุดจากการลองทุกลำดับ'));
 }
 
 // which map earns the most silver per hour with this build (+ the cards picked for gold farming, if any)

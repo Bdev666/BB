@@ -695,7 +695,9 @@ function skillOrder(b, p, r) {
     const v = V.find((x) => x.sid === sid) || {};
     return { sid, name: name(sid), casts: Math.round(q.n / rot.secs * 60), perCast: Math.round(q.dmg / Math.max(1, q.n) * adj), share: rot.total ? Math.round(q.dmg / rot.total * 1000) / 10 : 0,
       cdMs: sid === 'basic' ? Math.round(((r.basic || {}).cdMs || 0)) : Math.round(v.cdMs || 0), castMs: Math.round(v.castMs || 0), charges: v.charges || 1,
-      slot: b.hotbar.indexOf(sid) + 1 };
+      slot: b.hotbar.indexOf(sid) + 1,
+      // the part of each cast that is damage over time (bleed / poison / burn ticks, the game's own number)
+      dot: v.dot && v.hit ? Math.round(v.dot / Math.max(1, v.hit.vsTarget * (v.perCast || 1) + v.dot) * 100) : 0 };
   }).sort((a, c) => c.share - a.share);
   const opener = open.casts.filter((c) => c.t < 15000).map((c) => ({ t: Math.round(c.t / 100) / 10, name: name(c.sid) }));
   // crowd-control combo: what the "target is debuffed / under CC" bonuses are worth for this build
