@@ -1200,7 +1200,7 @@ function renderLab(box, r) {
     el('div', { class: 'lab-row' }, el('small', { class: 'hint' }, `แต้มคลาส 1 ${x.points.c1}/${x.points.c1Max}${x.c2 ? ` · แต้มคลาส 2 ${x.points.c2}/${x.points.c2Max}` : ''}`)),
     el('div', { class: 'lab-row' }, el('small', {}, 'ช่องลัด (ลำดับกด): '), x.hotbar.map((h, k) => el('span', { class: 'chip' }, `${k + 1}. ${h}`))),
     el('div', { class: 'lab-skills' }, ...x.skills.sort((a, b) => (a.c2 - b.c2) || a.line.localeCompare(b.line)).map((s) => el('div', { class: 'lab-sk' + (s.c2 ? ' c2' : '') + (s.passive ? ' pas' : '') },
-      el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
+      el('span', {}, s.name), el('b', {}, `${s.lv}/${s.max}`), s.ext ? el('small', { class: 'evo', title: 'เลเวลเกินเต็มของสกิลคลาส 1 ใช้แต้มคลาส 2 (ต้องเต็มก่อน และ Job คลาส 2 ถึงเกณฑ์)' }, '⬆ ต่อยอดคลาส 2 ' + (s.ext.trim() || '+' + (s.lv - s.base))) : null, s.evo ? el('small', { class: 'evo' }, 'Evo ' + s.evo) : null, el('small', { class: 'hint' }, s.line)))),
     x.traits.length ? el('div', { class: 'lab-row' }, el('small', {}, 'Trait: '), ...x.traits.map((t) => el('span', { class: 'chip' }, t))) : null,
     el('div', { class: 'lab-row' }, el('small', {}, 'สัดส่วนดาเมจ: '), ...x.share.map((s) => el('span', { class: 'chip' }, `${s.name} ${s.pct}%`))),
     comboBox(x.combos),

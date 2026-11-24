@@ -51,6 +51,7 @@ function detect(mod) {
         else if (Array.isArray(v.mage) && v.knight && v.mage.every((x) => typeof x === 'string')) r.c2opts = v;
         else if (v.stormcaller && Array.isArray(v.stormcaller.lines)) r.c2defs = v;
         else if (v.blade && v.blade.a && v.blade.a.perk) r.traits = v;
+        else if (!r.ext && v.bolt && v.bolt.path && typeof v.bolt.plus === 'number' && typeof v.bolt.job === 'number') r.ext = v; // class 2 "+" levels on class 1 skills
         else if (!r.cardDefs && Object.keys(v).length > 20 && Object.values(v).slice(0, 25).every((x) => x && Array.isArray(x.fx))) r.cardDefs = v;
         else if (!r.mobs) {
           const vals = Object.values(v);
@@ -404,10 +405,17 @@ function bestEvoAndTraits(b, p) {
   }
 }
 
+// Class 2 can take a class 1 skill past its top level ("Spirit Bolt 10/10" -> 11..15, the "+" part in the game). It needs the
+// skill at its top level first, the class 2 job level of that skill, and every such level costs 1 CLASS 2 point.
+const extOf = (b, sid) => { const e = G.ext && G.ext[sid]; return e && b.c2 && e.path === b.c2 ? e : null; };
+const capOf = (b, sid, p) => { const e = extOf(b, sid); return maxLv(sid) + (e && (p.c2Job || 50) >= e.job ? e.plus : 0); };
+// which point pool the point that takes a skill to newLv comes from
+const pointClass = (c2map, sid, newLv) => (c2map[sid] ? 2 : newLv > maxLv(sid) ? 2 : 1);
 // can this skill take one more point? (class 1: job level + previous skill in line at Lv 3; class 2: its job level + previous skill learnt)
 function canRaise(b, sid, p, c2map) {
   const lv = b.skills[sid] || 0;
-  if (lv >= maxLv(sid)) return false;
+  if (lv >= capOf(b, sid, p)) return false;
+  if (lv >= maxLv(sid) && !c2map[sid]) return true; // a class 2 level on a skill that is already at its top level
   if (c2map[sid]) {
     const d = G.skills[sid] || {};
     if (d.c2 && d.c2.job && p.c2Job < d.c2.job) return false;
@@ -474,7 +482,8 @@ async function optimize(p, onStep) {
   for (const l of c1Lines(p.job)) if (l.id && l.id !== 'basics') b.skills[l.skills[0]] = 1; // the free first skill of each line
   let left1 = c1Budget(p.job, p.jobLevel) - Object.values(b.skills).reduce((t, x) => t + x, 0);
   let left2 = p.c2 ? p.c2Points : 0;
-  const pool = (cls) => (cls === 1 ? c1 : c2list.map((x) => x.sid));
+  const extIds = c1.filter((sid) => extOf(b, sid));
+  const pool = (cls) => (cls === 1 ? c1 : [...c2list.map((x) => x.sid), ...extIds]);
   setHotbar(b);
   let cur = score(b, p).v;
   // greedy: spend points one step at a time on whatever adds the most; a step may be a chain
@@ -494,6 +503,10 @@ async function optimize(p, onStep) {
       }
       if (broken || !canRaise(tmp, sid, p, c2map)) continue;
       path.push(sid);
+      // every point of the step must come from this class's pool
+      const lvs = { ...b.skills }; let okCls = true;
+      for (const s of path) { lvs[s] = (lvs[s] || 0) + 1; if (pointClass(c2map, s, lvs[s]) !== cls) { okCls = false; break; } }
+      if (!okCls) continue;
       out.push(path);
     }
     return out;
@@ -533,6 +546,7 @@ async function optimize(p, onStep) {
         for (const to of ids) {
           if (!(b.skills[from] > 0)) break; // its points are all moved already
           if (to === from) continue;
+          if (pointClass(c2map, from, b.skills[from]) !== cls || pointClass(c2map, to, (b.skills[to] || 0) + 1) !== cls) continue;
           b.skills[from]--; const fromLv = b.skills[from];
           const ok = canRaise(b, to, p, c2map) && stillValid(b, p, c2map);
           if (ok) {
@@ -552,8 +566,9 @@ async function optimize(p, onStep) {
   }
   pruneUseless(b, p, c2map);
   // the points that were given back go to whatever really adds damage (not to skills that are not on the hotbar)
-  const used1 = Object.entries(b.skills).filter(([sid]) => !c2map[sid] && !((G.jobs.novice || {}).skills || []).includes(sid)).reduce((t, [, x]) => t + x, 0);
-  const used2 = Object.entries(b.skills).filter(([sid]) => c2map[sid]).reduce((t, [, x]) => t + x, 0);
+  const novice = (G.jobs.novice || {}).skills || [];
+  const used1 = Object.entries(b.skills).filter(([sid]) => !c2map[sid] && !novice.includes(sid)).reduce((t, [sid, x]) => t + Math.min(x, maxLv(sid)), 0);
+  const used2 = Object.entries(b.skills).reduce((t, [sid, x]) => t + (c2map[sid] ? x : Math.max(0, x - maxLv(sid))), 0);
   left1 = c1Budget(p.job, p.jobLevel) - used1; left2 = p.c2 ? p.c2Points - used2 : 0;
   if (left1 > 0 || left2 > 0) { setHotbar(b); cur = score(b, p).v; for (const cls of [1, 2]) await spend(cls, true); bestEvoAndTraits(b, p); }
   bestHotbar(b, p);
@@ -797,14 +812,15 @@ function describe(b, p) {
       problems = ((v && v.problems) || []).filter((x) => /แต้มสกิล|Job Lv|ต้องอัป/.test(x));
     } catch { /* checker changed shape: skip */ }
   }
-  const used = (c2) => Object.entries(b.skills).filter(([sid]) => isC2(sid) === c2).reduce((t, [, l]) => t + l, 0);
+  // class 1 points: a skill's levels up to its top level; class 2 points: class 2 skills, and levels past the top of a class 1 skill
+  const used = (c2) => Object.entries(b.skills).reduce((t, [sid, l]) => t + (isC2(sid) ? (c2 ? l : 0) : c2 ? Math.max(0, l - maxLv(sid)) : Math.min(l, maxLv(sid))), 0);
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
     score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)),
     sustained: (() => { try { return Math.round(sustainedDps(b, r)); } catch { return 0; } })(), window: p.window === 'burst' ? 'burst' : 'sustain',
     fightSec: p.fightSec || 0, fightDps: p.fightSec ? Math.round(windowDps(b, r, p.fightSec)) : 0, bossHp: (r.target && r.target.hp) || 0, ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
     c2: b.c2 ? (G.c2defs[b.c2] || {}).name || b.c2 : '',
-    skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: maxLv(sid), line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
+    skills: Object.entries(b.skills).filter(([, l]) => l > 0).map(([sid, lv]) => ({ sid, name: name(sid), lv, max: capOf(b, sid, p), base: maxLv(sid), ext: lv > maxLv(sid) ? ((G.ext && G.ext[sid] && G.ext[sid].name) || '') + ' (+' + (lv - maxLv(sid)) + ')' : '', line: lineName(lineOf(sid)), c2: !!(G.skills[sid] && G.skills[sid].c2), evo: b.evo[sid] ? b.evo[sid].toUpperCase() + ' · ' + evoName(sid, b.evo[sid]) : '', passive: isPassive(sid) })),
     traits: [...Object.entries(b.traits), ...Object.entries(b.c2tr)].map(([l, e]) => lineName(l) + ': ' + e.toUpperCase() + ' · ' + traitName(l, e)),
     hotbar: b.hotbar.map(name), hotbarIds: b.hotbar.slice(),
     // damaging hotbar skills this character has never been measured with: their numbers are the formula only
