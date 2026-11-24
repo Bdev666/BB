@@ -816,6 +816,12 @@ function describe(b, p) {
   const used = (c2) => Object.entries(b.skills).reduce((t, [sid, l]) => t + (isC2(sid) ? (c2 ? l : 0) : c2 ? Math.max(0, l - maxLv(sid)) : Math.min(l, maxLv(sid))), 0);
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
+    // every class 2 "+" level this path offers on a class 1 skill: how far this build takes it, and why not further
+    extras: Object.entries(G.ext || {}).filter(([sid, e]) => b.c2 && e.path === b.c2 && G.skills[sid]).map(([sid, e]) => {
+      const lv = b.skills[sid] || 0; const base = maxLv(sid);
+      return { sid, name: name(sid), game: e.name || '', plus: e.plus, job: e.job, lv, base, used: Math.max(0, lv - base), hot: (b.hotbar || []).includes(sid), passive: isPassive(sid),
+        why: p.c2Job < e.job ? 'Job คลาส 2 ยังไม่ถึง ' + e.job : lv < base ? 'คลาส 1 ยังไม่เต็ม (' + lv + '/' + base + ')' : lv >= base + e.plus ? '' : (!isPassive(sid) && !(b.hotbar || []).includes(sid) ? 'ไม่อยู่ในช่องลัด' : 'ไม่เพิ่มดาเมจ / แต้มคลาส 2 ไปลงที่ที่ได้มากกว่า') };
+    }),
     score: Math.round(s.v), dps: Math.round(((r.rotation || {}).dps || 0) * dummyAdj(b, r)),
     sustained: (() => { try { return Math.round(sustainedDps(b, r)); } catch { return 0; } })(), window: p.window === 'burst' ? 'burst' : 'sustain',
     fightSec: p.fightSec || 0, fightDps: p.fightSec ? Math.round(windowDps(b, r, p.fightSec)) : 0, bossHp: (r.target && r.target.hp) || 0, ttk: r.ttk, hitsToDie: r.defense && r.defense.hitsToDie,
