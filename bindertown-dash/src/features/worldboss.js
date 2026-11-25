@@ -4,6 +4,13 @@ const HUB = require('../core/hub');
 // joins with the game's worldBossWarp, turns AUTO on in the arena, and when the event ends takes the
 // accounts that BinderDash sent back to where they were (the game's "leave") with AUTO on again
 HUB.mapOf = (g) => (g.data && g.data.stats && g.data.stats.map) || '';
+// where the account goes back to after this boss: the farm spot of a way back still pending, else the last trip's start
+// (when not an arena), else where it stands now
+HUB.bossOrigin = function bossOrigin(g, before, me) {
+  const keep = g.loopBack && g.loopBack.why === 'boss' && !g.loopBack.arrived ? g.loopBack : null;
+  const prev = g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from) ? g.bossTrip : null;
+  return keep ? { from: keep.map, x: keep.x, y: keep.y } : prev ? { from: prev.from, x: prev.x, y: prev.y } : { from: before, x: me.x, y: me.y };
+};
 HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
   const out = [];
   for (const [id, g] of HUB.openGames()) {
@@ -13,10 +20,7 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
     const me = (g.data.world && g.data.world.self) || {};
     // the place the account really farms: when this trip comes before the way back from the last one (two bosses back to back in
     // a log), the account stands on a map it only passed through; remember the farm spot, not that
-    const keep = g.loopBack && g.loopBack.why === 'boss' && !g.loopBack.arrived ? g.loopBack : null;
-    const prev = g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from) ? g.bossTrip : null;
-    const origin = keep ? { from: keep.map, x: keep.x, y: keep.y } : prev ? { from: prev.from, x: prev.x, y: prev.y } : { from: before, x: me.x, y: me.y };
-    g.bossTrip = { kind, ...origin, at: Date.now() };
+    g.bossTrip = { kind, ...HUB.bossOrigin(g, before, me), at: Date.now() };
     HUB.log.info(`acc ${id}: world boss -> ${HUB.WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `asked the game to warp in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
     await HUB.sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
     out.push({ id, name, from: before });

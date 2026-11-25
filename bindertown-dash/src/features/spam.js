@@ -20,19 +20,24 @@ HUB.spamSet = (id, cfg) => {
   return c;
 };
 const TYPING_JS = `(() => { const a = document.activeElement; return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable); })()`;
+// why the keys wait right now ('' = press): only while AUTO fights, alive, awake, not on a trip of any kind
+HUB.spamPause = function spamPause(g) {
+  const st = (g.data && g.data.stats) || {};
+  if (!g.inGame || g.demo || g.status !== 'online' || !g.win || (g.win.isDestroyed && g.win.isDestroyed())) return 'เกมไม่ออนไลน์';
+  if (st.dead) return 'ตายอยู่';
+  if (st.sleeping) return 'พักจออยู่';
+  if (!st.auto) return 'AUTO ปิด';
+  if (g.travelling) return 'กำลังเดินทาง';
+  const dr = HUB.driverOf ? HUB.driverOf(g) : null;
+  if (dr && dr !== 'boss' && dr !== 'bounty') return 'กำลังทำ ' + dr;
+  return '';
+};
 HUB.spamTick = function spamTick() {
   const now = Date.now();
   for (const [id, g] of HUB.games) {
     const c = HUB.spamCfg(id);
     if (!c.on || !c.slots.length) { g.spamState = ''; continue; }
-    let why = '';
-    const st = (g.data && g.data.stats) || {};
-    if (!g.inGame || g.demo || g.status !== 'online' || !g.win || g.win.isDestroyed()) why = 'เกมไม่ออนไลน์';
-    else if (st.dead) why = 'ตายอยู่';
-    else if (st.sleeping) why = 'พักจออยู่';
-    else if (!st.auto) why = 'AUTO ปิด';
-    else if (g.travelling) why = 'กำลังเดินทาง';
-    else { const dr = HUB.driverOf(g); if (dr && dr !== 'boss' && dr !== 'bounty') why = 'กำลังทำ ' + dr; }
+    let why = HUB.spamPause(g);
     if (!why) {
       // the text-box check is a page call: once a second is enough (and it starts as "typing" = safe until known)
       if (!g.spamPage || now - g.spamPage.at > 1000) {

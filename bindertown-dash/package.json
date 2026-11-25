@@ -1,13 +1,13 @@
 {
   "name": "bindertown-dash",
   "productName": "BinderDash",
-  "version": "1.6.26",
+  "version": "1.6.27",
   "description": "Fan-made multi-account launcher and dashboard for Binder Town (unofficial)",
   "main": "src/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
-    "check": "node tools/check-syntax.js && node tools/check-page-scripts.js && node tools/session-data.test.js && node src/game-adapter.test.js",
+    "check": "node tools/check-syntax.js && node tools/check-page-scripts.js && node tools/session-data.test.js && node tools/features.test.js && node src/game-adapter.test.js",
     "dist": "electron-builder --win nsis",
     "dist:mac": "electron-builder --mac --universal"
   },
