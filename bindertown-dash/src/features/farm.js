@@ -36,6 +36,7 @@ HUB.farmBalance = function farmBalance(g) {
 function farmClose(L) {
   if (L.dirty || !L.kills || !L.map || HUB.WORLD_ARENAS.has(L.map) || !L.id) return;
   if (L.bal - L.kill > 20000000) { HUB.log.info(`farm ledger acc ${L.id}: +${L.bal} Silver in one minute on ${L.map} (not from kills or sales?) -> left out`); return; } // a claim / trade the dashboard did not see
+  if (L.bal + L.etc - L.kill < -10000000) { HUB.log.info(`farm ledger acc ${L.id}: ${L.bal} Silver in one minute on ${L.map} (spent on something other than farming?) -> left out`); return; } // a refine / market buy / seal: one such minute made a map look like -41M G/h
   const all = HUB.store.data.farm || (HUB.store.data.farm = {});
   const key = `${L.id}:${L.map}`;
   const rows = all[key] || (all[key] = []);
@@ -177,7 +178,8 @@ async function loopBackCheck(id, g) {
       if (!r.here && !(await arrive(id, g, L.map, 6 * 60000, true))) {
         // a second world boss started on the way (they came back to back in a log): the way back stays, for after that one
         if (g.bossTrip || HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { HUB.log.info(`acc ${id}: back to farm: another world boss came first, the way back to ${L.map} stays`); return; }
-        L.done = true; HUB.log.info(`acc ${id}: back to farm: did not arrive`); return;
+        if ((L.fails = (L.fails || 0) + 1) < 3) { HUB.log.info(`acc ${id}: back to farm: did not arrive in 6 min (now on ${HUB.mapOf(g) || '?'}, try ${L.fails}/3) -> trying again`); return; }
+        L.done = true; HUB.log.info(`acc ${id}: back to farm: did not arrive after 3 tries (now on ${HUB.mapOf(g) || '?'})`); HUB.notify(id, 'event', `↩ กลับแมพฟาร์ม ${HUB.mapName(L.map)} ไม่ได้ 3 ครั้ง · ตัวละครอยู่ที่ ${HUB.mapName(HUB.mapOf(g))} ช่วยดูหน่อย`); return;
       }
     }
     if (L.x != null) {

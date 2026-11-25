@@ -58,6 +58,17 @@ t('premium: auto follows the game, unknown counts as Premium, the tick overrides
   assert.strictEqual(HUB.isPremium(2, g(true)), false);
   assert.strictEqual(HUB.isPremium(3, g(false)), true);
 });
+// ---- farm ledger: a minute of spending is not farming ----
+t('farm ledger leaves out a minute where Silver fell by 41M', () => {
+  require(path.join(__dirname, '..', 'src', 'features', 'farm'));
+  HUB.store.data.farm = {}; HUB.WORLD_ARENAS = HUB.WORLD_ARENAS || new Set();
+  const g = { accId: 2, inGame: true, demo: false, data: { stats: { level: 111, silver: 1000000000, map: 'gullrock_rookery' } } };
+  HUB.mapOf = (x) => x.data.stats.map;
+  HUB.farmEvent(2, g, { type: 'kill', silver: 100 }); HUB.farmBalance(g);
+  g.data.stats.silver -= 41000000; HUB.farmBalance(g); // a refine / market buy in the same minute
+  g.ledger.m -= 1; HUB.farmBalance(g); // next minute closes this one
+  assert.strictEqual((HUB.store.data.farm['2:gullrock_rookery'] || []).length, 0);
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');

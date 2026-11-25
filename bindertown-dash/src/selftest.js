@@ -41,6 +41,10 @@ function create(deps) {
     const k = ev.sid || 'basic';
     const x = c.skills[k] || (c.skills[k] = { dmg: 0, hits: 0, crits: 0, max: 0, critDmg: 0 });
     x.dmg += ev.dmg; x.hits++; if (ev.crit) { x.crits++; x.critDmg += ev.dmg; } if (ev.dmg > x.max) x.max = ev.dmg;
+    // casts that landed: hits of one skill less than 1.5 s apart are one cast (the keys the player's game sent count tries too:
+    // a skill spam presses a skill on cooldown over and over, so those cannot give the real casts per minute)
+    if (!x.lastHit || now - x.lastHit > 1500) x.casts = (x.casts || 0) + 1;
+    x.lastHit = now;
     if (ev.mob) c.mobs[ev.mob] = (c.mobs[ev.mob] || 0) + 1;
   }
   // casts the player's game sent (per skill): with the hits, the hits per cast (targets x ticks) and the casts per minute
@@ -57,7 +61,7 @@ function create(deps) {
     const sec = Math.max(1, c.active / 1000);
     const total = Object.values(c.skills).reduce((t, x) => t + x.dmg, 0);
     const mob = Object.entries(c.mobs).sort((a, b) => b[1] - a[1])[0];
-    const rec = { t: new Date().toISOString(), app: version(), acc: id, minutes: Math.round((Date.now() - c.start) / 60000), activeSec: Math.round(sec), hits: c.hits, realDps: Math.round(total / sec), petDmg: c.pet, mobs: c.mobs, mainMob: mob ? mob[0] : null, casts: c.casts || {}, castsPerMin: Object.fromEntries(Object.entries(c.casts || {}).map(([k, n]) => [k, +(n / Math.max(1, (Date.now() - c.start) / 60000)).toFixed(2)])), hitsPerCast: Object.fromEntries(Object.entries(c.casts || {}).filter(([k]) => c.skills[k]).map(([k, n]) => [k, +(c.skills[k].hits / Math.max(1, n)).toFixed(1)])),
+    const rec = { t: new Date().toISOString(), app: version(), acc: id, minutes: Math.round((Date.now() - c.start) / 60000), activeSec: Math.round(sec), hits: c.hits, realDps: Math.round(total / sec), petDmg: c.pet, mobs: c.mobs, mainMob: mob ? mob[0] : null, landed: Object.fromEntries(Object.entries(c.skills).map(([k, x]) => [k, x.casts || 0])), landedPerMin: Object.fromEntries(Object.entries(c.skills).map(([k, x]) => [k, +((x.casts || 0) / Math.max(1, sec / 60)).toFixed(2)])), casts: c.casts || {}, castsPerMin: Object.fromEntries(Object.entries(c.casts || {}).map(([k, n]) => [k, +(n / Math.max(1, (Date.now() - c.start) / 60000)).toFixed(2)])), hitsPerCast: Object.fromEntries(Object.entries(c.casts || {}).filter(([k]) => c.skills[k]).map(([k, n]) => [k, +(c.skills[k].hits / Math.max(1, n)).toFixed(1)])),
       skills: Object.fromEntries(Object.entries(c.skills).map(([k, x]) => [k, { dmg: x.dmg, hits: x.hits, avg: Math.round(x.dmg / x.hits), max: x.max, critRate: +(x.crits / x.hits).toFixed(3), avgCrit: x.crits ? Math.round(x.critDmg / x.crits) : null, avgNonCrit: x.hits > x.crits ? Math.round((x.dmg - x.critDmg) / (x.hits - x.crits)) : null, share: +(x.dmg / (total || 1)).toFixed(3), dps: Math.round(x.dmg / sec) }])) };
     try {
       const me = deps.labMe ? await deps.labMe(id) : null;

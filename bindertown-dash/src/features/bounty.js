@@ -71,7 +71,9 @@ async function bountyRestore(g, id) {
   if (id != null) await bountyFilterOff(id, g); const B = g.bounty; if (B && B.prevFarm != null && g.win && !g.win.isDestroyed()) { await HUB.setFarmRange(g, B.prevFarm); B.prevFarm = null; } }
 async function bountyList(id) {
   const g = HUB.games.get(id); if (!g || !g.win || g.win.isDestroyed()) return null;
-  try { return await g.win.webContents.executeJavaScript(BOUNTY_LIST_JS, true); } catch { return null; }
+  const list = await HUB.pageRun(g, BOUNTY_LIST_JS, 'BOUNTY_LIST_JS');
+  if (Array.isArray(list)) { const names = g.bountyNames || (g.bountyNames = {}); for (const b of list) if (b.id && b.name) names[b.id] = b.name; } // the claim log says which one
+  return list;
 }
 HUB.bountyStatus = function bountyStatus(g) { const b = g.bounty; return b ? { on: !!b.on, phase: b.phase, target: b.cur ? `${b.cur.name} @ ${b.cur.map}` : '', done: b.claimedN || 0, note: b.note || '' } : null; };
 HUB.bountyStart = async function bountyStart(id, on = true) {
