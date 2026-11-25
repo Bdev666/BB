@@ -47,19 +47,30 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
         HUB.log.info(`acc ${o.id}: world boss -> ${HUB.mapOf(g) === town ? `warped to ${town} first` : `town warp to ${town} did not show in 25 s, asking for the arena anyway`}`);
         await HUB.sleep(2500); // the short wait after a warp before the next one
       }
-      if (!g.bossTrip) return; // stopped meanwhile
-      await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
-      HUB.log.info(`acc ${o.id}: world boss -> asked the game to warp in, from ${HUB.mapOf(g)}`);
     }
-    for (let i = 0; i < 90; i++) {
+    // ask for the arena until it is in: right away, then every 5 s while the boss is up (a warp asked while the town was still
+    // loading, or a moment before the start, got lost and the next try came 30 s later: the accounts stood in town), and say
+    // what the game answered when it refused
+    let asked = 0; let saidAt = 0;
+    const ask = async () => {
+      const at = Date.now(); asked++;
+      await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
+      if (asked === 1) HUB.log.info(`acc ${o.id}: world boss -> asked the game to warp in, from ${HUB.mapOf(g)}`);
+      await HUB.sleep(1500);
+      const nt = g.lastNotice && g.lastNotice.at >= at ? g.lastNotice.text : '';
+      if (nt && Date.now() - saidAt > 20000) { saidAt = Date.now(); HUB.log.info(`acc ${o.id}: world boss warp (try ${asked}) -> the game said: ${nt}`); }
+    };
+    const until = Date.now() + 4 * 60000; let lastAsk = 0;
+    while (Date.now() < until) {
       if (!g.bossTrip) return; // stopped meanwhile
-      if (HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { await HUB.walkToBossThenAuto(o.id, kind); return; }
-      if (i && i % 15 === 0) await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
-      await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
+      if (HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { HUB.log.info(`acc ${o.id}: world boss -> in the arena after ${asked} ask(s)`); await HUB.walkToBossThenAuto(o.id, kind); return; }
+      const live = (HUB.bosses.world.get(kind) || {}).state === 'live';
+      if (!g.data.stats.dead && (asked === 0 || (live && Date.now() - lastAsk >= 5000) || Date.now() - lastAsk >= 30000)) { lastAsk = Date.now(); await ask(); } // eslint-disable-line no-await-in-loop
+      await HUB.sleep(1000); // eslint-disable-line no-await-in-loop
     }
     missed.push(o.name); g.bossTrip = null;
-    HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 3 min (on ${HUB.mapOf(g) || '?'}, ${g.data.stats.dead ? 'DEAD' : 'alive'}, Lv ${g.data.stats.level || '?'}, status ${g.status}, asked ${1 + Math.floor(89 / 15)} times)`);
-  })).then(() => { if (missed.length) HUB.notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 3 นาที)`); }).catch((e) => HUB.log.warn(`world boss go: ${e.message}`));
+    HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 4 min (on ${HUB.mapOf(g) || '?'}, ${g.data.stats.dead ? 'DEAD' : 'alive'}, Lv ${g.data.stats.level || '?'}, status ${g.status}, asked ${asked} times)`);
+  })).then(() => { if (missed.length) HUB.notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 4 นาที)`); }).catch((e) => HUB.log.warn(`world boss go: ${e.message}`));
   return { ok: true, sent: out.length, accounts: out };
 };
 // where to stand: next to the world boss; if it is not in sight, the middle of the monsters around
