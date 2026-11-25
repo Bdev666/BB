@@ -19,19 +19,20 @@ const WARP_CONFIRM_JS = `(() => { const box = document.getElementById('buyconfir
   const text = box.innerText || ''; if (!/วาร์ป/.test(text)) return { box: true, warp: false };
   const free = /ฟรี/.test(text); const b = document.getElementById(free ? 'bcyes' : 'bcno'); if (!b || b.disabled) return { box: true, warp: true, free, pressed: false };
   b.click(); return { box: true, warp: true, free, pressed: true }; })()`;
-HUB.answerWarpBox = HUB.answerWarpBox = async function answerWarpBox(id, g) {
+HUB.answerWarpBox = async function answerWarpBox(id, g) {
   for (let i = 0; i < 8; i++) { // the box comes after the server answers (a moment)
     let r; try { r = await g.win.webContents.executeJavaScript(WARP_CONFIRM_JS, true); } catch { r = null; } // eslint-disable-line no-await-in-loop
     if (r && r.pressed) { HUB.log.info(`acc ${id}: travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
     await HUB.sleep(500); // eslint-disable-line no-await-in-loop
   }
   return null;
-};;
+};
 // the game's own AUTO settings "targets on this map" (one switch per monster kind, off = AUTO never hits it):
 // keep only the bounty monster on, or put back the ones BinderDash switched off. Bosses are left alone.
 const MOB_FILTER_JS = (mode, names) => `(async () => { const win = document.getElementById('autoopts'); const open = document.getElementById('autoopt'); if (!win || !open) return { ok: false, why: 'no auto settings' };
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const was = win.style.display === 'block'; if (!was) open.click();
-  await HUB.sleep(400);
+  await wait(400);
   const mode = ${JSON.stringify(mode)}; const names = ${JSON.stringify(names)}; const changed = []; let found = false;
   for (let guard = 0; guard < 40; guard++) {
     const btns = [...document.querySelectorAll('#au-targets .autg')];
@@ -42,7 +43,7 @@ const MOB_FILTER_JS = (mode, names) => `(async () => { const win = document.getE
     if (!pick) break;
     const nm = ((pick.querySelector('.autgn b') || {}).textContent || '').trim();
     pick.click(); if (!(mode === 'only' && nm === names[0])) changed.push(nm);
-    await HUB.sleep(60);
+    await wait(60);
   }
   if (!was) win.style.display = 'none';
   return { ok: true, changed, found: mode === 'only' ? found || [...document.querySelectorAll('#au-targets .autg .autgn b')].some((b) => b.textContent.trim() === names[0]) : true }; })()`;
@@ -65,15 +66,15 @@ const MOB_SPOT_JS = (type) => `(() => { try { const g = window.__game; const me 
 // the game's AUTO range (AUTO settings: N tiles around the start point, or 0 = whole map); returns the old one
 const FARM_R_JS = (v) => `(() => { const box = document.getElementById('au-farm'); if (!box) return null; const on = box.querySelector('[data-farm].on'); const prev = on ? Number(on.dataset.farm) : null;
   const b = box.querySelector('[data-farm="' + ${JSON.stringify(String(v))} + '"]'); if (b && prev !== ${Number(v)}) b.click(); return prev; })()`;
-HUB.setFarmRange = HUB.setFarmRange = async function setFarmRange(g, v) { try { return await g.win.webContents.executeJavaScript(FARM_R_JS(v), true); } catch { return null; } };;
+HUB.setFarmRange = async function setFarmRange(g, v) { try { return await g.win.webContents.executeJavaScript(FARM_R_JS(v), true); } catch { return null; } };
 async function bountyRestore(g, id) {
   if (id != null) await bountyFilterOff(id, g); const B = g.bounty; if (B && B.prevFarm != null && g.win && !g.win.isDestroyed()) { await HUB.setFarmRange(g, B.prevFarm); B.prevFarm = null; } }
 async function bountyList(id) {
   const g = HUB.games.get(id); if (!g || !g.win || g.win.isDestroyed()) return null;
   try { return await g.win.webContents.executeJavaScript(BOUNTY_LIST_JS, true); } catch { return null; }
 }
-HUB.bountyStatus = HUB.bountyStatus = function bountyStatus(g) { const b = g.bounty; return b ? { on: !!b.on, phase: b.phase, target: b.cur ? `${b.cur.name} @ ${b.cur.map}` : '', done: b.claimedN || 0, note: b.note || '' } : null; };;
-HUB.bountyStart = HUB.bountyStart = async function bountyStart(id, on = true) {
+HUB.bountyStatus = function bountyStatus(g) { const b = g.bounty; return b ? { on: !!b.on, phase: b.phase, target: b.cur ? `${b.cur.name} @ ${b.cur.map}` : '', done: b.claimedN || 0, note: b.note || '' } : null; };
+HUB.bountyStart = async function bountyStart(id, on = true) {
   const g = HUB.games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
   if (!on) { if (g.bounty) { g.bounty.on = false; g.bounty.phase = 'off'; await bountyRestore(g, id); } HUB.log.info(`acc ${id}: bounties off`); HUB.pushState(); return { ok: true }; }
   g.bounty = { on: true, phase: 'start', claimedN: 0, skip: [], at: Date.now(), note: '' };
@@ -82,7 +83,7 @@ HUB.bountyStart = HUB.bountyStart = async function bountyStart(id, on = true) {
   HUB.pushState();
   setTimeout(() => bountyStep(id), 1500);
   return { ok: true };
-};;
+};
 async function bountyClaimDone(id, list) {
   const g = HUB.games.get(id); let n = 0;
   for (const b of list || []) {
@@ -173,7 +174,7 @@ async function bountyStep(id) {
     B.note = `ล่า ${cur.name} ${cur.prog}/${cur.need} ที่ ${HUB.mapName(cur.map)}`;
   } catch (err) { HUB.log.warn(`acc ${id}: bounty step: ${err.message}`); } finally { if (g.bounty) g.bounty.busy = false; HUB.pushState(); }
 }
-HUB.bountyTick = HUB.bountyTick = function bountyTick() {
+HUB.bountyTick = function bountyTick() {
   for (const [id, g] of HUB.games) {
     if (!g.inGame || g.demo) continue;
     if (g.bounty && g.bounty.on) { HUB.sendInput(id, { type: 'huntQuery' }); setTimeout(() => bountyStep(id), 1500); continue; }
@@ -189,4 +190,4 @@ HUB.bountyTick = HUB.bountyTick = function bountyTick() {
       bountyClaimDone(id, list).catch(() => {});
     }
   }
-};;
+};

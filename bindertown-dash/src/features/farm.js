@@ -16,23 +16,23 @@ function farmBucket(g) {
   }
   return g.ledger;
 }
-HUB.farmDirty = HUB.farmDirty = function farmDirty(g) { if (g) farmBucket(g).dirty = true; };;
-HUB.farmEvent = HUB.farmEvent = function farmEvent(id, g, ev) {
+HUB.farmDirty = function farmDirty(g) { if (g) farmBucket(g).dirty = true; };
+HUB.farmEvent = function farmEvent(id, g, ev) {
   if (!g.inGame || g.demo) return;
   const L = farmBucket(g);
   if (ev.type === 'kill') { L.kills++; L.kill += Number(ev.silver) || 0; }
   else if (ev.type === 'loot' && ev.value > 0 && /^drop_/.test(ev.id || '')) { L.etc += ev.value; (g.etcPrice || (g.etcPrice = {}))[HUB.baseOf(ev.id)] = ev.value / (ev.qty || 1); }
   else if (ev.type === 'sold' && ev.auto) { const p = g.etcPrice && g.etcPrice[HUB.baseOf(ev.id || '')]; if (p) L.etc -= p * (ev.qty || 1); } // ETC sold by the game: the balance has it now
   else if (ev.type === 'sold' && !ev.auto) L.dirty = true; // a sale from the sell window (old loot) is not this minute's farming
-};;
-HUB.farmBalance = HUB.farmBalance = function farmBalance(g) {
+};
+HUB.farmBalance = function farmBalance(g) {
   const s = Number(g.data.stats.silver);
   if (!Number.isFinite(s)) return;
   const L = farmBucket(g);
   if (g.lastBal != null) L.bal += s - g.lastBal;
   if (L.map !== HUB.mapOf(g) || (g.claimUntil && Date.now() < g.claimUntil)) L.dirty = true; // changed map inside the minute / rewards coming in
   g.lastBal = s;
-};;
+};
 function farmClose(L) {
   if (L.dirty || !L.kills || !L.map || HUB.WORLD_ARENAS.has(L.map) || !L.id) return;
   if (L.bal - L.kill > 20000000) { HUB.log.info(`farm ledger acc ${L.id}: +${L.bal} Silver in one minute on ${L.map} (not from kills or sales?) -> left out`); return; } // a claim / trade the dashboard did not see
@@ -47,7 +47,7 @@ function farmClose(L) {
 // per map for one account, near its level: Silver per hour (median of the minutes, one bad minute does not swing it)
 let farmHistCache = null;
 function farmHist() { if (!farmHistCache || Date.now() - farmHistCache.at > 30 * 60000) { let h = {}; try { h = HUB.selftest.farmHistory(14); } catch (e) { HUB.log.warn(`farm history: ${e.message}`); } farmHistCache = { at: Date.now(), h }; } return farmHistCache.h; }
-HUB.farmSummary = HUB.farmSummary = function farmSummary(accId, level, sinceMin = 0) {
+HUB.farmSummary = function farmSummary(accId, level, sinceMin = 0) {
   const live = farmSummaryLedger(accId, level, sinceMin);
   if (sinceMin) return live; // a measurement window: only what was measured in it
   // + the stats log (every 10 min, 14 days): Silver from kills per map. It has no auto-sell, so maps known only from
@@ -70,7 +70,7 @@ HUB.farmSummary = HUB.farmSummary = function farmSummary(accId, level, sinceMin 
     else { const e = { map: a.map, name: HUB.mapName(a.map), minutes: 0, netHr: Math.round(killHr * ratio) - fee, est: true, killSilverHr: killHr, killsHr, deathsHr, histMinutes: min, histKillHr: killHr, last: Math.max(...st.map((s) => s.t)) }; live.push(e); byMap.set(a.map, e); }
   }
   return live.sort((p, q) => q.netHr - p.netHr);
-};;
+};
 function farmSummaryLedger(accId, level, sinceMin = 0) {
   const out = [];
   for (const [key, rows] of Object.entries(HUB.store.data.farm || {})) {
@@ -84,7 +84,7 @@ function farmSummaryLedger(accId, level, sinceMin = 0) {
   }
   return out.sort((p, q) => q.netHr - p.netHr);
 }
-HUB.farmSaveTick = HUB.farmSaveTick = function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; HUB.store.save(); } };;
+HUB.farmSaveTick = function farmSaveTick() { if (farmDirtyStore) { farmDirtyStore = false; HUB.store.save(); } };
 
 // The game's own "open the world map on this map" (its main module exports it as openWorldMap), found once per page.
 // Text for page scripts: an async function that returns true once window.__bdOpenWorld is there.
@@ -100,7 +100,7 @@ const UI_CHECK_JS = `(async () => { const g = window.__game; const has = (id) =>
   return { api: fn('me') && fn('state') && fn('mapId'), sell: fn('sell'), autoPanel: has('autoopt') && has('autoopts'), farmRange: has('au-farm'), targets: has('au-targets'), respawnBox: has('au-respawn'),
     hunt: has('openhunt') && has('huntwin'), channel: has('chbtn'), worldMap: world, worldBtn: has('worldbtn') }; })()`;
 const UI_USES = { api: 'อ่านข้อมูลตัวละคร (ทุกระบบ)', sell: 'ขายของให้ NPC', autoPanel: 'ตั้งค่า AUTO (ระยะฟาร์ม, เลือกมอน, เกิดที่เดิม)', farmRange: 'ระยะฟาร์ม (ค่าหัว / หาที่ฟาร์ม)', targets: 'ตีเฉพาะมอนค่าหัว', respawnBox: 'เปิดเกิดที่เดิมอัตโนมัติ', hunt: 'ทำค่าหัว', channel: 'ย้าย CH เมื่อคนเยอะ', worldMap: 'เดินทางไปแมพ (หาที่ฟาร์ม / ไปฟาร์ม / กลับจุดเดิม)', worldBtn: 'แผนที่โลก' };
-HUB.uiCheck = HUB.uiCheck = async function uiCheck(id, g) {
+HUB.uiCheck = async function uiCheck(id, g) {
   if (!g.win || g.win.isDestroyed() || !g.inGame || g.demo) return;
   let r; try { r = await g.win.webContents.executeJavaScript(UI_CHECK_JS, true); } catch { return; }
   if (!r) return;
@@ -110,7 +110,7 @@ HUB.uiCheck = HUB.uiCheck = async function uiCheck(id, g) {
     HUB.log.warn(`acc ${id}: this game build lacks what some automations use: ${missing.join(', ')}`);
     HUB.setAlert(id, 'uiMissing', true, `⚠ เกมอัปเดต: ระบบเหล่านี้อาจใช้ไม่ได้ · ${missing.map((k) => UI_USES[k] || k).join(' · ')} · ส่ง log ให้ผู้พัฒนา`);
   } else { if (g.alerts.has('uiMissing')) HUB.setAlert(id, 'uiMissing', false); HUB.log.info(`acc ${id}: game buttons used by the automations: all there`); }
-};;
+};
 
 // ---------- who drives this character now ----------
 // Every system that walks, travels or presses AUTO asks mayAct() first. Order: world boss (and the way back
@@ -118,7 +118,7 @@ HUB.uiCheck = HUB.uiCheck = async function uiCheck(id, g) {
 // AUTO-stuck fix / RAM reload. A higher one pauses the lower ones; equal or lower ones wait.
 const DRIVE_PRIO = { boss: 5, bossReturn: 5, bounty: 4, finder: 3, travel: 3, deathReturn: 3, crowd: 1, stuck: 1, ram: 0 };
 HUB.DRIVE_TH = { boss: 'ตีบอสโลก', bossReturn: 'กลับจุดฟาร์มหลังบอส', bounty: 'ทำค่าหัว', finder: 'หาที่ฟาร์ม', travel: 'เดินทางไปแมพที่เลือก', deathReturn: 'กลับจุดฟาร์มหลังตาย', crowd: 'ย้าย CH', stuck: 'แก้ AUTO ค้าง', ram: 'คืนแรม' };
-HUB.driverOf = HUB.driverOf = function driverOf(g) {
+HUB.driverOf = function driverOf(g) {
   const now = Date.now(); const list = [];
   if (g.bossTrip || HUB.WORLD_ARENAS.has(HUB.mapOf(g))) list.push('boss');
   if (g.loopBack && !g.loopBack.done) list.push(g.loopBack.why === 'boss' ? 'bossReturn' : 'deathReturn');
@@ -129,13 +129,13 @@ HUB.driverOf = HUB.driverOf = function driverOf(g) {
   if (g.ramReloadAt && now - g.ramReloadAt < 90 * 1000) list.push('ram');
   list.sort((a, b) => DRIVE_PRIO[b] - DRIVE_PRIO[a]);
   return list[0] || null;
-};;
+};
 // who may go ahead: nobody else drives, or it is itself, or it outranks the one driving
-HUB.mayAct = HUB.mayAct = function mayAct(g, who) {
+HUB.mayAct = function mayAct(g, who) {
   const d = HUB.driverOf(g);
   return !d || d === who || DRIVE_PRIO[who] > DRIVE_PRIO[d];
-};;
-HUB.waitNote = HUB.waitNote = function waitNote(g) { const d = HUB.driverOf(g); return d ? `รอ: กำลัง${HUB.DRIVE_TH[d]}` : ''; };;
+};
+HUB.waitNote = function waitNote(g) { const d = HUB.driverOf(g); return d ? `รอ: กำลัง${HUB.DRIVE_TH[d]}` : ''; };
 
 // ---------- AUTO on but nothing hit for 3 minutes: switch AUTO off and on again (at most 4 times an hour) ----------
 async function stuckCheck(id, g) {
@@ -173,7 +173,11 @@ async function loopBackCheck(id, g) {
       HUB.log.info(`acc ${id}: ${L.why === 'boss' ? 'world boss done' : 'death-loop pause over'}, in ${HUB.mapOf(g)} -> back to ${L.map}`);
       const r = await travelTo(id, g, L.map);
       if (!r.ok) { L.done = true; HUB.log.info(`acc ${id}: back to farm: ${r.error}`); return; }
-      if (!r.here && !(await arrive(id, g, L.map, 6 * 60000, true))) { L.done = true; HUB.log.info(`acc ${id}: back to farm: did not arrive`); return; }
+      if (!r.here && !(await arrive(id, g, L.map, 6 * 60000, true))) {
+        // a second world boss started on the way (they came back to back in a log): the way back stays, for after that one
+        if (g.bossTrip || HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { HUB.log.info(`acc ${id}: back to farm: another world boss came first, the way back to ${L.map} stays`); return; }
+        L.done = true; HUB.log.info(`acc ${id}: back to farm: did not arrive`); return;
+      }
     }
     if (L.x != null) {
       if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
@@ -182,16 +186,21 @@ async function loopBackCheck(id, g) {
       for (let i = 0; i < 70; i++) { // eslint-disable-line no-await-in-loop
         const st = (g.data.world && g.data.world.self) || {};
         if (st.x == null) { await HUB.sleep(1500); continue; } // eslint-disable-line no-await-in-loop
+        // the map name and the position lag a moment behind a warp: with the old map's position the "distance" was 78 tiles
+        // and the loop ended at once (a log: "walked back ... (78 tiles left)" 3 s after the warp, then AUTO on far from the spot)
+        if (HUB.mapOf(g) !== L.map) { await HUB.sleep(1500); continue; } // eslint-disable-line no-await-in-loop
         left = Math.hypot(st.x - L.x, st.y - L.y);
-        if (left <= 3 || HUB.mapOf(g) !== L.map) break;
+        if (left <= 3) break;
         await HUB.sendInput(id, { type: 'moveTo', x: L.x, y: L.y }); // eslint-disable-line no-await-in-loop
         await HUB.sleep(2500); // eslint-disable-line no-await-in-loop
       }
       HUB.log.info(`acc ${id}: walked back to ${Math.round(L.x)},${Math.round(L.y)} on ${L.map}${left != null ? ` (${Math.round(left)} tiles left)` : ' (position unknown)'}`);
+      // far from the spot after ~3 minutes: one more round later (the walk may have been cut by a fight or a door), then AUTO on wherever it is
+      if (left != null && left > 8 && (L.tries = (L.tries || 0) + 1) < 3) { HUB.log.info(`acc ${id}: still ${Math.round(left)} tiles from the farming spot -> walking on (round ${L.tries + 1})`); return; }
     }
     if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
     g.autoSeenOffAt = Date.now();
-    L.done = true;
+    L.done = true; L.arrived = true;
     HUB.log.info(`acc ${id}: back at the farming spot on ${L.map}${L.why === 'boss' ? ' after the world boss' : ''}, AUTO on`);
     g.data.log('other', `↩ กลับจุดฟาร์ม${L.why === 'boss' ? 'หลังตีบอสโลก' : 'หลังพักเกิดที่เดิม 10 นาที'} · ${HUB.mapName(L.map)} · เปิด AUTO`);
   } finally { L.busy = false; }
@@ -254,8 +263,8 @@ async function arrive(id, g, map, maxMs = 6 * 60000, keepRange = false) {
 // Candidates: Build Lab's map list for this character (its level, safe enough: 5+ hits to die) + maps it already
 // farmed. Each new one is farmed N minutes and judged by the ledger above; maps with enough recent minutes are not
 // tried again. Free travel only (walks when a warp would cost Gold). Stops for world bosses and bounties.
-HUB.finderStatus = HUB.finderStatus = function finderStatus(g) { const f = g.finder; return f ? { on: !!f.on, note: f.note || '', i: f.i, n: (f.list || []).length, best: f.best || null } : null; };;
-HUB.finderStart = HUB.finderStart = async function finderStart(id, on) {
+HUB.finderStatus = function finderStatus(g) { const f = g.finder; return f ? { on: !!f.on, note: f.note || '', i: f.i, n: (f.list || []).length, best: f.best || null } : null; };
+HUB.finderStart = async function finderStart(id, on) {
   const g = HUB.games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
   if (!on) { if (g.finder) { g.finder.on = false; g.finder.note = 'หยุดแล้ว'; } g.travelling = null; HUB.log.info(`acc ${id}: farm finder stopped`); HUB.pushState(); return { ok: true }; }
   if (g.bounty && g.bounty.on) return { ok: false, error: 'กำลังทำค่าหัวอยู่ · หยุดค่าหัวก่อน' };
@@ -286,7 +295,7 @@ HUB.finderStart = HUB.finderStart = async function finderStart(id, on) {
   finderStep(id).catch((e) => HUB.log.warn(`acc ${id}: farm finder: ${e.message}`));
   HUB.pushState();
   return { ok: true, trying: list.map((x) => HUB.mapName(x.map)), known: [...known.values()].map((x) => x.name) };
-};;
+};
 async function finderStep(id) {
   const g = HUB.games.get(id); const f = g && g.finder;
   if (!f || !f.on || f.busy || !g.inGame || g.demo || g.status !== 'online') return;
@@ -342,7 +351,7 @@ async function finderStep(id) {
     }
   } finally { f.busy = false; HUB.pushState(); }
 }
-HUB.farmGo = HUB.farmGo = async function farmGo(id, map) {
+HUB.farmGo = async function farmGo(id, map) {
   const g = HUB.games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'บัญชีนี้ยังไม่ได้เข้าเกม' };
   if (!HUB.mayAct(g, 'travel')) return { ok: false, error: HUB.waitNote(g) || 'ตัวละครกำลังทำอย่างอื่นอยู่' };
   if (g.finder && g.finder.on) { g.finder.on = false; g.finder.note = 'หยุด: คุณเลือกแมพเอง'; } // the player's choice wins over the finder
@@ -351,7 +360,7 @@ HUB.farmGo = HUB.farmGo = async function farmGo(id, map) {
   if (r.here) { if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); return { ok: true }; }
   arrive(id, g, map).then((ok) => HUB.log.info(`acc ${id}: go farm ${map}: ${ok ? 'arrived, AUTO on' : 'did not arrive'}`)).catch(() => {});
   return { ok: true };
-};;
+};
 // dying a lot on a farm map costs real money (5,000 G a respawn): say so once in a while, with a better map
 function deathRateCheck(id, g) {
   const now = Date.now(); const map = HUB.mapOf(g);
@@ -367,7 +376,7 @@ function deathRateCheck(id, g) {
   HUB.log.info(`acc ${id}: ${n} deaths in the last hour on ${map} (~${n * 5000} G in respawns)${better ? ` -> suggest ${better.map} (${better.netHr}/h)` : ''}`);
   HUB.notify(id, 'deathRate', `☠ ตาย ${n} ครั้งใน 1 ชม. ที่ ${HUB.mapName(map)} · ค่าเกิด ~${(n * 5000).toLocaleString('en-US')} G/ชม.${here ? ` (เงินจากมอน ~${Math.round(here.killSilverHr / 1000)}k/ชม.)` : ''}${better ? ` · แมพที่คุ้มกว่า: ${better.name} ~${Math.round(better.netHr / 1000)}k/ชม. (กด 📊 แมพที่เคยฟาร์ม → ไปฟาร์ม)` : ''}`);
 }
-HUB.farmTick = HUB.farmTick = function farmTick() {
+HUB.farmTick = function farmTick() {
   for (const [id, g] of HUB.games) {
     if (!g.inGame || g.demo) continue;
     farmBucket(g); // closes the minute that just ended
@@ -376,4 +385,4 @@ HUB.farmTick = HUB.farmTick = function farmTick() {
     loopBackCheck(id, g).catch((e) => HUB.log.warn(`acc ${id}: back to farm: ${e.message}`));
     finderStep(id).catch((e) => HUB.log.warn(`acc ${id}: farm finder: ${e.message}`));
   }
-};;
+};

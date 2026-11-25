@@ -28,6 +28,8 @@ while ((m = re.exec(s))) {
     const names = Object.keys(scope);
     let val = new Function('JSON', 'WORLD_TYPES', 'HUB', ...names, 'return ' + src)(JSON, {}, HUB, ...names.map((k) => scope[k]));
     scope[m[1]] = val;
+    // the game page has no HUB: a page script that says HUB.something fails only when it runs (it did once: HUB.sleep in a template)
+    for (const t of (typeof val === 'function' ? [val('x', 'y', 'z'), val(true), val(false)] : [val])) if (typeof t === 'string' && /\bHUB\./.test(t)) throw new Error('the script mentions HUB, which does not exist in the game page');
     if (!/_JS$/.test(m[1])) { if (typeof val === 'string') new Function('return (' + val + ')'); n++; continue; }
     if (typeof val === 'function') { for (const args of [['x', 'y', 'z'], [true], [false]]) new Function('return ' + val(...args)); } else new Function('return ' + val);
   } catch (e) { bad++; console.error(`page script ${m[1]} (${path.basename(file)}): ${e.message}`); }

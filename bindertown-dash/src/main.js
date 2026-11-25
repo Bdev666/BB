@@ -83,7 +83,7 @@ function rt(id) {
   if (!HUB.games.has(id)) HUB.games.set(id, { ...blankRuntime(), accId: id });
   return HUB.games.get(id);
 }
-HUB.account = HUB.account = function account(id) { return HUB.store.data.accounts.find((a) => a.id === id); };;
+HUB.account = function account(id) { return HUB.store.data.accounts.find((a) => a.id === id); };
 
 function publicState() {
   const now = Date.now();
@@ -120,7 +120,7 @@ function publicState() {
 HUB.visible = (w) => !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized();
 let pushTimer = null;
 let sleepMode = false; let sleepShown = [];
-HUB.pushState = HUB.pushState = function pushState() {
+HUB.pushState = function pushState() {
   if (pushTimer) return;
   pushTimer = setTimeout(() => {
     pushTimer = null;
@@ -132,10 +132,10 @@ HUB.pushState = HUB.pushState = function pushState() {
     const st = publicState();
     for (const w of targets) w.webContents.send('dash:state', st);
   }, 250);
-};;
+};
 
 // ---------- notifications ----------
-HUB.notify = HUB.notify = function notify(id, kind, text) {
+HUB.notify = function notify(id, kind, text) {
   const s = HUB.store.data.settings;
   const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind === 'weightFull' ? 'weight' : kind;
   if (s.notify[group] === false) return;
@@ -153,9 +153,9 @@ HUB.notify = HUB.notify = function notify(id, kind, text) {
     n.show();
   }
   telegram.send(s.telegram.token, s.telegram.chatId, `${title}: ${text}`).catch(() => {});
-};;
+};
 
-HUB.setAlert = HUB.setAlert = function setAlert(id, key, on, text) {
+HUB.setAlert = function setAlert(id, key, on, text) {
   const g = rt(id);
   if (on && !g.alerts.has(key)) {
     g.alerts.add(key);
@@ -168,7 +168,7 @@ HUB.setAlert = HUB.setAlert = function setAlert(id, key, on, text) {
     HUB.log.info(`acc ${id}: alert off ${key.replace(/:.*/, ':…')}`);
   }
   HUB.pushState();
-};;
+};
 
 // ---------- game windows ----------
 function windowTitle(id) {
@@ -252,7 +252,7 @@ function openGame(id, opts = {}) {
     else if (choice === 2) e.preventDefault();
   });
   win.on('closed', () => {
-    HUB.games.set(id, blankRuntime());
+    HUB.games.set(id, { ...blankRuntime(), accId: id }); // accId too: without it a boss fight was logged for "acc undefined"
     updateSleepBlocker();
     HUB.pushState();
   });
@@ -304,6 +304,7 @@ function openGame(id, opts = {}) {
     if (isMain && code !== -3) { g.status = 'offline'; HUB.pushState(); }
   });
   wc.on('render-process-gone', (_e, details) => {
+    if (g.ramKill && Date.now() - g.ramKill < 15000) { g.ramKill = 0; HUB.log.info(`acc ${id}: game page restarted on purpose (a new renderer gives the memory back)`); return; }
     HUB.log.error(`acc ${id}: game page gone: ${details.reason} (exit ${details.exitCode})`);
     g.status = 'crashed';
     HUB.setAlert(id, 'crash', true, `หน้าเกมหยุดทำงาน (${details.reason})`);
@@ -325,9 +326,16 @@ function openGame(id, opts = {}) {
 function attachWatcher(id, wc) {
   const g = rt(id);
   const dbg = wc.debugger;
-  try { dbg.attach('1.3'); } catch (err) { HUB.log.error(`acc ${id}: debugger attach failed`, err); return; }
-  // small buffers: we only need WebSocket frames, not response bodies kept in memory
-  dbg.sendCommand('Network.enable', { maxTotalBufferSize: 1024 * 1024, maxResourceBufferSize: 64 * 1024 }).catch(() => {});
+  // attach (if not attached) and switch Network on. Done again after every page load: a page that came back from a crash or
+  // a new renderer process has lost it, and the account then read nothing from the game (no data for hours, a log showed it)
+  const enable = () => {
+    try { if (!dbg.isAttached()) dbg.attach('1.3'); } catch (err) { HUB.log.error(`acc ${id}: debugger attach failed`, err); return false; }
+    // small buffers: we only need WebSocket frames, not response bodies kept in memory
+    dbg.sendCommand('Network.enable', { maxTotalBufferSize: 1024 * 1024, maxResourceBufferSize: 64 * 1024 }).catch(() => {});
+    return true;
+  };
+  if (!enable()) return;
+  wc.on('did-finish-load', () => { if (enable()) HUB.log.info(`acc ${id}: page loaded: game data watcher on`); });
   dbg.on('message', (_e, method, params) => {
     if (method === 'Network.webSocketCreated') {
       g.sockets.add(params.requestId);
@@ -342,7 +350,10 @@ function attachWatcher(id, wc) {
       if (params.response.opcode === 2) rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64'));
     }
   });
-  dbg.on('detach', (_e, reason) => HUB.log.warn(`acc ${id}: debugger detached: ${reason}`));
+  dbg.on('detach', (_e, reason) => {
+    HUB.log.warn(`acc ${id}: debugger detached: ${reason}`);
+    setTimeout(() => { try { if (!wc.isDestroyed() && enable()) HUB.log.info(`acc ${id}: debugger attached again`); } catch { /* window closing */ } }, 1500);
+  });
 }
 
 function onFrame(id, frame) {
@@ -433,9 +444,9 @@ function closeGame(id) {
   const g = rt(id);
   if (g.win && !g.win.isDestroyed()) g.win.destroy();
 }
-HUB.openGames = HUB.openGames = function openGames() {
+HUB.openGames = function openGames() {
   return [...HUB.games.entries()].filter(([, g]) => g.win && !g.win.isDestroyed());
-};;
+};
 
 // While a game is open, don't let Windows suspend the app when idle
 function updateSleepBlocker() {
@@ -609,15 +620,15 @@ function handleEvents(id, events) {
 // Only what the player presses. Each goes out the way the game's own UI sends it:
 // a click on the game's own button, the game's own window.__game helpers, or the
 // same 'input' message the game client sends.
-HUB.sendInput = HUB.sendInput = function sendInput(id, obj) {
+HUB.sendInput = function sendInput(id, obj) {
   const g = rt(id);
   if (!g.win || g.win.isDestroyed()) return Promise.resolve(false);
   const b64 = encodeInput(obj).toString('base64');
   return g.win.webContents.executeJavaScript(`window.__bdSend ? window.__bdSend(${JSON.stringify(b64)}) : false`, true).catch(() => false);
-};;
+};
 
 const priceAsked = new Map(); // itemId -> time
-HUB.requestPrice = HUB.requestPrice = function requestPrice(id, itemId, force = false) {
+HUB.requestPrice = function requestPrice(id, itemId, force = false) {
   const last = priceAsked.get(itemId) || 0;
   if (!force && Date.now() - last < 10 * 60 * 1000) return Promise.resolve(true);
   priceAsked.set(itemId, Date.now());
@@ -625,9 +636,9 @@ HUB.requestPrice = HUB.requestPrice = function requestPrice(id, itemId, force = 
   const g = rt(id); g.priceAsks = (g.priceAsks || []).filter((a) => Date.now() - a.at < 8000); g.priceAsks.push({ id: itemId, at: Date.now() });
   // the market board's item view (kind + grade): what the game's market window asks for
   return HUB.sendInput(id, { ...MARKET_FILTER, type: 'marketItem', itemId, loff: 0 });
-};;
+};
 
-HUB.gameCommand = HUB.gameCommand = async function gameCommand(id, cmd, arg) {
+HUB.gameCommand = async function gameCommand(id, cmd, arg) {
   const r = await HUB.runCommand(id, cmd, arg);
   if (!r.ok || !['sell', 'sellEtc', 'chat', 'salvage'].includes(cmd)) return r;
   // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
@@ -636,9 +647,9 @@ HUB.gameCommand = HUB.gameCommand = async function gameCommand(id, cmd, arg) {
   await HUB.sleep(1500);
   if (g.lastNotice && g.lastNotice.at >= sentAt) return { ok: false, error: g.lastNotice.text };
   return r;
-};;
+};
 
-HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
+HUB.runCommand = async function runCommand(id, cmd, arg) {
   const g = rt(id);
   if (!g.win || g.win.isDestroyed()) return { ok: false, error: 'เปิดเกมบัญชีนี้ก่อน' };
   if (!g.inGame) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
@@ -808,7 +819,7 @@ HUB.runCommand = HUB.runCommand = async function runCommand(id, cmd, arg) {
   }
   HUB.log.info(`acc ${id}: command ${cmd}${cmd === 'chat' ? ` (${arg.channel}, ${String(arg.text || '').length} chars)` : arg.itemId ? ` ${arg.itemId}` : ''} -> ${ok ? 'sent' : 'not sent'}`);
   return ok ? { ok: true } : { ok: false, error: 'เกมยังไม่พร้อม ลองใหม่อีกครั้ง' };
-};;
+};
 
 // ---------- auto reconnect ----------
 // The game reconnects ordinary drops by itself. On top of that BinderDash reloads the game
@@ -1006,12 +1017,12 @@ async function priceGear(id, ids) {
 }
 
 // AUTO / sleep straight from the game page: the once-a-second snapshot can be a beat behind
-HUB.liveUi = HUB.liveUi = async function liveUi(id) {
+HUB.liveUi = async function liveUi(id) {
   const g = rt(id);
   try {
     return await g.win.webContents.executeJavaScript(`({ auto: document.body.classList.contains('auto-on'), sleeping: document.body.classList.contains('sleeping') })`, true);
   } catch { return { auto: g.data.stats.auto, sleeping: g.data.stats.sleeping }; }
-};;
+};
 
 // ---------- every account at once (only what the player pressed) ----------
 async function commandAll(cmd, arg) {
@@ -1333,9 +1344,15 @@ function tick() {
       g.data.log('other', `หน้าเกมใช้ RAM ${mb} MB เกิน ${s.ramLimitMB} MB · โหลดใหม่เพื่อคืน RAM`);
       HUB.liveUi(id).then((ui) => {
         g.autoBeforeReload = !!ui.auto;
-        g.win.webContents.reload();
+        // a reload keeps the same renderer process and its memory (measured: 470 MB stayed 470 MB, and the log of a day showed
+        // 2500 MB after every "reload"); a new renderer process is what gives it back (470 MB -> 88 MB)
+        g.ramKill = Date.now();
+        try { g.win.webContents.forcefullyCrashRenderer(); } catch { /* old Electron: reload below */ }
+        setTimeout(() => { try { g.win.webContents.reload(); } catch { /* closed */ } }, 800);
         // back in the game: AUTO on again if it was on (the character is where it was: the server kept it there)
-        setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await HUB.liveUi(id)).auto) { await HUB.gameCommand(id, 'auto', {}); HUB.log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading */ } }, 60000);
+        for (const delay of [45000, 75000, 105000]) {
+          setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await HUB.liveUi(id)).auto) { g.autoBeforeReload = false; await HUB.gameCommand(id, 'auto', {}); HUB.log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading: the next try */ } }, delay);
+        }
       }).catch(() => g.win.webContents.reload());
     }
   }
@@ -1429,7 +1446,7 @@ function createTray() {
 const { LAB_JS } = require('./build-lab');
 let labWin = null;
 let labReady = null;
-HUB.labCall = HUB.labCall = function labCall(expr) {
+HUB.labCall = function labCall(expr) {
   if (!labWin || labWin.isDestroyed()) {
     labWin = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:lab', contextIsolation: true, sandbox: true, backgroundThrottling: false } });
     labWin.on('closed', () => { labWin = null; labReady = null; });
@@ -1438,7 +1455,7 @@ HUB.labCall = HUB.labCall = function labCall(expr) {
   }
   return labReady.then(() => labWin.webContents.executeJavaScript(expr, true))
     .catch((e) => { HUB.log.warn('build lab: ' + (e && e.message)); throw new Error('Build Lab: ' + String((e && e.message) || e).replace(/^.*Error: /, '')); });
-};;
+};
 const ME_JS = `(() => { const m = window.__game && window.__game.me(); if (!m) return null;
   const o = (v) => (v instanceof Map ? Object.fromEntries(v) : v && typeof v.toJSON === 'function' ? v.toJSON() : v);
   let traits = o(m.traits); try { if (typeof traits === 'string') traits = JSON.parse(traits); } catch { traits = {}; }

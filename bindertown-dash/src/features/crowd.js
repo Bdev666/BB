@@ -47,7 +47,13 @@ async function crowdCheck(id, g) {
     // wait for the new channel, then walk back to the same spot and fight there again
     let now = null;
     for (let i = 0; i < 40; i++) { await HUB.sleep(1000); try { now = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { now = null; } if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
-    if (!now || now.ch !== best) { HUB.log.info(`acc ${id}: channel did not change (still CH ${now && now.ch})`); return; }
+    if (!now || now.ch !== best) {
+      // not moved: try again in ~2 minutes, not 10 (a log: "did not change" at 12:39, the next try at 12:49, 3 players in the circle all that time)
+      g.crowdMovedAt = Date.now() - 8 * 60000; g.crowdFails = (g.crowdFails || 0) + 1;
+      if (g.crowdFails >= 4) { g.crowdMovedAt = Date.now(); g.crowdFails = 0; }
+      HUB.log.info(`acc ${id}: channel did not change (still CH ${now && now.ch})`); return;
+    }
+    g.crowdFails = 0;
     if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // off while walking back (it would fight on the way)
     for (let i = 0; i < 15; i++) { // eslint-disable-line no-await-in-loop
       let p; try { p = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { p = null; } // eslint-disable-line no-await-in-loop
@@ -60,4 +66,4 @@ async function crowdCheck(id, g) {
     HUB.notify(id, 'crowd', `👥 คนเยอะ (${c.near} คนในวง) · ย้าย CH ${c.ch} → CH ${best} (${counts[best - 1]} คน) กลับจุดเดิมแล้วเปิด AUTO`);
   } catch (err) { HUB.log.warn(`acc ${id}: crowd move: ${err.message}`); } finally { g.crowdBusy = false; }
 }
-HUB.crowdTick = HUB.crowdTick = function crowdTick() { for (const [id, g] of HUB.games) crowdCheck(id, g).catch(() => {}); };;
+HUB.crowdTick = function crowdTick() { for (const [id, g] of HUB.games) crowdCheck(id, g).catch(() => {}); };

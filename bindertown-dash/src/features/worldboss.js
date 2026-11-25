@@ -4,14 +4,19 @@ const HUB = require('../core/hub');
 // joins with the game's worldBossWarp, turns AUTO on in the arena, and when the event ends takes the
 // accounts that BinderDash sent back to where they were (the game's "leave") with AUTO on again
 HUB.mapOf = (g) => (g.data && g.data.stats && g.data.stats.map) || '';
-HUB.worldBossGo = HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
+HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
   const out = [];
   for (const [id, g] of HUB.openGames()) {
     if (!g.inGame || g.demo || g.status !== 'online') continue;
     const name = g.data.stats.name || HUB.account(id).name;
     const before = HUB.mapOf(g);
     const me = (g.data.world && g.data.world.self) || {};
-    g.bossTrip = { kind, from: before, x: me.x, y: me.y, at: Date.now() };
+    // the place the account really farms: when this trip comes before the way back from the last one (two bosses back to back in
+    // a log), the account stands on a map it only passed through; remember the farm spot, not that
+    const keep = g.loopBack && g.loopBack.why === 'boss' && !g.loopBack.arrived ? g.loopBack : null;
+    const prev = g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from) ? g.bossTrip : null;
+    const origin = keep ? { from: keep.map, x: keep.x, y: keep.y } : prev ? { from: prev.from, x: prev.x, y: prev.y } : { from: before, x: me.x, y: me.y };
+    g.bossTrip = { kind, ...origin, at: Date.now() };
     HUB.log.info(`acc ${id}: world boss -> ${HUB.WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `asked the game to warp in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
     await HUB.sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
     out.push({ id, name, from: before });
@@ -36,7 +41,7 @@ HUB.worldBossGo = HUB.worldBossGo = async function worldBossGo(kind, reason = '�
     missed.push(o.name); g.bossTrip = null; HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 3 min`);
   })).then(() => { if (missed.length) HUB.notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 3 นาที)`); }).catch((e) => HUB.log.warn(`world boss go: ${e.message}`));
   return { ok: true, sent: out.length, accounts: out };
-};;
+};
 // where to stand: next to the world boss; if it is not in sight, the middle of the monsters around
 const BOSS_SPOT_JS = (type) => `(() => { try { const g = window.__game; const st = g.state(); const me = g.me(); if (!st || !me) return null;
   const all = []; st.mobs.forEach((m) => all.push(m));
@@ -46,7 +51,7 @@ const BOSS_SPOT_JS = (type) => `(() => { try { const g = window.__game; const st
   let x, y, how;
   if (boss) { x = boss.x; y = boss.y; how = 'boss'; } else if (all.length) { x = all.reduce((t, m) => t + m.x, 0) / all.length; y = all.reduce((t, m) => t + m.y, 0) / all.length; how = 'mobs'; } else return { me: [me.x, me.y], none: true };
   return { x: Math.round(x), y: Math.round(y), how, d: Math.hypot(x - me.x, y - me.y), me: [Math.round(me.x), Math.round(me.y)] }; } catch (e) { return null; } })()`;
-HUB.walkToBossThenAuto = HUB.walkToBossThenAuto = async function walkToBossThenAuto(id, kind, again = false) {
+HUB.walkToBossThenAuto = async function walkToBossThenAuto(id, kind, again = false) {
   const g = HUB.games.get(id); if (!g || !g.win || g.win.isDestroyed()) return;
   const type = HUB.WORLD_TYPES[kind] || '';
   let spot = null;
@@ -72,7 +77,7 @@ HUB.walkToBossThenAuto = HUB.walkToBossThenAuto = async function walkToBossThenA
   }
   HUB.log.info(`acc ${id}: world boss -> walked to the ${spot && spot.how ? spot.how : 'arena'}${spot && spot.d != null ? ` (${Math.round(spot.d)} tiles left)` : ''}, AUTO on`);
   if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
-};;
+};
 async function worldBossLeave(kind) {
   for (const [id, g] of HUB.openGames()) {
     const inArena = g.inGame && !g.demo && HUB.WORLD_ARENAS.has(HUB.mapOf(g));
@@ -86,7 +91,7 @@ async function worldBossLeave(kind) {
   }
 }
 
-HUB.onWorldBoss = HUB.onWorldBoss = function onWorldBoss(v) {
+HUB.onWorldBoss = function onWorldBoss(v) {
   // the event's real length (start -> end) for the Build Lab
   if (v.state === 'live' && v.startAt && v.endsAt && v.endsAt > v.startAt && HUB.WORLD_TYPES[v.kind]) {
     const wl = HUB.store.data.worldLen || (HUB.store.data.worldLen = {});
@@ -101,9 +106,9 @@ HUB.onWorldBoss = HUB.onWorldBoss = function onWorldBoss(v) {
   }
   if (before && before.state === 'live' && v.state !== 'live' && HUB.store.data.settings.worldBossReturn !== false) worldBossLeave(v.kind);
   HUB.pushState();
-};;
+};
 
-HUB.bossUp = HUB.bossUp = function bossUp(b) {
+HUB.bossUp = function bossUp(b) {
   // one heads-up per boss and map per 20 minutes: the game re-estimates the spawn time every minute,
   // so a key with the time in it said the same boss again every minute (seen 6 times in a row in a log)
   const key = `${b.mobType}@${b.map}`;
@@ -111,7 +116,7 @@ HUB.bossUp = HUB.bossUp = function bossUp(b) {
   if (HUB.bosses.lastUp.has(key) && Date.now() - HUB.bosses.lastUp.get(key) < 20 * 60 * 1000) return;
   HUB.bosses.lastUp.set(key, Date.now());
   HUB.notify(null, 'fieldBoss', `♛ บอสสนาม ${b.name} เกิดแล้ว · ${HUB.mapName(b.map)}`);
-};;
+};
 
 // map id -> name, from the same map table the Dashboard uses (one JSON object per line)
 const MAP_NAMES = (() => {
@@ -120,10 +125,10 @@ const MAP_NAMES = (() => {
       .filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l.trim().replace(/,$/, ''))).map((m) => [m.id, m.name]));
   } catch { return {}; }
 })();
-HUB.mapName = HUB.mapName = function mapName(id) { return MAP_NAMES[id] || String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); };;
+HUB.mapName = function mapName(id) { return MAP_NAMES[id] || String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); };
 
 // timers: "about to spawn" heads-up, and spawns we can tell from the clock alone
-HUB.bossTick = HUB.bossTick = function bossTick() {
+HUB.bossTick = function bossTick() {
   const s = HUB.store.data.settings;
   const now = Date.now();
   const lead = s.bossLeadMinutes * 60000;
@@ -159,9 +164,9 @@ HUB.bossTick = HUB.bossTick = function bossTick() {
     const first = HUB.openGames().find(([, g]) => g.inGame && g.status === 'online' && !g.demo);
     if (first) { HUB.bosses.queriedAt = now; HUB.sendInput(first[0], { type: 'fieldBossQuery' }); }
   }
-};;
+};
 
-HUB.bossView = HUB.bossView = function bossView() {
+HUB.bossView = function bossView() {
   const now = Date.now();
   return {
     field: [...HUB.bosses.field.values()]
@@ -173,4 +178,4 @@ HUB.bossView = HUB.bossView = function bossView() {
       inMs: w.state === 'live' ? 0 : Math.max(0, (w.nextAt || w.startAt) - now), endsInMs: w.endsAt ? Math.max(0, w.endsAt - now) : 0,
     })),
   };
-};;
+};

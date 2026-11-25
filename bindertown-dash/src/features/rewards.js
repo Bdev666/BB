@@ -2,7 +2,7 @@ const HUB = require('../core/hub');
 
 // ---------- collect rewards: mail gifts, Pass missions (daily / weekly) and Pass tiers ----------
 // the same messages the game's own "รับ" buttons send (mail one by one, then "claim all" on the Pass page)
-HUB.claimRewards = HUB.claimRewards = async function claimRewards(id) {
+HUB.claimRewards = async function claimRewards(id) {
   const g = HUB.games.get(id); if (!g || !g.inGame || g.demo) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
   const waitFor = async (key, since) => { for (let i = 0; i < 20; i++) { if (g[key] && g[key].at >= since) return g[key]; await HUB.sleep(250); } return null; }; // eslint-disable-line no-await-in-loop
   const out = { mail: 0, daily: 0, weekly: 0, tiers: false };
@@ -20,4 +20,4 @@ HUB.claimRewards = HUB.claimRewards = async function claimRewards(id) {
   HUB.log.info(`acc ${id}: rewards collected: ${out.mail} mail, ${out.daily} daily, ${out.weekly} weekly mission(s), pass tiers`);
   if (!mail && !pass) return { ok: false, error: 'เกมไม่ตอบ (ลองใหม่อีกครั้ง)' };
   return { ok: true, ...out };
-};;
+};

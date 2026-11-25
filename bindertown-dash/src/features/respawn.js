@@ -12,7 +12,7 @@ const AUTO_RESPAWN_JS = (premium) => `(() => { const c = document.getElementById
 // death loop: up on the spot, killed again, again (seen: 8 deaths in a minute, 5,000 G each).
 // 4 deaths within 2 minutes = turn the game's "respawn in place" off for this account for 10 minutes,
 // so the next death goes back to town like normal, and say so
-HUB.deathLoopCheck = HUB.deathLoopCheck = function deathLoopCheck() { /* removed in 1.5.1 at the player's request: always respawn at once */ };;
+HUB.deathLoopCheck = function deathLoopCheck() { /* removed in 1.5.1 at the player's request: always respawn at once */ };
 async function ensureAutoRespawn(id) {
   const g = HUB.games.get(id);
   if (!g || !g.inGame || g.demo || !g.win || g.win.isDestroyed()) return;
@@ -42,7 +42,7 @@ const RESPAWN_HERE_JS = `(() => { const o = document.getElementById('deathoverla
   h.click(); return { dead: true, clicked: true, free }; })()`;
 // on a death: send the same "respawn here" the button sends at once (the button itself only shows ~2 s
 // later), then keep looking every 0.3 s and press the button when it is there, until up
-HUB.backupRespawn = HUB.backupRespawn = function backupRespawn(id, delay = 150) {
+HUB.backupRespawn = function backupRespawn(id, delay = 150) {
   if (HUB.store.data.settings.autoRespawnHere === false) return;
   const g = HUB.games.get(id); if (!g || g.demo || g.respawnPending) return;
   g.respawnPending = true;
@@ -67,13 +67,13 @@ HUB.backupRespawn = HUB.backupRespawn = function backupRespawn(id, delay = 150) 
     if (g.respawnTries < 40) HUB.backupRespawn(id, 300); // up to ~12 s, then the 15 s check takes over
     else g.respawnTries = 0;
   }, delay);
-};;
+};
 async function liveDead(id) {
   const g = HUB.games.get(id);
   // a death screen over a living character counts too: backupRespawn closes it
   try { return await g.win.webContents.executeJavaScript(`(() => { try { const o = document.getElementById('deathoverlay'); if (o && getComputedStyle(o).display !== 'none') return true; const m = window.__game && window.__game.me(); return !!(m && (m.state === 'dead' || m.hp <= 0)); } catch { return false; } })()`, true); } catch { return false; }
 }
-HUB.autoRespawnTick = HUB.autoRespawnTick = function autoRespawnTick() {
+HUB.autoRespawnTick = function autoRespawnTick() {
   if (HUB.store.data.settings.autoRespawnHere === false) return;
   for (const [id, g] of HUB.games) {
     if (!g.inGame || g.demo) continue;
@@ -81,4 +81,4 @@ HUB.autoRespawnTick = HUB.autoRespawnTick = function autoRespawnTick() {
     // a death the event stream missed: look at the screen too
     liveDead(id).then((dead) => { if (dead) HUB.backupRespawn(id, 0); else if (!g.respawnPending) g.respawnTries = 0; });
   }
-};;
+};

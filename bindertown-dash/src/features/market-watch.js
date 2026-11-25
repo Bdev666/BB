@@ -9,7 +9,7 @@ HUB.marketLive = new Map(); // key -> latest view
 HUB.mwLastAsk = 0;
 HUB.mwList = () => HUB.store.data.marketWatch || (HUB.store.data.marketWatch = []);
 HUB.mwHist = () => HUB.store.data.marketHist || (HUB.store.data.marketHist = {});
-HUB.marketWatchSeen = HUB.marketWatchSeen = function marketWatchSeen(ev) {
+HUB.marketWatchSeen = function marketWatchSeen(ev) {
   const watch = HUB.mwList(); if (!watch.length) return;
   const hit = watch.filter((w) => w.key === ev.key || w.itemId === ev.id); if (!hit.length) return;
   const now = Date.now();
@@ -32,8 +32,8 @@ HUB.marketWatchSeen = HUB.marketWatchSeen = function marketWatchSeen(ev) {
   }
   HUB.store.save();
   HUB.pushState();
-};;
-HUB.marketWatchTick = HUB.marketWatchTick = function marketWatchTick() {
+};
+HUB.marketWatchTick = function marketWatchTick() {
   const watch = HUB.mwList(); if (!watch.length) return;
   const every = Math.max(1, Number(HUB.store.data.settings.marketWatchMin) || 2) * 60000;
   if (Date.now() - HUB.mwLastAsk < 3000) return;
@@ -45,8 +45,8 @@ HUB.marketWatchTick = HUB.marketWatchTick = function marketWatchTick() {
   if (!due.at) due.at = 0;
   due.askedAt = Date.now();
   HUB.requestPrice(acc[0], due.itemId, true);
-};;
-HUB.mwSearch = HUB.mwSearch = function mwSearch(q) {
+};
+HUB.mwSearch = function mwSearch(q) {
   const N = require('../game-names');
   const t = String(q || '').trim().toLowerCase(); if (t.length < 2) return [];
   const out = [];
@@ -56,4 +56,4 @@ HUB.mwSearch = HUB.mwSearch = function mwSearch(q) {
     if (out.length >= 30) break;
   }
   return out;
-};;
+};

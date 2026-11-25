@@ -3,14 +3,14 @@ const HUB = require('../core/hub');
 // ---------- buy potions by themselves when they are about to run out ----------
 // rounds x 99 (the shop sells 99 at a time), at most once every 10 minutes per potion; HUD buying is Premium
 // the game's hotbar (belt): base ids per slot, kept by the game page in its local storage
-HUB.readBelt = HUB.readBelt = function readBelt(id, g) {
+HUB.readBelt = function readBelt(id, g) {
   if (!g.win || g.win.isDestroyed() || (g.beltAt && Date.now() - g.beltAt < 60000)) return;
   g.beltAt = Date.now();
   g.win.webContents.executeJavaScript(`(() => { const out = []; for (const k of Object.keys(localStorage)) if (/\\.pref\\.belt$/.test(k)) { try { for (const x of JSON.parse(localStorage.getItem(k)) || []) if (x && !out.includes(x)) out.push(String(x)); } catch {} } return out; })()`, true)
     .then((b) => { const list = (b || []).map((x) => HUB.baseOf(x)); if (String(list) !== String(g.belt || [])) HUB.log.info(`acc ${id}: hotbar ${list.join(', ') || '(empty)'}`); g.belt = list; })
     .catch(() => {});
-};;
-HUB.autoBuyPotion = HUB.autoBuyPotion = async function autoBuyPotion(id, g, p) {
+};
+HUB.autoBuyPotion = async function autoBuyPotion(id, g, p) {
   const ab = HUB.store.data.settings.autoBuy || {};
   if (!ab.on || g.demo || !g.inGame || !p) return;
   const pid = p.id;
@@ -29,4 +29,4 @@ HUB.autoBuyPotion = HUB.autoBuyPotion = async function autoBuyPotion(id, g, p) {
   HUB.selftest.count(id, r.ok ? 'autoBuy' : 'autoBuyFail'); if (r.ok) HUB.selftest.count(id, 'autoBuyQty', r.bought);
   if (r.ok) { HUB.setAlert(id, 'potion:' + pid, false); HUB.notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติ ${r.bought} ขวด${r.note ? ' · ' + r.note : ''}`); }
   else if (!g.autoBuyFailAt || Date.now() - g.autoBuyFailAt > 60 * 60 * 1000) { g.autoBuyFailAt = Date.now(); HUB.notify(id, 'potion', `🧪 ซื้อ ${row.name} อัตโนมัติไม่สำเร็จ: ${r.error}`); } // at most once an hour
-};;
+};
