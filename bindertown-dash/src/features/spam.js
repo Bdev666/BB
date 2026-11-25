@@ -19,6 +19,16 @@ HUB.spamSet = (id, cfg) => {
   HUB.pushState();
   return c;
 };
+// what is on each slot of the skill bar: the game's own AUTO settings list the hotbar skills with their slot number
+// (the panel is opened and put back the way it was)
+const SKILL_SLOTS_JS = `(async () => { const win = document.getElementById('autoopts'); const open = document.getElementById('autoopt'); if (!win || !open) return null;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const was = win.style.display === 'block'; if (!was) open.click(); await wait(300);
+  const out = [...document.querySelectorAll('#autoopts .auskill')].map((b) => { const img = b.querySelector('img'); const m = /skill\\/([\\w-]+)\\.png/.exec((img && img.getAttribute('src')) || '');
+    return { slot: Number(((b.querySelector('.auslot') || {}).textContent || '').trim()) || 0, sid: m ? m[1] : '', name: ((b.querySelector('small') || {}).textContent || '').trim(), auto: b.classList.contains('on') }; });
+  if (!was) win.style.display = 'none';
+  return out; })()`;
+HUB.spamSlots = async (id) => { const g = HUB.games.get(id); if (!g || !g.inGame) return null; return HUB.pageRun(g, SKILL_SLOTS_JS, 'SKILL_SLOTS_JS'); };
 const TYPING_JS = `(() => { const a = document.activeElement; return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable); })()`;
 // why the keys wait right now ('' = press): only while AUTO fights, alive, awake, not on a trip of any kind
 HUB.spamPause = function spamPause(g) {

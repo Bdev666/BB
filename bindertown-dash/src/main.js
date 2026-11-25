@@ -1628,6 +1628,7 @@ function registerIpc() {
   handle('world-boss-go', (kind) => HUB.worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => HUB.bountyStart(id, on !== false));
   handle('spam-set', (id, cfg) => HUB.spamSet(id, cfg || {}));
+  handle('spam-slots', (id) => HUB.spamSlots(id));
   handle('claim-rewards', (id) => HUB.claimRewards(id));
   handle('farm-find', (id, on) => HUB.finderStart(id, !!on));
   handle('farm-go', (id, map) => HUB.farmGo(id, String(map || '')));

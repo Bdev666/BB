@@ -1307,6 +1307,10 @@ function openSpam(a) {
     b.onclick = () => { if (picks.has(n)) picks.delete(n); else picks.add(n); b.classList.toggle('on', picks.has(n)); };
     return b;
   });
+  // the skill on each slot (read from the game's AUTO settings): "2 · Ice Lance"
+  dash.invoke('spam-slots', a.id).then((list) => {
+    for (const x of list || []) { const b = chips[x.slot - 1]; if (!b || !x.name) continue; b.textContent = `${x.slot} · ${x.name}${x.auto ? '' : ' (AUTO ไม่ใช้)'}`; b.title = x.auto ? 'AUTO ของเกมใช้สกิลนี้อยู่' : 'ปิดไว้ในตั้งค่า AUTO ของเกม: สแปมจะกดให้เอง'; }
+  }).catch(() => {});
   const speed = el('select', {}, ...[[200, 'ถี่มาก (0.2 วิ)'], [300, 'ปกติ (0.3 วิ)'], [500, 'ช้า (0.5 วิ)'], [1000, 'ช้ามาก (1 วิ)']].map(([v, t]) => el('option', { value: String(v), selected: Number(cur.everyMs) === v ? '' : null }, t)));
   const save = async (on) => { await dash.invoke('spam-set', a.id, { on, slots: [...picks], everyMs: +speed.value }); closeModal(); }; // the button on the account shows the new state
   openModal(`⚡ สแปมสกิล · ${a.name}`, [
