@@ -1337,7 +1337,9 @@ function tick() {
     const busy = (dr && dr !== 'bounty' && dr !== 'finder') || (g.bounty && g.bounty.on && g.bounty.phase === 'travel') || (g.finder && g.finder.on && g.finder.phase !== 'measure') || g.data.stats.dead;
     const otherReloading = [...HUB.games.values()].some((o) => o !== g && o.ramReloadAt && now - o.ramReloadAt < 90 * 1000);
     if (s.autoRam && g.memoryMB > s.ramLimitMB && g.status === 'online' && minorOnly && !busy && !otherReloading
-        && (!g.ramReloadAt || now - g.ramReloadAt > 30 * 60 * 1000)) {
+        // as seldom as it can be: a fresh renderer takes ~30-40 s out of the farming. Once past the limit it waits 2 hours since the
+        // last one; far past the limit (+1500 MB: the page then freezes for seconds) it does not wait
+        && (!g.ramReloadAt || now - g.ramReloadAt > 2 * 3600 * 1000 || g.memoryMB > s.ramLimitMB + 1500)) {
       g.ramReloadAt = now;
       const mb = g.memoryMB;
       HUB.log.info(`acc ${id}: game page uses ${mb} MB (limit ${s.ramLimitMB}) -> reload to give the memory back`);
@@ -1350,8 +1352,9 @@ function tick() {
         try { g.win.webContents.forcefullyCrashRenderer(); } catch { /* old Electron: reload below */ }
         setTimeout(() => { try { g.win.webContents.reload(); } catch { /* closed */ } }, 800);
         // back in the game: AUTO on again if it was on (the character is where it was: the server kept it there)
-        for (const delay of [45000, 75000, 105000]) {
-          setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await HUB.liveUi(id)).auto) { g.autoBeforeReload = false; await HUB.gameCommand(id, 'auto', {}); HUB.log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading: the next try */ } }, delay);
+        // AUTO back on as soon as the game is up again: look every 4 s from 8 s on, 2 minutes at most
+        for (let t = 8000; t <= 120000; t += 4000) {
+          setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await HUB.liveUi(id)).auto) { g.autoBeforeReload = false; await HUB.gameCommand(id, 'auto', {}); HUB.log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading: the next look */ } }, t);
         }
       }).catch(() => g.win.webContents.reload());
     }
