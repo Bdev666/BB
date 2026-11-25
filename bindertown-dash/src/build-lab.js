@@ -77,10 +77,29 @@ function c2TraitsIn(b) {
 function calc(b) {
   c2TraitsIn(b);
   const bas = b && b.basics;
-  if (!bas || !G.jobs.novice) return G.calc(b, (b && b.__opts) || {});
+  if (!bas || !G.jobs.novice) return ultCooldown(G.calc(b, (b && b.__opts) || {}));
   const saved = [];
   for (const sid of G.jobs.novice.skills) { const d = G.skills[sid]; if (!d) continue; saved.push([d, d.maxLevel]); d.maxLevel = bas[sid] || 0; }
-  try { return G.calc(b, (b && b.__opts) || {}); } finally { for (const [d, m] of saved) d.maxLevel = m; }
+  try { return ultCooldown(G.calc(b, (b && b.__opts) || {})); } finally { for (const [d, m] of saved) d.maxLevel = m; }
+}
+// The calculator leaves the class 2 Ultimate at its full 90 s cooldown, but the game shortens it like every other skill:
+// a Scribe's real hits (1,400-1,750 Codex Omega hits in 10 minutes, 8 monsters a tick) fit a 36 s cycle = 90 s x the same
+// cooldown factor its other skills get (Final Chapter 13 s -> 5.1 s). Give the Ultimate that factor (the median of the others).
+function ultCooldown(r) {
+  try {
+    const list = (r && r.skills) || [];
+    const u = list.find((x) => G.skills[x.sid] && G.skills[x.sid].c2 && G.skills[x.sid].c2.ult);
+    if (!u || !u.cdMs) return r;
+    const base = (G.skills[u.sid] || {}).cdMs; if (!base || Math.abs(u.cdMs - base) > 1) return r; // already shortened
+    const f = list.filter((x) => x !== u && x.cdMs > 0 && (G.skills[x.sid] || {}).cdMs > 0).map((x) => x.cdMs / G.skills[x.sid].cdMs).filter((x) => x > 0.2 && x <= 1).sort((a, c) => a - c);
+    if (!f.length) return r;
+    const k = f[Math.floor(f.length / 2)];
+    u.cdMs = base * k; if (u.dpsAlone) u.dpsAlone /= k;
+    // the calculator's own rotation (used for farming numbers) cast it every 90 s too: 1/k as many casts
+    const rot = r.rotation; const sh = rot && (rot.share || []).find((x) => x.key === u.sid);
+    if (sh && sh.dmg > 0) { const add = sh.dmg * (1 / k - 1); sh.dmg += add; rot.dps += add / (rot.seconds || 60); }
+  } catch { /* shape changed: leave it */ }
+  return r;
 }
 
 // training dummies: the server does not give the level-gap bonus on them (measured: Lv 13 vs the Lv 1
@@ -1116,7 +1135,7 @@ L.predict = async (p) => {
     withCombos: Math.round(rot.dps * cmb.mult), packDps, pack: packDps ? pack : null, packCurve, combos: cmb.parts, sheet: sheetOf(r),
     gear: Object.entries(b.gear || {}).map(([slot, it]) => ({ slot, id: it.id, name: (G.mobs && false) || it.id, affixes: it.affixes || [], refine: it.refine || 0 })),
     cards: (b.cards || []).map((c, i) => ({ id: c, star: (b.cardStars || [])[i] || 1 })),
-    debug: { sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
+    debug: { skills: (r.skills || []).filter((x) => x.damages && b.skills[x.sid]).map((x) => ({ sid: x.sid, lv: x.lv, cdMs: Math.round(x.cdMs || 0), castMs: Math.round(x.castMs || 0), charges: x.charges || 1, perCast: x.perCast, vsTarget: Math.round((x.hit && x.hit.vsTarget) || 0), dot: Math.round(x.dot || 0), dpsAlone: Math.round(x.dpsAlone || 0) })), sources: r.sources, basic: { avg: bs.avg, vsTarget: bs.vsTarget, cdMs: bs.cdMs, perSec: bs.perSec, power: bs.power, armor: bs.armor, hitChance: bs.hitChance, critChance: bs.critChance, usesMatk: bs.usesMatk }, sheet: { atk: sh.atk, matk: sh.matk, aspd: sh.aspd, crit: sh.crit, critDmg: sh.critDmg, level: sh.level }, factors: (r.factors || []).map((f) => f.label + ' x' + Math.round(f.x * 1000) / 1000), eff: r.eff, gear: Object.keys(b.gear || {}) },
     target: { id: target, level: q.targetLevel }, dps: Math.round(rot.dps),
     perSkill: rot.share.map((x) => ({ sid: x.key, name: name(x.key), dps: Math.round(x.dmg / (rot.seconds || 60)) })),
     // per skill: the game's own numbers for one use (to set against real hits from the combat log)

@@ -7,13 +7,14 @@ HUB.readBelt = function readBelt(id, g) {
   if (!g.win || g.win.isDestroyed() || (g.beltAt && Date.now() - g.beltAt < 60000)) return;
   g.beltAt = Date.now();
   g.win.webContents.executeJavaScript(`(() => { const out = []; for (const k of Object.keys(localStorage)) if (/\\.pref\\.belt$/.test(k)) { try { for (const x of JSON.parse(localStorage.getItem(k)) || []) if (x && !out.includes(x)) out.push(String(x)); } catch {} } return out; })()`, true)
-    .then((b) => { const list = (b || []).map((x) => HUB.baseOf(x)); if (String(list) !== String(g.belt || [])) HUB.log.info(`acc ${id}: hotbar ${list.join(', ') || '(empty)'}`); g.belt = list; })
+    .then((b) => { const list = (b || []).map((x) => HUB.baseOf(x)); if (String([...list].sort()) !== String([...(g.belt || [])].sort())) HUB.log.info(`acc ${id}: hotbar ${list.join(', ') || '(empty)'}`); g.belt = list; })
     .catch(() => {});
 };
 HUB.autoBuyPotion = async function autoBuyPotion(id, g, p) {
   const ab = HUB.store.data.settings.autoBuy || {};
   if (!ab.on || g.demo || !g.inGame || !p) return;
   const pid = p.id;
+  if (!pid) return; // a bag row with no shop id (cash scrolls, food, …): only NPC potions can be bought (a log: "auto-buy undefined")
   const row = { name: p.name };
   g.autoBuyAt = g.autoBuyAt || {};
   if (g.autoBuyAt[pid] && Date.now() - g.autoBuyAt[pid] < 10 * 60 * 1000) return;

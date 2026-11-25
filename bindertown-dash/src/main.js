@@ -112,6 +112,7 @@ function publicState() {
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
+        alertTexts: Object.fromEntries(g.alertTexts || []), // what each alert says, in Thai with the item's real name
       };
     }),
   };
@@ -157,15 +158,17 @@ HUB.notify = function notify(id, kind, text) {
 
 HUB.setAlert = function setAlert(id, key, on, text) {
   const g = rt(id);
+  g.alertTexts = g.alertTexts || new Map();
+  if (on && text) g.alertTexts.set(key, text); else if (!on) g.alertTexts.delete(key);
   if (on && !g.alerts.has(key)) {
     g.alerts.add(key);
-    HUB.log.info(`acc ${id}: alert on ${key.replace(/:.*/, ':…')}`);
+    if (key !== 'death') HUB.log.info(`acc ${id}: alert on ${key.replace(/:.*/, ':…')}`); // deaths: the respawn lines say them
     g.alertSaid = g.alertSaid || new Map();
     const said = g.alertSaid.get(key);
     if (!(said && Date.now() - said < 15 * 60000 && /^(weight|weightFull|idle|potion|item)/.test(key))) { g.alertSaid.set(key, Date.now()); HUB.notify(id, key, text); }
   } else if (!on && g.alerts.has(key)) {
     g.alerts.delete(key);
-    HUB.log.info(`acc ${id}: alert off ${key.replace(/:.*/, ':…')}`);
+    if (key !== 'death') HUB.log.info(`acc ${id}: alert off ${key.replace(/:.*/, ':…')}`);
   }
   HUB.pushState();
 };
@@ -590,7 +593,9 @@ function handleEvents(id, events) {
           // the central market's price for this kind + grade (cheapest listing now, like the board),
           // never NPC prices; only from the threshold up (default 1,000,000 Gold)
           const G = (n) => Math.round(n).toLocaleString('en-US');
-          HUB.log.info(`acc ${id}: market price ${ev.key || ev.id}: ${ev.price ?? '-'} G (${ev.basis || 'no data'})`);
+          // the same price again is not news (a 4-day log had ~5,000 of these lines): say it when it changes or every 30 min
+          HUB.priceSaid = HUB.priceSaid || new Map(); const pk = ev.key || ev.id; const ps = HUB.priceSaid.get(pk);
+          if (!ps || ps.price !== ev.price || Date.now() - ps.at > 30 * 60000) { HUB.priceSaid.set(pk, { price: ev.price, at: Date.now() }); HUB.log.info(`acc ${id}: market price ${pk}: ${ev.price ?? '-'} G (${ev.basis || 'no data'})`); }
           if (ev.price && ev.price * wait.qty >= s.valuableMinGold) {
             HUB.notify(id, 'valuable', `💰 ดรอป ${ev.item}${wait.qty > 1 ? ' x' + wait.qty : ''} · ตลาดกลาง${ev.basis === 'listed' ? 'ถูกสุด' : 'ขายล่าสุด'} ~${G(ev.price)} G${wait.qty > 1 ? '/ชิ้น' : ''}${ev.basis === 'listed' && ev.last ? ` · ขายจริงล่าสุด ${G(ev.last)} G` : ''}`);
           }
@@ -785,9 +790,14 @@ HUB.runCommand = async function runCommand(id, cmd, arg) {
           if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
         }
         if (got > 0 && svBefore != null) { const sv = await silverNow(); const u = sv != null ? (svBefore - sv) / got : 0; if (u >= (p.price || 1) * 0.3 && u <= (p.price || 1) * 10) unit = u; } // eslint-disable-line no-await-in-loop -- kills add Silver meanwhile: keep only a believable price
-        if (got <= 0) { reason = reason || 'ร้านไม่ขายเพิ่ม (Silver ไม่พอ / กระเป๋าหนักเกิน / ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; break; }
+        // say which: the numbers are here (silver, bag weight), the guess list is only the fallback
+        const why = async () => { const sv = await silverNow(); const sum = g.data.summary ? g.data.summary() : {}; const wp = sum.weightPct;
+          if (sv != null && sv < unit * Math.min(n, 10)) return `Silver ไม่พอ (มี ${Math.round(sv).toLocaleString('en-US')})`;
+          if (wp != null && wp >= 90) return `กระเป๋าหนัก ${Math.round(wp)}%`;
+          return 'ร้านไม่ขายเพิ่ม (ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; };
+        if (got <= 0) { reason = reason || await why(); break; } // eslint-disable-line no-await-in-loop
         left -= got;
-        if (got < n) { reason = 'ได้ไม่ครบรอบนี้ (Silver หรือน้ำหนักกระเป๋าไม่พอ)'; break; }
+        if (got < n) { reason = `ได้ไม่ครบรอบนี้ (${await why()})`; break; } // eslint-disable-line no-await-in-loop
       }
       const bought = have() - start;
       HUB.log.info(`acc ${id}: buy ${p.id} x${qty} -> got ${bought}${reason ? ' (' + reason + ')' : ''}`);
@@ -1785,7 +1795,7 @@ function registerIpc() {
   });
   handle('open-settings', (tab) => openSettings(tab));
   handle('update-check', () => updater.check(true));
-  handle('update-now', () => { const u = updater.state(); if (u.status === 'available') updater.download(); else updater.check(true); });
+  handle('update-now', () => { const u = updater.state(); if (u.status === 'ready') updater.install(); else if (u.status === 'available') updater.download(); else updater.check(true); });
   handle('open-release', () => shell.openExternal('https://github.com/Bdev666/BB/releases/latest'));
   handle('open-hidden', (id) => openGame(id, { hidden: true }));
   handle('app-info', () => ({

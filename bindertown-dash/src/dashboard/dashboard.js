@@ -87,7 +87,7 @@ function accountCard(a) {
     open && s.rewards ? el('span', { class: 'gift', title: 'มีของรอรับ (Pass / จดหมาย)' }, `🎁 ${s.rewards}`) : null,
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
-  a.alerts.length ? el('div', { class: 'acc-alert' }, '⚠ ' + a.alerts.map(alertText).join(' · ')) : null,
+  a.alerts.length ? el('div', { class: 'acc-alert', title: a.alerts.map((k) => (a.alertTexts || {})[k] || alertText(k)).join('\n') }, '⚠ ' + a.alerts.map((k) => { const t = (a.alertTexts || {})[k]; const c = t && t.replace(/\s*\((ตั้งไว้|ช่องลัด)[^)]*\)/g, ''); return c && c.length <= 40 ? c : alertText(k); }).join(' · ')) : null,
   a.compat && !a.compat.ok ? el('div', { class: 'acc-alert' }, '⚠ อ่านข้อมูลเกมไม่ครบ (เกมอัปเดต)') : null);
 }
 
@@ -1396,7 +1396,7 @@ $('#update-btn').addEventListener('click', () => { updSkip = ''; renderUpdate((s
 let updSkip = (() => { try { return localStorage.getItem('upd-skip') || ''; } catch { return ''; } })();
 function renderUpdate(u) {
   const box = $('#upd');
-  const show = (u.status === 'available' && updSkip !== u.version) || u.status === 'downloading' || u.status === 'ready';
+  const show = (u.status === 'available' || u.status === 'downloading' || u.status === 'ready') && updSkip !== u.version; // 'later' hides it for that version (it still installs when the app closes)
   box.hidden = !show;
   if (!show) return;
   $('#upd-cur').textContent = 'v' + (u.current || '');
@@ -1406,9 +1406,9 @@ function renderUpdate(u) {
   const busy = u.status === 'downloading' || u.status === 'ready';
   $('#upd-bar').hidden = !busy;
   $('#upd-fill').style.width = (u.status === 'ready' ? 100 : u.percent || 0) + '%';
-  $('#upd-status').textContent = u.status === 'downloading' ? `กำลังดาวน์โหลด ${u.percent || 0}%…` : u.status === 'ready' ? 'ดาวน์โหลดเสร็จ · กำลังติดตั้งและเปิดใหม่…' : 'อัปเดตแล้วโปรแกรมจะติดตั้งและเปิดใหม่เองในราว 1 นาที · บัญชีที่เปิดอยู่จะเปิดกลับให้';
-  $('#upd-go').disabled = busy; $('#upd-later').disabled = busy;
-  $('#upd-go').textContent = busy ? 'กำลังอัปเดต…' : 'อัปเดตตอนนี้';
+  $('#upd-status').textContent = u.status === 'downloading' ? `กำลังดาวน์โหลด ${u.percent || 0}%…` : u.status === 'ready' ? 'ดาวน์โหลดเสร็จแล้ว · กดติดตั้ง (โปรแกรมเปิดใหม่ เกมทุกตัวเปิดกลับเองในราว 1 นาที) หรือปล่อยไว้ จะติดตั้งตอนปิดโปรแกรม' : 'อัปเดตแล้วโปรแกรมจะติดตั้งและเปิดใหม่เองในราว 1 นาที · บัญชีที่เปิดอยู่จะเปิดกลับให้';
+  $('#upd-go').disabled = u.status === 'downloading'; $('#upd-later').disabled = u.status === 'downloading';
+  $('#upd-go').textContent = u.status === 'ready' ? '🔄 ติดตั้งเลย' : u.status === 'downloading' ? 'กำลังดาวน์โหลด…' : 'อัปเดตตอนนี้';
   if (u.manualOnly) { $('#upd-status').textContent = 'macOS: กดแล้วจะเปิดหน้าดาวน์โหลด · โหลดไฟล์ .dmg ใหม่ ปิดโปรแกรม แล้วลาก BinderDash ทับของเดิมในโฟลเดอร์ Applications'; $('#upd-go').textContent = 'ดาวน์โหลด .dmg ใหม่'; }
 }
 $('#upd-go').addEventListener('click', () => dash.invoke('update-now'));
