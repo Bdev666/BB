@@ -595,6 +595,7 @@ async function optimize(p, onStep) {
   const used2 = Object.entries(b.skills).reduce((t, [sid, x]) => t + (c2map[sid] ? x : Math.max(0, x - maxLv(sid))), 0);
   left1 = c1Budget(p.job, p.jobLevel) - used1; left2 = p.c2 ? p.c2Points - used2 : 0;
   if (left1 > 0 || left2 > 0) { setHotbar(b); cur = score(b, p).v; for (const cls of [1, 2]) await spend(cls, true); bestEvoAndTraits(b, p); }
+  if (b.c2) { try { b.extended = tryExtensions(b, p, c2map); } catch { b.extended = []; } if (onStep) await onStep(); }
   bestHotbar(b, p);
   return b;
 }
@@ -624,6 +625,51 @@ function uselessSkills(b, p, c2map, apply) {
   }
   if (apply && out.length) setHotbar(b);
   return out;
+}
+// A class 2 "+" only opens on a class 1 skill at its top level, and the class 1 points may run out before (the greedy
+// spends them one step at a time and never sees the "+" behind a full skill). For each skill on the hotbar (or passive) a few
+// points short of the top: top it up with free / the cheapest class 1 points, add its "+" with free / the cheapest class 2
+// points, keep it when the whole build gets stronger.
+function tryExtensions(b, p, c2map) {
+  const nov = (G.jobs.novice || {}).skills || [];
+  const used1 = () => Object.entries(b.skills).filter(([s]) => !c2map[s] && !nov.includes(s)).reduce((t, [s, x]) => t + Math.min(x, maxLv(s)), 0);
+  const used2 = () => Object.entries(b.skills).reduce((t, [s, x]) => t + (c2map[s] ? x : Math.max(0, x - maxLv(s))), 0);
+  let cur = score(b, p).v; const done = [];
+  for (const sid of Object.keys(G.ext || {})) {
+    const e = extOf(b, sid); if (!e || (p.c2Job || 50) < e.job) continue;
+    const lv = b.skills[sid] || 0; const top = maxLv(sid);
+    if (lv < 1 || lv >= top || top - lv > 7) continue;
+    if (!isPassive(sid) && !(b.hotbar || []).includes(sid)) continue;
+    const save = JSON.stringify({ s: b.skills, h: b.hotbar, e: b.evo });
+    const lossOf = (pool) => {
+      const base = score(b, p).v; const out = [];
+      for (const f of Object.keys(b.skills)) {
+        if (f === sid || nov.includes(f) || !(b.skills[f] > 0) || pointClass(c2map, f, b.skills[f]) !== pool) continue;
+        b.skills[f]--; const ok = stillValid(b, p, c2map); const v = ok ? score(b, p).v : 0; b.skills[f]++;
+        if (ok) out.push({ f, loss: base - v });
+      }
+      return out.sort((x, y) => x.loss - y.loss);
+    };
+    const take = (pool, n) => { // free points first, then one at a time from the skills that lose least
+      const budget = pool === 1 ? c1Budget(p.job, p.jobLevel) - used1() : (p.c2 ? p.c2Points : 0) - used2();
+      let left = n - Math.min(n, Math.max(0, budget));
+      for (const x of left > 0 ? lossOf(pool) : []) {
+        while (left > 0 && b.skills[x.f] > 0 && pointClass(c2map, x.f, b.skills[x.f]) === pool) { b.skills[x.f]--; if (!stillValid(b, p, c2map)) { b.skills[x.f]++; break; } left--; }
+        if (left <= 0) break;
+      }
+      return left <= 0;
+    };
+    let ok = take(1, top - lv);
+    if (ok) { b.skills[sid] = top; ok = take(2, e.plus); if (ok) b.skills[sid] = top + e.plus; }
+    if (ok) {
+      for (const k of Object.keys(b.skills)) if (!b.skills[k]) delete b.skills[k];
+      bestEvoAndTraits(b, p); setHotbar(b);
+      const v = score(b, p).v;
+      if (v > cur * 1.005) { done.push({ sid, name: (G.skills[sid] || {}).name || sid, from: lv, to: top + e.plus, gainPct: Math.round((v / cur - 1) * 1000) / 10 }); cur = v; continue; }
+    }
+    const o = JSON.parse(save); b.skills = o.s; b.hotbar = o.h; b.evo = o.e;
+  }
+  return done;
 }
 function pruneUseless(b, p, c2map) {
   // twice: taking a skill away can free the one it was holding up
@@ -870,6 +916,7 @@ function describe(b, p) {
     // damaging hotbar skills this character has never been measured with: their numbers are the formula only
     unmeasured: Object.keys(SKILL_ADJ).length ? b.hotbar.filter((sid) => SKILL_ADJ[sid] == null).map(name) : [],
     freed: (b.freed || []).map((x) => x.name + ' ' + x.points + ' แต้ม (' + x.why + ')'),
+    extended: (b.extended || []).map((x) => x.name + ' ' + x.from + ' -> ' + x.to + ' (+' + x.gainPct + '%)'),
     measured: Object.keys(SKILL_ADJ).length > 0,
     share: ((r.rotation || {}).share || []).slice(0, 8).map((x) => ({ name: x.key === 'basic' ? 'โจมตีปกติ' : name(x.key), pct: Math.round(x.dmg / Math.max(1, (r.rotation.share || []).reduce((t, y) => t + y.dmg, 0)) * 100) })),
     notes: [...problems.map((x) => '⚠ ' + x), ...notes].slice(0, 10),

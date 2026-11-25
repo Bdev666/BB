@@ -196,7 +196,7 @@ async function loopBackCheck(id, g) {
       }
       HUB.log.info(`acc ${id}: walked back to ${Math.round(L.x)},${Math.round(L.y)} on ${L.map}${left != null ? ` (${Math.round(left)} tiles left)` : ' (position unknown)'}`);
       // far from the spot after ~3 minutes: one more round later (the walk may have been cut by a fight or a door), then AUTO on wherever it is
-      if (left != null && left > 8 && (L.tries = (L.tries || 0) + 1) < 3) { HUB.log.info(`acc ${id}: still ${Math.round(left)} tiles from the farming spot -> walking on (round ${L.tries + 1})`); return; }
+      if (left != null && left > 8 && (L.tries = (L.tries || 0) + 1) < 3) { HUB.log.info(`acc ${id}: still ${Math.round(left)} tiles from the farming spot -> walking on (round ${L.tries + 1}), AUTO fights meanwhile`); if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); return; }
     }
     if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
     g.autoSeenOffAt = Date.now();

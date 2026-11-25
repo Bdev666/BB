@@ -1189,6 +1189,7 @@ function renderLab(box, r) {
   const cur = r.current;
   const head = el('p', {}, `${r.mode === 'boss' ? '👑 ตีบอส' : '🌾 ฟาร์ม'} · เป้า ${labPretty(r.target.id)} Lv ${r.target.level}${r.fight ? ` · คิดจากการสู้ ${r.fight.sec >= 120 ? (r.fight.sec / 60).toFixed(1) + ' นาที' : r.fight.sec + ' วิ'} (${r.fight.why})` : ''} · ${r.full ? 'รวมการ์ดชุดที่จัดให้' + (r.loadout ? ' + เกียร์ของตัวละคร' : '') : r.loadout ? 'รวมเกียร์+การ์ดของตัวละคร' : 'ไม่รวมเกียร์/การ์ด'}${r.evals ? ` · ลอง ${num(r.evals)} แบบ` : ''} ใน ${(r.ms / 1000).toFixed(1)} วิ`);
   const card = (x, i) => el('div', { class: 'lab-card' + (i === 0 ? ' best' : '') },
+    x.extended && x.extended.length ? el('div', { class: 'hint okline' }, `⬆ อัปคลาส 1 ให้เต็มเพื่อต่อยอดคลาส 2 (คุ้มกว่า): ${x.extended.join(' · ')}`) : null,
     x.freed && x.freed.length ? el('div', { class: 'hint okline' }, `♻ ไม่ลงแต้มสกิลที่ไม่เพิ่มดาเมจ · เก็บแต้มไว้: ${x.freed.join(' · ')}`) : null,
     x.measured ? el('div', { class: 'hint ' + (x.unmeasured && x.unmeasured.length ? 'warnline' : 'okline') }, x.unmeasured && x.unmeasured.length ? `⚠ สกิลที่ยังไม่เคยวัดดาเมจจริง: ${x.unmeasured.join(', ')} · ตัวเลขของสกิลพวกนี้มาจากสูตรอย่างเดียว ลองใช้จริงแล้ววัดด้วย A/B ก่อนเชื่อ` : '✓ ทุกสกิลในช่องลัดปรับตามดาเมจจริงของตัวละครนี้แล้ว') : null,
     el('div', { class: 'lab-top' }, el('b', {}, `${i === 0 ? '🏆 ' : ''}${x.c2 ? 'คลาส 2 · ' + x.c2 : 'คลาส 1 อย่างเดียว'}`),
