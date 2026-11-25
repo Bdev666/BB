@@ -87,6 +87,10 @@ function accountCard(a) {
     open && s.rewards ? el('span', { class: 'gift', title: 'มีของรอรับ (Pass / จดหมาย)' }, `🎁 ${s.rewards}`) : null,
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
+  // the same picture the log writes every 30 minutes: what it farms now and what it earns there (last hour on this map)
+  open && a.farmNow ? el('div', { class: 'acc-meta acc-health', title: 'ชั่วโมงล่าสุดบนแมพนี้ (เงินสุทธิ = เงินจากมอน + ของขาย NPC − ค่าตาย) · ตัวขับ = ระบบที่คุมตัวละครอยู่' },
+    el('span', {}, `💰 ${short(a.farmNow.netHr || 0)}/ชม.`), a.farmNow.deathsHr ? el('span', { class: 'neg' }, ` ☠ ${a.farmNow.deathsHr}/ชม.`) : null,
+    a.driver ? el('span', { class: 'hint' }, ` · ${a.driver}`) : null) : null,
   a.alerts.length ? el('div', { class: 'acc-alert', title: a.alerts.map((k) => (a.alertTexts || {})[k] || alertText(k)).join('\n') }, '⚠ ' + a.alerts.map((k) => { const t = (a.alertTexts || {})[k]; const c = t && t.replace(/\s*\((ตั้งไว้|ช่องลัด)[^)]*\)/g, ''); return c && c.length <= 40 ? c : alertText(k); }).join(' · ')) : null,
   a.compat && !a.compat.ok ? el('div', { class: 'acc-alert' }, '⚠ อ่านข้อมูลเกมไม่ครบ (เกมอัปเดต)') : null);
 }
