@@ -19,7 +19,7 @@ async function ensureAutoRespawn(id) {
   if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause
   if (g.autoRespawnAt && Date.now() - g.autoRespawnAt < 60000) return;
   g.autoRespawnAt = Date.now();
-  const premium = g.data.stats.premium === true || (g.data.premiumUntil && g.data.premiumUntil > Date.now());
+  const premium = HUB.isPremium(id, g);
   let r; try { r = await g.win.webContents.executeJavaScript(AUTO_RESPAWN_JS(premium), true); } catch { return; }
   const before = g.autoRespawn && g.autoRespawn.on;
   g.autoRespawn = r;

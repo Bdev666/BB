@@ -92,6 +92,7 @@ HUB.rt = HUB.rt = function rt(id) {
   return HUB.games.get(id);
 };;
 HUB.account = function account(id) { return HUB.store.data.accounts.find((a) => a.id === id); };
+require('./features/premium');
 
 function publicState() {
   const now = Date.now();
@@ -113,6 +114,7 @@ function publicState() {
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: HUB.bountyStatus(g),
         spam: { ...HUB.spamCfg(a.id), state: g.spamState || '' },
+        premium: HUB.isPremium(a.id, g), premiumMode: a.premium || 'auto', premiumGame: g.data && g.data.stats ? g.data.stats.premium : undefined,
         finder: HUB.finderStatus(g),
         driver: (() => { const d = HUB.driverOf(g); return d ? HUB.DRIVE_TH[d] : ''; })(),
         silverUpHr: (() => { const B = g.balHist; if (!B || B.length < 6) return null; const a = B[0]; const b = B[B.length - 1]; return { perHour: Math.round((b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 60), minutes: b[0] - a[0] }; })(),
@@ -1169,6 +1171,12 @@ function registerIpc() {
     HUB.store.save();
     HUB.pushState();
     return id;
+  });
+  handle('account-premium', (id, mode) => {
+    const a = HUB.account(id); if (!a) return null;
+    a.premium = mode === 'yes' || mode === 'no' ? mode : 'auto'; HUB.store.save();
+    HUB.log.info(`acc ${id}: Premium set to ${a.premium} (now ${HUB.isPremium(id, HUB.games.get(id)) ? 'Premium' : 'no Premium'})`);
+    HUB.pushState(); return a.premium;
   });
   handle('rename', (id, name) => {
     const a = HUB.account(id);

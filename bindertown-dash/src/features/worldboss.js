@@ -40,7 +40,7 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
       // waited 3 minutes and never got in, twice); from a town it does. Warping is free with Premium; without it the
       // account asks for the arena from where it stands (no Gold spent by itself)
       const town = HUB.townFor(HUB.mapOf(g));
-      if (town && HUB.mapOf(g) !== town && g.data.stats.premium) {
+      if (town && HUB.mapOf(g) !== town && HUB.isPremium(o.id, g)) {
         if ((await HUB.liveUi(o.id)).auto) await HUB.gameCommand(o.id, 'auto', {}); // AUTO off: it would walk off in town
         await HUB.sendInput(o.id, { type: 'warpTo', mapId: town });
         for (let i = 0; i < 25 && HUB.mapOf(g) !== town; i++) await HUB.sleep(1000); // eslint-disable-line no-await-in-loop

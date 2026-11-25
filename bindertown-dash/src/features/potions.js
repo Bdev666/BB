@@ -14,6 +14,10 @@ HUB.autoBuyPotion = async function autoBuyPotion(id, g, p) {
   const ab = HUB.store.data.settings.autoBuy || {};
   if (!ab.on || g.demo || !g.inGame || !p) return;
   const pid = p.id;
+  if (!HUB.isPremium(id, g)) { // the HUD shop is Premium only: without it the game refuses every try
+    if (!g.autoBuyNoPrem) { g.autoBuyNoPrem = true; HUB.notify(id, 'potion', `🧪 ไม่มี Premium: ซื้อ${p.name}ผ่าน HUD ไม่ได้ (กฎของเกม) · ไปซื้อที่ร้าน NPC ในเมือง`); }
+    return;
+  }
   if (!pid) return; // a bag row with no shop id (cash scrolls, food, …): only NPC potions can be bought (a log: "auto-buy undefined")
   const row = { name: p.name };
   g.autoBuyAt = g.autoBuyAt || {};

@@ -514,7 +514,7 @@ async function cmd(name, arg, pending) {
 
 // the game's rule: selling from anywhere (HUD) is Premium only, otherwise at an NPC shop in town
 const SELL_RULE = 'ขายจากระยะไกลได้เฉพาะบัญชี Premium (กฎของเกม) · ไม่มี Premium ต้องไปขายกับร้านค้า NPC ในเมือง';
-function canSell() { return !!(detail && detail.stats && detail.stats.premium); }
+function canSell() { const a = state && state.accounts && state.accounts.find((x) => x.id === selected); return a && a.premium !== undefined ? !!a.premium : !!(detail && detail.stats && detail.stats.premium); }
 
 // ---------- modal: buy potions / salvage gear ----------
 function openModal(title, body) {

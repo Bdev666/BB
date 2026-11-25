@@ -611,12 +611,15 @@ function renderControls(a) {
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver, a.spam]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver, a.spam, a.premium, a.premiumMode, a.premiumGame]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '▶ การเล่น'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
       el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
       s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
+      el('button', { class: 'ctl' + (a.premium ? ' on' : ''), title: 'Premium ของบัญชีนี้: ใช้ตัดสินใจหลายระบบ (เกิดที่เดิม วาร์ปฟรี ซื้อ/ขายผ่าน HUD วาร์ปเข้าเมืองก่อนบอสโลก) · กดเพื่อสลับ: อัตโนมัติ (ตามที่เกมบอก) → มี → ไม่มี',
+        onclick: () => dash.invoke('account-premium', a.id, a.premiumMode === 'auto' || !a.premiumMode ? 'yes' : a.premiumMode === 'yes' ? 'no' : 'auto') },
+        `👑 Premium: ${a.premiumMode === 'yes' ? 'มี (ตั้งเอง)' : a.premiumMode === 'no' ? 'ไม่มี (ตั้งเอง)' : `อัตโนมัติ · ${a.premiumGame === true ? 'มี' : a.premiumGame === false ? 'ไม่มี' : 'ยังไม่รู้ = ถือว่ามี'}`}`),
       el('button', { class: 'ctl' + (a.spam && a.spam.on ? ' on' : ''), title: 'กดปุ่มสกิลที่เลือก (1–9) ซ้ำๆ ให้ร่ายทันทีที่พร้อม ระหว่างที่ AUTO ตีอยู่' + (a.spam && a.spam.on && a.spam.state ? ` · ตอนนี้: ${a.spam.state}` : ''), onclick: () => openSpam(a) },
         a.spam && a.spam.on ? `⚡ สแปมสกิล ${a.spam.slots.join(' ')}${a.spam.state && a.spam.state !== 'กดอยู่' ? ' · ' + a.spam.state : ''}` : '⚡ สแปมสกิล'),
       a.autoRespawn ? el('span', { class: 'ctl-chip' + (a.autoRespawn.on ? ' on' : ''), title: a.autoRespawn.on ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมเปิดอยู่ · ตายตอน AUTO ในแมพฟิลด์ = ลุกที่เดิม' : 'เปิดตัวเลือกของเกมไม่ได้' }, a.autoRespawn.on ? `↺ เกิดที่เดิม: เปิด${a.autoRespawn.count ? ` (${a.autoRespawn.count} ครั้ง)` : ''}` : (a.autoRespawn.why === 'premium' ? '↺ เกิดที่เดิม: ต้อง Premium' : '↺ เกิดที่เดิม: -')) : null,

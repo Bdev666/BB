@@ -46,6 +46,18 @@ t('town before a world boss: the region town, or the one the game used last time
   assert.strictEqual(HUB.townFor('valebrook'), 'valebrook');
   assert.ok(HUB.isTown('tidehaven') && !HUB.isTown('drowned_forum'));
 });
+// ---- Premium: the player's tick wins, else what the game says, unknown = Premium ----
+require(path.join(__dirname, '..', 'src', 'features', 'premium'));
+t('premium: auto follows the game, unknown counts as Premium, the tick overrides', () => {
+  const accs = [{ id: 1 }, { id: 2, premium: 'no' }, { id: 3, premium: 'yes' }];
+  HUB.account = (id) => accs.find((a) => a.id === id);
+  const g = (p) => ({ data: { stats: { premium: p }, premiumUntil: null } });
+  assert.strictEqual(HUB.isPremium(1, g(undefined)), true);
+  assert.strictEqual(HUB.isPremium(1, g(false)), false);
+  assert.strictEqual(HUB.isPremium(1, g(true)), true);
+  assert.strictEqual(HUB.isPremium(2, g(true)), false);
+  assert.strictEqual(HUB.isPremium(3, g(false)), true);
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');
