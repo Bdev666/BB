@@ -8,9 +8,9 @@ const {
 HUB.fs = require('fs');
 HUB.path = require('path');
 const { Store } = require('./store');
-const telegram = require('./telegram');
+HUB.telegram = require('./telegram');
 const icons = require('./icons');
-const __m1 = require('./game-adapter'); const BinderTownAdapter = __m1.BinderTownAdapter; const SNAPSHOT_JS = __m1.SNAPSHOT_JS; const encodeInput = __m1.encodeInput; const POTIONS = __m1.POTIONS; const KNOWN_BUILDS = __m1.KNOWN_BUILDS; const MARKET_FILTER = __m1.MARKET_FILTER; const rarityOf = __m1.rarityOf; HUB.baseOf = __m1.baseOf; const pretty = __m1.pretty;
+const __m1 = require('./game-adapter'); const BinderTownAdapter = __m1.BinderTownAdapter; const SNAPSHOT_JS = __m1.SNAPSHOT_JS; HUB.encodeInput = __m1.encodeInput; HUB.POTIONS = __m1.POTIONS; const KNOWN_BUILDS = __m1.KNOWN_BUILDS; HUB.MARKET_FILTER = __m1.MARKET_FILTER; HUB.rarityOf = __m1.rarityOf; HUB.baseOf = __m1.baseOf; HUB.pretty = __m1.pretty;
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const APP_ICON = HUB.path.join(__dirname, 'assets', 'icon.png');
@@ -39,9 +39,9 @@ HUB.games = new Map(); // accountId -> runtime state
 HUB.labMeRef = null;
 HUB.selftest = require('./selftest').create({
   games: HUB.games, log: HUB.log, store: () => HUB.store, version: () => app.getVersion(),
-  salvageable: (...a) => salvageable(...a), tradableGear: (...a) => tradableGear(...a), priceGear: (...a) => priceGear(...a),
-  salvageOpts: (...a) => salvageOpts(...a), salvageVerdict: (...a) => salvageVerdict(...a), sendInput: (...a) => HUB.sendInput(...a),
-  runCommand: (...a) => HUB.runCommand(...a), MARKET_FILTER, labMe: (id) => (HUB.labMeRef ? HUB.labMeRef(id) : null),
+  salvageable: (...a) => HUB.salvageable(...a), tradableGear: (...a) => HUB.tradableGear(...a), priceGear: (...a) => HUB.priceGear(...a),
+  salvageOpts: (...a) => HUB.salvageOpts(...a), salvageVerdict: (...a) => HUB.salvageVerdict(...a), sendInput: (...a) => HUB.sendInput(...a),
+  runCommand: (...a) => HUB.runCommand(...a), MARKET_FILTER: HUB.MARKET_FILTER, labMe: (id) => (HUB.labMeRef ? HUB.labMeRef(id) : null),
   labPredict: (p) => HUB.labCall(`window.__bdLab.predict(${JSON.stringify(p)})`),
   // per character: real hit / formula hit (median over skills), eased in over time
   // kept apart for world bosses and everything else (the world boss takes damage differently from what the formula says)
@@ -79,10 +79,10 @@ function blankRuntime() {
     loadedAt: null,
   };
 }
-function rt(id) {
+HUB.rt = HUB.rt = function rt(id) {
   if (!HUB.games.has(id)) HUB.games.set(id, { ...blankRuntime(), accId: id });
   return HUB.games.get(id);
-}
+};;
 HUB.account = function account(id) { return HUB.store.data.accounts.find((a) => a.id === id); };
 
 function publicState() {
@@ -92,9 +92,9 @@ function publicState() {
     maxAccounts: MAX_ACCOUNTS,
     update: { ...updater.state(), current: app.getVersion() },
     bosses: HUB.bossView(),
-    events: eventsView(),
+    events: HUB.eventsView(),
     accounts: HUB.store.data.accounts.map((a) => {
-      const g = rt(a.id);
+      const g = HUB.rt(a.id);
       return {
         id: a.id,
         name: a.name,
@@ -142,7 +142,7 @@ HUB.notify = function notify(id, kind, text) {
   const group = kind.startsWith('item:') ? 'itemLow' : kind.startsWith('potion:') ? 'potion' : kind === 'weightFull' ? 'weight' : kind;
   if (s.notify[group] === false) return;
   // id null = about the game world (bosses), not one account
-  const g = id == null ? null : rt(id);
+  const g = id == null ? null : HUB.rt(id);
   if (g && g.demo) return; // demo data never notifies
   // don't interrupt the account you're looking at right now
   if (g && g.win && !g.win.isDestroyed() && g.win.isVisible() && g.win.isFocused()) return;
@@ -154,11 +154,11 @@ HUB.notify = function notify(id, kind, text) {
     n.on('click', () => (id == null ? createDashboard() : showGame(id)));
     n.show();
   }
-  telegram.send(s.telegram.token, s.telegram.chatId, `${title}: ${text}`).catch(() => {});
+  HUB.telegram.send(s.telegram.token, s.telegram.chatId, `${title}: ${text}`).catch(() => {});
 };
 
 HUB.setAlert = function setAlert(id, key, on, text) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   g.alertTexts = g.alertTexts || new Map();
   if (on && text) g.alertTexts.set(key, text); else if (!on) g.alertTexts.delete(key);
   if (on && !g.alerts.has(key)) {
@@ -177,7 +177,7 @@ HUB.setAlert = function setAlert(id, key, on, text) {
 // ---------- game windows ----------
 function windowTitle(id) {
   const a = HUB.account(id);
-  const n = rt(id).data.stats.name;
+  const n = HUB.rt(id).data.stats.name;
   return `${n ? `${a.name} · ${n}` : a.name} — Binder Town`;
 }
 
@@ -204,7 +204,7 @@ function isGameUrl(url) {
 function openGame(id, opts = {}) {
   const a = HUB.account(id);
   if (!a) return;
-  const g = rt(id);
+  const g = HUB.rt(id);
   if (g.win && !g.win.isDestroyed()) return showGame(id);
   g.demo = null;
   g.data.reset();
@@ -328,7 +328,7 @@ function openGame(id, opts = {}) {
 
 // Watch the game's WebSocket traffic through the DevTools protocol (read-only).
 function attachWatcher(id, wc) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   const dbg = wc.debugger;
   // attach (if not attached) and switch Network on. Done again after every page load: a page that came back from a crash or
   // a new renderer process has lost it, and the account then read nothing from the game (no data for hours, a log showed it)
@@ -351,7 +351,7 @@ function attachWatcher(id, wc) {
       onFrame(id, params.response);
     } else if (method === 'Network.webSocketFrameSent') {
       // only used to time the game's own pings (read-only)
-      if (params.response.opcode === 2) { const o = rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64')); if (o && o.cast) HUB.selftest.combatCast(id, o.cast); }
+      if (params.response.opcode === 2) { const o = HUB.rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64')); if (o && o.cast) HUB.selftest.combatCast(id, o.cast); }
     }
   });
   dbg.on('detach', (_e, reason) => {
@@ -361,7 +361,7 @@ function attachWatcher(id, wc) {
 }
 
 function onFrame(id, frame) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   g.lastMsgAt = Date.now();
   if (g.status !== 'online') { g.status = 'online'; }
   if (g.alerts.has('disconnect')) HUB.setAlert(id, 'disconnect', false);
@@ -432,7 +432,7 @@ function capture(id, frame) {
 }
 
 function showGame(id) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   if (!g.win || g.win.isDestroyed()) return openGame(id);
   if (g.win.isMinimized()) g.win.restore();
   if (!g.win.isVisible() && !g.userPlaced) placeOverDashboard(g.win);
@@ -441,11 +441,11 @@ function showGame(id) {
   g.win.focus();
 }
 function hideGame(id) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   if (g.win && !g.win.isDestroyed()) g.win.hide();
 }
 function closeGame(id) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   if (g.win && !g.win.isDestroyed()) g.win.destroy();
 }
 HUB.openGames = function openGames() {
@@ -461,7 +461,7 @@ function updateSleepBlocker() {
 
 // ---------- game events -> data + notifications ----------
 function handleEvents(id, events) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   const s = HUB.store.data.settings;
   for (const ev of events) {
     g.data.ingest(ev);
@@ -473,7 +473,7 @@ function handleEvents(id, events) {
         // a real-DPS measurement is running: keep this character's own hits
         if (ev.type === 'hit') { HUB.fightHit(g, ev); HUB.selftest.combatHit(id, ev); HUB.abHit(g, ev); }
         if (ev.type === 'kill' && g.ab && g.ab.phase) HUB.abBucket(g).kills++;
-        if (ev.type === 'kill' && g.fight && ev.target === pretty(g.fight.mob)) HUB.fightEnd(g, true);
+        if (ev.type === 'kill' && g.fight && ev.target === HUB.pretty(g.fight.mob)) HUB.fightEnd(g, true);
         if (ev.type === 'hit' && g.measure && Date.now() < g.measure.until) { const m = g.measure; if (!m.first) m.first = Date.now(); m.last = Date.now(); m.hits.push({ dmg: ev.dmg, sid: ev.sid, mob: ev.mob, pet: ev.pet, crit: ev.crit }); }
         if (g.alerts.has('idle')) HUB.setAlert(id, 'idle', false);
         break;
@@ -545,7 +545,7 @@ function handleEvents(id, events) {
         if (ev.worthChecking && ev.id) { g.valuableWait.set(ev.id, { qty: ev.qty, at: Date.now() }); HUB.requestPrice(id, ev.id); }
         break;
       case 'fieldBosses': onFieldBosses(ev.list); break;
-      case 'myListings': onMyListings(id, ev.list); break;
+      case 'myListings': HUB.onMyListings(id, ev.list); break;
       case 'marketResult': g.lastMarket = { ok: ev.ok, reason: ev.reason, at: Date.now() }; break;
       case 'worldEvent': onWorldEvent(ev); break;
       case 'newType':
@@ -622,215 +622,7 @@ function handleEvents(id, events) {
   }
 }
 
-// ---------- commands from the Dashboard ----------
-// Only what the player presses. Each goes out the way the game's own UI sends it:
-// a click on the game's own button, the game's own window.__game helpers, or the
-// same 'input' message the game client sends.
-HUB.sendInput = function sendInput(id, obj) {
-  const g = rt(id);
-  if (!g.win || g.win.isDestroyed()) return Promise.resolve(false);
-  const b64 = encodeInput(obj).toString('base64');
-  return g.win.webContents.executeJavaScript(`window.__bdSend ? window.__bdSend(${JSON.stringify(b64)}) : false`, true).catch(() => false);
-};
-
-const priceAsked = new Map(); // itemId -> time
-HUB.requestPrice = function requestPrice(id, itemId, force = false) {
-  const last = priceAsked.get(itemId) || 0;
-  if (!force && Date.now() - last < 10 * 60 * 1000) return Promise.resolve(true);
-  priceAsked.set(itemId, Date.now());
-  // remember what was asked: the board may answer with its own id for the kind + grade (not the bag piece's id)
-  const g = rt(id); g.priceAsks = (g.priceAsks || []).filter((a) => Date.now() - a.at < 8000); g.priceAsks.push({ id: itemId, at: Date.now() });
-  // the market board's item view (kind + grade): what the game's market window asks for
-  return HUB.sendInput(id, { ...MARKET_FILTER, type: 'marketItem', itemId, loff: 0 });
-};
-
-HUB.gameCommand = async function gameCommand(id, cmd, arg) {
-  const r = await HUB.runCommand(id, cmd, arg);
-  if (!r.ok || !['sell', 'sellEtc', 'chat', 'salvage'].includes(cmd)) return r;
-  // the game answers refusals with a notice ("ซื้อ/ขายผ่าน HUD ได้เฉพาะ Premium ..."): pass it on
-  const g = rt(id);
-  const sentAt = Date.now();
-  await HUB.sleep(1500);
-  if (g.lastNotice && g.lastNotice.at >= sentAt) return { ok: false, error: g.lastNotice.text };
-  return r;
-};
-
-HUB.runCommand = async function runCommand(id, cmd, arg) {
-  const g = rt(id);
-  if (!g.win || g.win.isDestroyed()) return { ok: false, error: 'เปิดเกมบัญชีนี้ก่อน' };
-  if (!g.inGame) return { ok: false, error: 'ยังไม่ได้เข้าเกม' };
-  const js = (code) => g.win.webContents.executeJavaScript(code, true).catch(() => false);
-  const click = (sel) => js(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.offsetParent || x.id === 'autobig'); if (!b) return false; b.click(); return true; })()`);
-  let ok = false;
-  switch (cmd) {
-    case 'auto':
-    case 'sleep': {
-      const before = await HUB.liveUi(id);
-      ok = await click(cmd === 'auto' ? '#autobig' : '#autoeco');
-      if (ok) {
-        await HUB.sleep(400);
-        const after = await HUB.liveUi(id);
-        Object.assign(g.data.stats, { auto: after.auto, sleeping: after.sleeping });
-        if (cmd === 'auto' && after.auto === before.auto) return { ok: false, error: `เกมไม่${before.auto ? 'ปิด' : 'เปิด'} AUTO ให้ (เช่น อยู่ในเมือง ตัวละครตาย หรือกำลังวาร์ป)` };
-      }
-      break;
-    }
-    case 'respawn':
-      // prefer the "here / in place" button, then any respawn button on the death screen
-      // the game's death screen: #drespawnhere = up on the spot (Gold fee), the other button = back to town
-      ok = await js(`(() => { const o = document.getElementById('deathoverlay'); if (!o || getComputedStyle(o).display === 'none') return false; const h = document.getElementById('drespawnhere'); if (h && !h.disabled) { h.click(); return true; } if (${arg.hereOnly ? 'true' : 'false'}) return false; const bs = [...o.querySelectorAll('button')].filter((b) => !b.disabled && b.id !== 'drespawnhere'); if (!bs[0]) return false; bs[0].click(); return true; })()`);
-      break;
-    case 'sell': {
-      const qty = Math.max(1, Math.floor(Number(arg.qty) || 0));
-      if (!/^[\w~#.:+^|$&!%@*-]+$/.test(arg.itemId || '')) return { ok: false, error: 'ไอเทมไม่ถูกต้อง' };
-      ok = await js(`(window.__game && window.__game.sell) ? (window.__game.sell(${JSON.stringify(arg.itemId)}, ${qty}), true) : false`);
-      break;
-    }
-    case 'sellNpc': {
-      // chosen pieces (the dashboard's NPC sell window); never a locked one, whatever the list says
-      const list = Array.isArray(arg.items) ? arg.items.slice(0, 300) : [];
-      let n = 0;
-      for (const it of list) {
-        const itemId = String(it.itemId || ''); const qty = Math.max(1, Math.floor(Number(it.qty) || 1));
-        if (!/^[\w~#.:+^|$&!%@*-]+$/.test(itemId) || (g.adapter.locks && g.adapter.locks.has(itemId))) continue;
-        // eslint-disable-next-line no-await-in-loop
-        await js(`window.__game.sell(${JSON.stringify(itemId)}, ${qty}), true`); n++;
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.sleep(250);
-      }
-      HUB.log.info(`acc ${id}: sold ${n} item stack(s) to the NPC (chosen in the dashboard)`);
-      ok = n > 0;
-      break;
-    }
-    case 'sellEtc': {
-      // every monster drop in the bag (ETC), one sell per stack, like the game's sell window
-      const inv = g.adapter.inv ? [...g.adapter.inv] : [];
-      const drops = inv.filter(([itemId, qty]) => /^drop_/.test(itemId) && qty > 0);
-      if (!drops.length) return { ok: false, error: 'ไม่มีของดรอปในกระเป๋า' };
-      for (const [itemId, qty] of drops) {
-        // eslint-disable-next-line no-await-in-loop
-        await js(`window.__game.sell(${JSON.stringify(itemId)}, ${qty}), true`);
-      }
-      ok = true;
-      break;
-    }
-    case 'price': ok = await HUB.requestPrice(id, arg.itemId, true); break;
-    case 'priceAll': {
-      // ask the market about every tradable gear piece in the bag (one after another, like browsing)
-      const ids = tradableGear(g);
-      for (const itemId of ids) {
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.requestPrice(id, itemId, true);
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.sleep(350);
-      }
-      return { ok: true, count: ids.length };
-    }
-    case 'marketList': {
-      // list one piece / stack on the central market at the price the player confirmed
-      const itemId = String(arg.itemId || '');
-      const unit = Math.floor(Number(arg.unitPrice) || 0);
-      const have = g.adapter.inv ? g.adapter.inv.get(itemId) || 0 : 0;
-      const qty = Math.max(1, Math.min(have, Math.floor(Number(arg.qty) || 1)));
-      if (!have) return { ok: false, error: 'ไม่มีของชิ้นนี้ในกระเป๋าแล้ว' };
-      if (g.adapter.locks.has(itemId)) return { ok: false, error: 'ของชิ้นนี้ล็อกไว้ในเกม' };
-      if (g.adapter.bound.has(itemId)) return { ok: false, error: 'ของผูกตัว ลงขายไม่ได้' };
-      if (unit < 1) return { ok: false, error: 'ใส่ราคาก่อน' };
-      const sentAt = Date.now();
-      if (!(await HUB.sendInput(id, { type: 'marketList', itemId, qty, price: qty * unit }))) return { ok: false, error: 'เกมยังไม่พร้อม' };
-      for (let i = 0; i < 20; i++) {
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.sleep(200);
-        const m = g.lastMarket;
-        if (m && m.at >= sentAt) {
-          HUB.log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> ${m.ok ? 'listed' : 'refused: ' + m.reason}`);
-          if (m.ok) addPending(g, itemId, qty, unit, true);
-          return m.ok ? { ok: true, pending: true } : { ok: false, error: m.reason || 'ตลาดไม่รับรายการนี้' };
-        }
-        const n = g.lastNotice;
-        if (n && n.at >= sentAt) return { ok: false, error: n.text };
-      }
-      // no answer yet: the market may still be working on it (listings show up ~5 min later).
-      // If the piece left the bag it went to the market; either way it is rechecked later.
-      const gone = !(g.adapter.inv && g.adapter.inv.get(itemId));
-      addPending(g, itemId, qty, unit, gone);
-      HUB.log.info(`acc ${id}: market list ${itemId.split(/[|#]/)[0]} x${qty} @ ${unit} -> no answer, ${gone ? 'left the bag' : 'still in bag'}; recheck later`);
-      return { ok: true, pending: true, unsure: !gone };
-    }
-    case 'marketCancel': ok = await HUB.sendInput(id, { type: 'marketCancel', id: Number(arg.listingId) }); break;
-    case 'buy': {
-      // NPC shop potions only (the game's vendor list); the game charges Silver
-      const p = POTIONS.find((x) => x.id === arg.itemId);
-      const qty = Math.max(1, Math.min(999, Math.floor(Number(arg.qty) || 0)));
-      if (!p) return { ok: false, error: 'ซื้อได้เฉพาะยาจากร้าน NPC' };
-      // the shop takes at most 99 per purchase: buy in rounds and count what really arrived in the bag
-      // every quality grade of this potion (potion, potion~1, potion~2): what the hotbar draws from
-      const have = () => { let n = 0; if (g.adapter.inv) for (const [k, q] of g.adapter.inv) if (HUB.baseOf(k) === p.id) n += q || 0; return n; };
-      const start = have();
-      let left = qty; let reason = '';
-      // keepSilver: never spend below this (auto-buy); the unit price is learned from the first round
-      const keep = Math.max(0, Number(arg.keepSilver) || 0);
-      const silverNow = async () => { try { return await g.win.webContents.executeJavaScript('(window.__game && window.__game.me() || {}).silver', true); } catch { return null; } };
-      let unit = (p.price || 12) * 1.5;
-      while (left > 0) {
-        let n = Math.min(99, left);
-        if (arg.keepSilver != null) {
-          const sv = await silverNow(); // eslint-disable-line no-await-in-loop
-          if (sv != null) n = Math.min(n, Math.floor((sv - keep) / unit));
-          if (n <= 0) { reason = `เหลือ Silver ไม่เกินที่ตั้งเก็บไว้ (${keep.toLocaleString('en-US')})`; break; }
-        }
-        const svBefore = arg.keepSilver != null ? await silverNow() : null; // eslint-disable-line no-await-in-loop
-        const before = have(); const sentAt = Date.now();
-        // eslint-disable-next-line no-await-in-loop
-        if (!(await HUB.sendInput(id, { type: 'vendorBuy', itemId: p.id, qty: n }))) { reason = 'เกมยังไม่พร้อม'; break; }
-        let got = 0;
-        for (let i = 0; i < 25 && !got; i++) {
-          // eslint-disable-next-line no-await-in-loop
-          await HUB.sleep(120);
-          got = have() - before;
-          if (!got && g.lastNotice && g.lastNotice.at >= sentAt) { reason = g.lastNotice.text; break; }
-        }
-        if (got > 0 && svBefore != null) { const sv = await silverNow(); const u = sv != null ? (svBefore - sv) / got : 0; if (u >= (p.price || 1) * 0.3 && u <= (p.price || 1) * 10) unit = u; } // eslint-disable-line no-await-in-loop -- kills add Silver meanwhile: keep only a believable price
-        // say which: the numbers are here (silver, bag weight), the guess list is only the fallback
-        const why = async () => { const sv = await silverNow(); const sum = g.data.summary ? g.data.summary() : {}; const wp = sum.weightPct;
-          if (sv != null && sv < unit * Math.min(n, 10)) return `Silver ไม่พอ (มี ${Math.round(sv).toLocaleString('en-US')})`;
-          if (wp != null && wp >= 90) return `กระเป๋าหนัก ${Math.round(wp)}%`;
-          return 'ร้านไม่ขายเพิ่ม (ต้องเป็น Premium หรืออยู่ใกล้ร้าน)'; };
-        if (got <= 0) { reason = reason || await why(); break; } // eslint-disable-line no-await-in-loop
-        left -= got;
-        if (got < n) { reason = `ได้ไม่ครบรอบนี้ (${await why()})`; break; } // eslint-disable-line no-await-in-loop
-      }
-      const bought = have() - start;
-      HUB.log.info(`acc ${id}: buy ${p.id} x${qty} -> got ${bought}${reason ? ' (' + reason + ')' : ''}`);
-      return bought > 0 ? { ok: true, bought, asked: qty, note: reason } : { ok: false, error: reason || 'ซื้อไม่สำเร็จ' };
-    }
-    case 'salvage': {
-      // one or more gear pieces from the bag; locked ones are skipped like in the game
-      const ids = (Array.isArray(arg.itemIds) ? arg.itemIds : [arg.itemId]).filter((x) => typeof x === 'string' && x.includes('#'));
-      const usable = ids.filter((x) => !g.adapter.locks.has(x) && g.adapter.inv && g.adapter.inv.has(x));
-      if (!usable.length) return { ok: false, error: 'ไม่มีของที่ย่อยได้ (ของที่ล็อกไว้จะไม่ถูกย่อย)' };
-      for (const itemId of usable) {
-        // eslint-disable-next-line no-await-in-loop
-        ok = (await HUB.sendInput(id, { type: 'salvage', itemId })) || ok;
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.sleep(250);
-      }
-      break;
-    }
-    case 'chat': {
-      const text = String(arg.text || '').trim().slice(0, 200);
-      const channel = ['world', 'map', 'party', 'guild', 'whisper', 'trade'].includes(arg.channel) ? arg.channel : 'map';
-      if (!text) return { ok: false, error: 'ไม่มีข้อความ' };
-      const msg = { type: 'chat', text, channel };
-      if (channel === 'whisper') { if (!arg.to) return { ok: false, error: 'ใส่ชื่อคนที่จะกระซิบ' }; msg.to = String(arg.to).trim(); }
-      ok = await HUB.sendInput(id, msg);
-      break;
-    }
-    default: return { ok: false, error: 'ไม่รู้จักคำสั่ง' };
-  }
-  HUB.log.info(`acc ${id}: command ${cmd}${cmd === 'chat' ? ` (${arg.channel}, ${String(arg.text || '').length} chars)` : arg.itemId ? ` ${arg.itemId}` : ''} -> ${ok ? 'sent' : 'not sent'}`);
-  return ok ? { ok: true } : { ok: false, error: 'เกมยังไม่พร้อม ลองใหม่อีกครั้ง' };
-};
+require('./features/commands');
 
 // ---------- auto reconnect ----------
 // The game reconnects ordinary drops by itself. On top of that BinderDash reloads the game
@@ -853,7 +645,7 @@ function classifyVeil(veil) {
 
 function scheduleReload(id, reason, baseDelayMs) {
   const s = HUB.store.data.settings;
-  const g = rt(id);
+  const g = HUB.rt(id);
   if (!s.autoReconnect || !g.win || g.win.isDestroyed()) return;
   if (g.rc && g.rc.pending) return; // one at a time
   const now = Date.now();
@@ -897,7 +689,7 @@ function reconnectTick() {
 
 // What the game page shows: disconnect boxes, sign-in screen. Called with every snapshot.
 function watchScreen(id, snap) {
-  const g = rt(id);
+  const g = HUB.rt(id);
   const scr = (snap && snap.screen) || {};
   const kind = classifyVeil(scr.veil);
   if (kind !== g.veil) { if (kind || g.veil) HUB.log.info(`acc ${id}: game screen ${g.veil || '-'} -> ${kind || '-'}`); g.veil = kind; }
@@ -959,94 +751,16 @@ function onWorldEvent(ev) {
   }
   HUB.pushState();
 }
-function eventsView() {
+HUB.eventsView = HUB.eventsView = function eventsView() {
   const now = Date.now();
   return [...worldEvents.values()].flatMap((e) => [
     e.active && (!e.active.endsAt || e.active.endsAt > now) ? { name: e.active.name, perks: e.active.perks, endsInMs: e.active.endsAt ? e.active.endsAt - now : 0, live: true } : null,
     e.next && e.next.startsAt > now ? { name: e.next.name, perks: [], startsInMs: e.next.startsAt - now, live: false } : null,
   ]).filter(Boolean);
-}
+};;
 
 // gear that may go on the market: not locked, not bound
-// ---------- central-market listings that take a while to appear ----------
-const LISTING_DELAY_MS = 5 * 60 * 1000;
-function addPending(g, itemId, qty, unit, confirmed) {
-  g.pending = g.pending.filter((p) => p.itemId !== itemId);
-  g.pending.push({ itemId, name: pretty(HUB.baseOf(itemId)), rarity: rarityOf(itemId), qty, unit, at: Date.now(), confirmed, state: 'waiting' });
-}
-function onMyListings(id, list) {
-  const g = rt(id);
-  g.myListings = { list, at: Date.now() };
-  for (const p of g.pending) {
-    if (list.some((m) => m.itemId === p.itemId)) p.state = 'listed';
-    else if (Date.now() - p.at > LISTING_DELAY_MS + 60 * 1000 && p.state === 'waiting') p.state = p.confirmed || !(g.adapter.inv && g.adapter.inv.get(p.itemId)) ? 'notSeen' : 'failed';
-  }
-}
-// once the market's delay is over, look at "my listings" for each account with listings waiting
-let marketTickN = 0;
-function marketTick() {
-  marketTickN++;
-  for (const [id, g] of HUB.games) {
-    if (g.status !== 'online') continue;
-    g.pending = g.pending.filter((p) => Date.now() - p.at < 60 * 60 * 1000 && !(p.state === 'listed' && Date.now() - p.at > 15 * 60 * 1000));
-    const due = g.pending.some((p) => p.state === 'waiting' && Date.now() - p.at > LISTING_DELAY_MS);
-    if (due && (!g.myListings || Date.now() - g.myListings.at > 50 * 1000)) HUB.sendInput(id, { ...MARKET_FILTER, type: 'marketQuery', sort: 'def', off: 0 });
-    // price gear pieces the dashboard has no market price for yet (a few per minute, like browsing)
-    if (marketTickN % 4 === 0) {
-      const ip = g.data.itemPrices;
-      const todo = tradableGear(g).filter((x) => !ip.has(x) || Date.now() - ip.get(x).at > 30 * 60 * 1000).slice(0, 3);
-      todo.forEach((x, i) => setTimeout(() => HUB.requestPrice(id, x), i * 500));
-    }
-  }
-}
-
-function tradableGear(g) {
-  return g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && !g.adapter.bound.has(x)) : [];
-}
-
-// gear pieces that may be salvaged: unlocked, of the chosen grades (default Normal + Magic)
-function salvageable(g, rarities, opt) {
-  const want = new Set(Array.isArray(rarities) && rarities.length ? rarities : ['normal', 'magic']);
-  const ids = g.adapter.inv ? [...g.adapter.inv.keys()].filter((x) => x.includes('#') && !g.adapter.locks.has(x) && want.has(rarityOf(x))) : [];
-  return opt && opt.byPrice ? ids.filter((x) => salvageVerdict(g, x, opt).salvage) : ids;
-}
-// salvage only what the central market says is worth little: no price, or under the limit, and not a steady seller
-function salvageOpts(o) {
-  const s = HUB.store.data.settings;
-  return { byPrice: o && o.byPrice != null ? !!o.byPrice : s.salvageByPrice !== false, maxPrice: Number((o && o.maxPrice) ?? s.salvageMaxPrice ?? 1000000), keepVol: Number((o && o.keepVol) ?? s.salvageKeepVol ?? 3), unknownOk: o && o.unknownOk != null ? !!o.unknownOk : !!s.salvageUnknownOk };
-}
-function salvageVerdict(g, id, opt) {
-  if (g.adapter.bound.has(id)) return { salvage: true, why: 'ผูกตัว ขายในตลาดไม่ได้' };
-  const p = g.data.itemPrices.get(id);
-  if (!p) return opt.unknownOk ? { salvage: true, why: 'ตลาดไม่ตอบราคา (ตั้งให้ถือว่าไม่มีราคา)' } : { salvage: false, why: 'ตลาดไม่ตอบราคา (เก็บไว้ก่อน)' };
-  if (p.vol7 >= opt.keepVol && opt.keepVol > 0) return { salvage: false, why: `ขายออกบ่อย ${p.vol7} ชิ้นใน 7 วัน`, price: p.price, vol7: p.vol7 };
-  if (p.price && p.price >= opt.maxPrice) return { salvage: false, why: `ราคาตลาด ${Math.round(p.price).toLocaleString()} G`, price: p.price, vol7: p.vol7 };
-  return { salvage: true, why: p.price ? `ราคาต่ำ ${Math.round(p.price).toLocaleString()} G` : 'ไม่มีราคาในตลาด', price: p.price || 0, vol7: p.vol7 || 0 };
-}
-// ask the market about gear in the bag that has no recent price, then wait for the answers
-async function priceGear(id, ids) {
-  const g = rt(id);
-  const todo = ids.filter((x) => !g.adapter.bound.has(x) && (!g.data.itemPrices.has(x) || Date.now() - g.data.itemPrices.get(x).at > 30 * 60 * 1000));
-  // ask, wait, and ask again for the pieces the market did not answer (it can skip quick repeated asks)
-  const t0 = Date.now();
-  let missing = todo;
-  for (let round = 0; round < 3 && missing.length; round++) {
-    for (const x of missing) { await HUB.requestPrice(id, x, true); await HUB.sleep(round ? 800 : 450); } // eslint-disable-line no-await-in-loop
-    await HUB.sleep(2500); // eslint-disable-line no-await-in-loop
-    missing = missing.filter((x) => !g.data.itemPrices.has(x) || g.data.itemPrices.get(x).at < t0 - 1000);
-  }
-  HUB.selftest.count(id, 'priceAsked', todo.length); HUB.selftest.count(id, 'priceMissed', missing.length);
-  if (missing.length) HUB.log.info(`acc ${id}: market gave no price for ${missing.length} piece(s) after 3 tries`);
-  return todo.length;
-}
-
-// AUTO / sleep straight from the game page: the once-a-second snapshot can be a beat behind
-HUB.liveUi = async function liveUi(id) {
-  const g = rt(id);
-  try {
-    return await g.win.webContents.executeJavaScript(`({ auto: document.body.classList.contains('auto-on'), sleeping: document.body.classList.contains('sleeping') })`, true);
-  } catch { return { auto: g.data.stats.auto, sleeping: g.data.stats.sleeping }; }
-};
+require('./features/market-listings');
 
 // ---------- every account at once (only what the player pressed) ----------
 async function commandAll(cmd, arg) {
@@ -1066,9 +780,9 @@ async function commandAll(cmd, arg) {
       r = await HUB.gameCommand(id, cmd, arg);
     } else if (cmd === 'salvageAll') {
       // unlocked gear of the chosen grades in this account's bag (the player confirmed the counts first)
-      const opt = salvageOpts(arg);
-      if (opt.byPrice) await priceGear(id, salvageable(g, arg.rarities));
-      const ids = salvageable(g, arg.rarities, opt);
+      const opt = HUB.salvageOpts(arg);
+      if (opt.byPrice) await HUB.priceGear(id, HUB.salvageable(g, arg.rarities));
+      const ids = HUB.salvageable(g, arg.rarities, opt);
       r = ids.length ? await HUB.gameCommand(id, 'salvage', { itemIds: ids }) : { ok: true, skipped: true, error: 'ไม่มีอุปกรณ์ให้ย่อย' };
       if (r.ok && ids.length) r.count = ids.length;
     } else {
@@ -1088,118 +802,7 @@ function applyStartWithWindows() {
   try { app.setLoginItemSettings({ openAtLogin: !!HUB.store.data.settings.startWithWindows }); } catch (err) { HUB.log.warn('login item:', err.message); }
 }
 
-// ---------- remote control from Telegram (owner's chat only, off by default) ----------
-const remote = new telegram.Remote({
-  onCommand: (text) => remoteCommand(text),
-  onIgnored: (m) => HUB.log.warn(`telegram: ignored a message from another chat (${m.chat && m.chat.id})`),
-  onError: (err) => HUB.log.once('tg-remote', 60000, 'warn', 'telegram remote:', err.message || err),
-});
-function syncRemote() {
-  const s = HUB.store.data.settings;
-  if (s.telegramRemote && s.telegram.token && s.telegram.chatId) { remote.start(s.telegram.token, s.telegram.chatId); HUB.log.info('telegram remote: on'); }
-  else if (remote.running) { remote.stop(); HUB.log.info('telegram remote: off'); }
-}
-
-const pctText = (cur, max) => (max ? `${Math.round((cur / max) * 100)}%` : '-');
-const shortNum = (n) => (typeof n !== 'number' ? '-' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n)));
-const mins = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`; };
-
-// "all" or account numbers as shown in the Dashboard list (1 = top)
-function pickAccounts(arg) {
-  const list = HUB.store.data.accounts;
-  if (!arg || arg === 'all' || arg === 'ทั้งหมด') return list.map((a) => a.id);
-  return String(arg).split(/[ ,]+/).map(Number).filter((n) => n >= 1 && n <= list.length).map((n) => list[n - 1].id);
-}
-
-async function remoteCommand(text) {
-  const [cmdRaw, ...rest] = text.split(/\s+/);
-  const cmd = cmdRaw.toLowerCase().replace(/@.*$/, '');
-  const arg = rest.join(' ');
-  HUB.log.info(`telegram command: ${cmd}${arg ? ' ' + arg.slice(0, 20) : ''}`);
-  const list = HUB.store.data.accounts;
-  switch (cmd) {
-    case '/start':
-    case '/help':
-      return [
-        'BinderDash รีโมต 🎮',
-        '/status — สถานะทุกบัญชี',
-        '/auto on|off [all|1 2 …] — เปิด/ปิด AUTO',
-        '/sleep [all|1 2 …] — พักจอ',
-        '/daily — ของรอรับ (Pass / จดหมาย)',
-        '/bosses — บอสที่เกิดแล้ว / ใกล้เกิด',
-        '/events — อีเวนต์ที่กำลังมี',
-        'เลขบัญชี = ลำดับในรายการบน Dashboard',
-      ].join('\n');
-    case '/status': {
-      const now = Date.now();
-      const lines = list.map((a, i) => {
-        const g = rt(a.id);
-        const s = g.data.stats;
-        const r = g.data.rates(now);
-        if (!g.win || g.win.isDestroyed()) return `${i + 1}. ${a.name} — ปิดอยู่`;
-        if (!g.inGame) return `${i + 1}. ${a.name} — ${g.status === 'maintenance' ? 'ปิดปรับปรุง' : 'ยังไม่เข้าเกม'}`;
-        return `${i + 1}. ${s.name || a.name} Lv${s.level ?? '?'} ${s.auto ? '▶AUTO' : '■หยุด'}${s.dead ? ' 💀ตาย' : ''}`
-          + `\n   HP ${pctText(s.hp, s.maxHp)} · EXP ${typeof s.expPct === 'number' ? s.expPct.toFixed(1) + '%' : '-'} · ${shortNum(r.expPerHour)} EXP/ชม. · รายได้ ${shortNum(r.incomePerHour)}/ชม.`
-          + (g.alerts.size ? `\n   ⚠ ${[...g.alerts].map((k) => k.replace(/:.*/, '')).join(', ')}` : '');
-      });
-      const online = Math.max(0, ...[...HUB.games.values()].map((g) => g.data.net.online || 0));
-      return `📊 สถานะ${online ? ` · คนในเซิร์ฟ ${online}` : ''}\n${lines.join('\n') || 'ยังไม่มีบัญชี'}`;
-    }
-    case '/auto':
-    case '/sleep': {
-      let target = arg;
-      let want = null;
-      if (cmd === '/auto') {
-        const m = /^(on|off|เปิด|ปิด)\b\s*(.*)$/i.exec(arg);
-        if (!m) return 'ใช้แบบนี้: /auto on หรือ /auto off (เติมเลขบัญชีได้ เช่น /auto off 2 3)';
-        want = /^(on|เปิด)$/i.test(m[1]);
-        target = m[2];
-      }
-      const ids = pickAccounts(target);
-      const out = [];
-      for (const id of ids) {
-        const g = rt(id);
-        const name = (g.data.stats.name || HUB.account(id).name);
-        if (!g.win || g.win.isDestroyed() || !g.inGame) { out.push(`– ${name}: ไม่ได้อยู่ในเกม`); continue; }
-        // eslint-disable-next-line no-await-in-loop
-        const ui = await HUB.liveUi(id);
-        if (cmd === '/auto' && ui.auto === want) { out.push(`✔ ${name}: AUTO ${want ? 'เปิด' : 'ปิด'}อยู่แล้ว`); continue; }
-        if (cmd === '/sleep' && ui.sleeping) { out.push(`✔ ${name}: พักจออยู่แล้ว`); continue; }
-        // eslint-disable-next-line no-await-in-loop
-        const r = await HUB.gameCommand(id, cmd === '/auto' ? 'auto' : 'sleep', {});
-        out.push(`${r.ok ? '✔' : '✖'} ${name}${r.ok ? (cmd === '/auto' ? `: AUTO ${want ? 'เปิด' : 'ปิด'}แล้ว` : ': พักจอแล้ว') : `: ${r.error}`}`);
-        // eslint-disable-next-line no-await-in-loop
-        await HUB.sleep(300);
-      }
-      return out.join('\n') || 'ไม่มีบัญชีที่เลือก';
-    }
-    case '/daily': {
-      const lines = list.map((a, i) => {
-        const g = rt(a.id);
-        const w = g.data.rewardsWaiting();
-        const c = g.data.checklist;
-        if (!c.pass && !c.mail) return `${i + 1}. ${a.name} — ยังไม่มีข้อมูล`;
-        const done = c.pass ? c.pass.daily.filter((x) => x.claimed).length : 0;
-        return `${i + 1}. ${g.data.stats.name || a.name} — Pass ${done}/${c.pass ? c.pass.daily.length : 4}${w.pass ? ` · 🎁 รอกดรับ ${w.pass}` : ''}${w.mail ? ` · ✉ จดหมายมีของ ${w.mail}` : ''}`;
-      });
-      return `📋 รายวัน\n${lines.join('\n')}`;
-    }
-    case '/bosses': {
-      const b = HUB.bossView();
-      const up = b.field.filter((f) => f.up).map((f) => `♛ ${f.name} (${HUB.mapName(f.map)}) — เกิดแล้ว`);
-      const soon = b.field.filter((f) => !f.up && f.inMs < 30 * 60000).map((f) => `♛ ${f.name} (${HUB.mapName(f.map)}) — อีก ${mins(f.inMs)}`);
-      const world = b.world.map((w) => `🌋 ${w.name} — ${w.state === 'live' ? `กำลังสู้ ${w.fighters} คน` : `อีก ${mins(w.inMs)}`}`);
-      const all = [...world, ...up, ...soon];
-      return all.length ? `บอส\n${all.join('\n')}` : 'ยังไม่มีข้อมูลบอส (ต้องมีบัญชีที่อยู่ในเกม)';
-    }
-    case '/events': {
-      const ev = eventsView();
-      return ev.length ? ev.map((e) => (e.live ? `🔥 ${e.name}${e.perks.length ? ' · ' + e.perks.join(' · ') : ''}${e.endsInMs ? ` · เหลือ ${mins(e.endsInMs)}` : ''}` : `⏳ ${e.name} · เริ่มในอีก ${mins(e.startsInMs)}`)).join('\n') : 'ตอนนี้ไม่มีอีเวนต์';
-    }
-    default:
-      return 'ไม่รู้จักคำสั่งนี้ พิมพ์ /help ดูคำสั่งทั้งหมด';
-  }
-}
+require('./features/telegram-remote');
 
 // ---------- bosses (the same for every account on the server) ----------
 HUB.bosses = { field: new Map(), world: new Map(), sent: new Set(), queriedAt: 0 };
@@ -1249,7 +852,7 @@ function makeReport() {
     '',
     '== บัญชี ==',
     ...HUB.store.data.accounts.map((a) => {
-      const g = rt(a.id);
+      const g = HUB.rt(a.id);
       const h = g.inGame ? g.adapter.health() : null;
       return `#${a.id} status=${g.status} alerts=[${[...g.alerts].map((k) => k.replace(/:.*/, ':…')).join(',')}] mem=${g.memoryMB || '-'}MB`
         + (h ? ` build=${h.build || '?'} ok=${h.ok} frames=${h.frames}${h.problems.length ? ` problems=${h.problems.join(' | ')}` : ''}` : '');
@@ -1272,7 +875,7 @@ function makeReport() {
 function demoTick() {
   const on = HUB.store.data.settings.demo;
   HUB.store.data.accounts.forEach((a, i) => {
-    const g = rt(a.id);
+    const g = HUB.rt(a.id);
     const open = g.win && !g.win.isDestroyed();
     if (on && !open) {
       if (!g.demo) { g.demo = new DemoFeed(i); g.data.reset(); }
@@ -1304,14 +907,14 @@ function tick() {
     const low = new Set();
     // potions: what is on the game's hotbar (belt), counted over every quality grade
     HUB.readBelt(id, g);
-    const potionIds = new Set(POTIONS.map((p) => p.id));
+    const potionIds = new Set(HUB.POTIONS.map((p) => p.id));
     const belt = (g.belt || []).filter((b) => potionIds.has(b));
     const watch = belt.length ? belt : [...new Set([...(g.adapter.inv ? g.adapter.inv.keys() : [])].map(HUB.baseOf).filter((b) => potionIds.has(b)))];
     // a fixed count, not a forecast: steady whatever the pace (every quality grade counted, like the hotbar)
     const below = Math.max(1, Number((s.autoBuy || {}).below) || 50);
     for (const pid of watch) {
       let qty = 0; if (g.adapter.inv) for (const [k, q] of g.adapter.inv) if (HUB.baseOf(k) === pid) qty += q || 0;
-      const p = POTIONS.find((x) => x.id === pid);
+      const p = HUB.POTIONS.find((x) => x.id === pid);
       const key = 'potion:' + pid;
       if (qty <= below) {
         low.add(key);
@@ -1505,8 +1108,8 @@ function registerIpc() {
   handle('detail', (id) => {
     if (!HUB.account(id)) return null;
     watchedId = id;
-    const g = rt(id);
-    return { ...g.data.detail(), pending: g.pending.map((p) => ({ ...p, left: Math.max(0, p.at + LISTING_DELAY_MS - Date.now()) })) };
+    const g = HUB.rt(id);
+    return { ...g.data.detail(), pending: g.pending.map((p) => ({ ...p, left: Math.max(0, p.at + HUB.LISTING_DELAY_MS - Date.now()) })) };
   });
   handle('open', (id) => {
     const nonPremiumWarning = HUB.openGames().length === 3;
@@ -1514,7 +1117,7 @@ function registerIpc() {
     return { warnFreeLimit: nonPremiumWarning };
   });
   handle('show', (id) => showGame(id));
-  handle('reload', (id) => { const g = rt(id); if (g.win && !g.win.isDestroyed()) g.win.webContents.reload(); });
+  handle('reload', (id) => { const g = HUB.rt(id); if (g.win && !g.win.isDestroyed()) g.win.webContents.reload(); });
   handle('toggle-all', () => toggleAllGames());
   // the Dashboard's sleep view: hide the game windows that are showing (they keep playing; a hidden window
   // draws nothing, so the PC runs cooler and the other games smoother), show them again on the way out
@@ -1547,7 +1150,7 @@ function registerIpc() {
     if (!a || typeof name !== 'string') return;
     a.name = name.trim().slice(0, 40) || a.name;
     HUB.store.save();
-    const g = rt(id);
+    const g = HUB.rt(id);
     if (g.win && !g.win.isDestroyed()) g.win.setTitle(windowTitle(id));
     HUB.pushState();
   });
@@ -1591,19 +1194,19 @@ function registerIpc() {
     if (patch.debugCapture !== undefined) s.debugCapture = !!patch.debugCapture;
     if (patch.demo !== undefined) s.demo = !!patch.demo;
     HUB.store.save();
-    syncRemote();
+    HUB.syncRemote();
     HUB.pushState();
   });
   handle('telegram-connect', async (token) => {
     token = String(token || '').trim();
     if (!/^\d+:[\w-]{30,}$/.test(token)) return { ok: false, error: 'KEY ไม่ถูกรูปแบบ' };
     try {
-      const chatId = await telegram.findChatId(token);
+      const chatId = await HUB.telegram.findChatId(token);
       if (!chatId) return { ok: false, error: 'ยังไม่เจอแชท · เปิดแชทกับบอทใน Telegram แล้วกด START ก่อน แล้วกดเชื่อมต่ออีกครั้ง' };
       HUB.store.data.settings.telegram = { token, chatId };
       HUB.store.save();
-      syncRemote();
-      await telegram.send(token, chatId, 'BinderDash เชื่อมต่อแล้ว 👋');
+      HUB.syncRemote();
+      await HUB.telegram.send(token, chatId, 'BinderDash เชื่อมต่อแล้ว 👋');
       HUB.pushState();
       return { ok: true };
     } catch (err) {
@@ -1612,7 +1215,7 @@ function registerIpc() {
   });
   handle('telegram-disconnect', () => {
     HUB.store.data.settings.telegram = { token: '', chatId: '' };
-    syncRemote();
+    HUB.syncRemote();
     HUB.store.save();
     HUB.pushState();
   });
@@ -1620,7 +1223,7 @@ function registerIpc() {
     const first = HUB.store.data.accounts[0];
     const s = HUB.store.data.settings;
     if (Notification.isSupported()) new Notification({ title: 'BinderDash', body: 'ทดสอบการแจ้งเตือน', silent: !s.notify.sound }).show();
-    telegram.send(s.telegram.token, s.telegram.chatId, 'BinderDash: ทดสอบการแจ้งเตือน').catch(() => {});
+    HUB.telegram.send(s.telegram.token, s.telegram.chatId, 'BinderDash: ทดสอบการแจ้งเตือน').catch(() => {});
     return !!first;
   });
   handle('game-cmd', (id, cmd, arg) => HUB.gameCommand(id, cmd, arg || {}));
@@ -1705,7 +1308,7 @@ function registerIpc() {
         if (!g.inGame || g.demo || !g.adapter.inv) continue;
         for (const [itemId, qty] of g.adapter.inv) {
           if (!qty || g.adapter.locks.has(itemId) || g.adapter.bound.has(itemId)) continue;
-          const key = itemId.includes('#') ? `${HUB.baseOf(itemId)}|${rarityOf(itemId)}` : HUB.baseOf(itemId);
+          const key = itemId.includes('#') ? `${HUB.baseOf(itemId)}|${HUB.rarityOf(itemId)}` : HUB.baseOf(itemId);
           if (key === want || (!itemId.includes('#') && HUB.baseOf(itemId) === w.base && !w.itemId.includes('|'))) list.push({ acc: id, name: g.data.stats.name || (HUB.account(id) || {}).name, itemId, qty });
         }
       }
@@ -1778,20 +1381,20 @@ function registerIpc() {
   });
   handle('open-selftest', () => { const d = HUB.path.join(HUB.log.dir(), 'selftest'); HUB.fs.mkdirSync(d, { recursive: true }); return shell.openPath(d); });
   handle('salvage-preview', async (rarities, o) => {
-    const opt = salvageOpts(o);
+    const opt = HUB.salvageOpts(o);
     const list = HUB.openGames().filter(([, g]) => g.inGame && !g.demo);
-    if (opt.byPrice) await Promise.all(list.map(([id, g]) => priceGear(id, salvageable(g, rarities))));
-    return list.map(([id, g]) => { const all = salvageable(g, rarities); const ok = opt.byPrice ? salvageable(g, rarities, opt) : all; return { id, name: g.data.stats.name || HUB.account(id).name, count: ok.length, kept: all.length - ok.length }; });
+    if (opt.byPrice) await Promise.all(list.map(([id, g]) => HUB.priceGear(id, HUB.salvageable(g, rarities))));
+    return list.map(([id, g]) => { const all = HUB.salvageable(g, rarities); const ok = opt.byPrice ? HUB.salvageable(g, rarities, opt) : all; return { id, name: g.data.stats.name || HUB.account(id).name, count: ok.length, kept: all.length - ok.length }; });
   });
   // one account: every unlocked gear piece with its market numbers and the verdict
   handle('salvage-verdicts', async (id, o) => {
     const g = HUB.games.get(id); if (!g || !g.inGame) return null;
-    const opt = salvageOpts(o);
-    const all = salvageable(g, ['normal', 'magic', 'rare', 'epic']);
-    await priceGear(id, all);
-    return { opt, items: all.map((x) => ({ id: x, ...salvageVerdict(g, x, opt) })) };
+    const opt = HUB.salvageOpts(o);
+    const all = HUB.salvageable(g, ['normal', 'magic', 'rare', 'epic']);
+    await HUB.priceGear(id, all);
+    return { opt, items: all.map((x) => ({ id: x, ...HUB.salvageVerdict(g, x, opt) })) };
   });
-  handle('potions', () => POTIONS);
+  handle('potions', () => HUB.POTIONS);
   handle('item-watch', (name, limit) => {
     const w = HUB.store.data.settings.itemWatch;
     const n = Number(limit);
@@ -1890,7 +1493,7 @@ app.whenReady().then(() => {
     ['boss fight timer', HUB.fightTick, 5000],
     ['alerts, idle, RAM', tick, 15000],
     ['boss clocks', HUB.bossTick, 15000],
-    ['market listings', marketTick, 15000],
+    ['market listings', HUB.marketTick, 15000],
     ['respawn in place', HUB.autoRespawnTick, 15000],
     ['farm: ledger, stuck AUTO, way back, finder', HUB.farmTick, 15000],
     ['bounties', HUB.bountyTick, 20000],
@@ -1911,5 +1514,5 @@ app.whenReady().then(() => {
     setInterval(run, every);
   }
   applyStartWithWindows();
-  syncRemote();
+  HUB.syncRemote();
 });
