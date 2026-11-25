@@ -21,7 +21,7 @@ const WARP_CONFIRM_JS = `(() => { const box = document.getElementById('buyconfir
   b.click(); return { box: true, warp: true, free, pressed: true }; })()`;
 HUB.answerWarpBox = async function answerWarpBox(id, g) {
   for (let i = 0; i < 8; i++) { // the box comes after the server answers (a moment)
-    let r; try { r = await g.win.webContents.executeJavaScript(WARP_CONFIRM_JS, true); } catch { r = null; } // eslint-disable-line no-await-in-loop
+    let r = await HUB.pageRun(g, WARP_CONFIRM_JS, 'WARP_CONFIRM_JS'); // eslint-disable-line no-await-in-loop
     if (r && r.pressed) { HUB.log.info(`acc ${id}: travel -> ${r.free ? 'warp (free)' : 'walk (warp would cost Gold)'}`); return r; }
     await HUB.sleep(500); // eslint-disable-line no-await-in-loop
   }
@@ -56,7 +56,7 @@ async function bountyFilterOn(id, g, map, name) {
 async function bountyFilterOff(id, g) {
   const f = g.mobFilter || (HUB.store.data.mobFilter || {})[id];
   if (!f || !f.names || !f.names.length || HUB.mapOf(g) !== f.map || !g.win || g.win.isDestroyed()) return false;
-  let r; try { r = await g.win.webContents.executeJavaScript(MOB_FILTER_JS('restore', f.names), true); } catch { r = null; }
+  let r = await HUB.pageRun(g, MOB_FILTER_JS('restore', f.names), 'MOB_FILTER_JS');
   if (r && r.ok) { g.mobFilter = null; const all = HUB.store.data.mobFilter || {}; delete all[id]; HUB.store.save(); HUB.log.info(`acc ${id}: AUTO targets back as they were (${r.changed.length} kind(s) on again)`); return true; }
   return false;
 }
@@ -166,7 +166,7 @@ async function bountyStep(id) {
       { const prev = await HUB.setFarmRange(g, 0); if (prev != null && prev !== 0 && B.prevFarm == null) B.prevFarm = prev; } // whole map while on a bounty
       if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
       if (HUB.store.data.settings.bountyOnlyTarget !== false) await bountyFilterOn(id, g, cur.map, cur.name); // AUTO hits only the bounty monster
-      let spot = null; try { spot = await g.win.webContents.executeJavaScript(MOB_SPOT_JS(type), true); } catch { spot = null; }
+      let spot = await HUB.pageRun(g, MOB_SPOT_JS(type), 'MOB_SPOT_JS');
       if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // the settings window can pause it: make sure
       B.phase = 'hunt';
       HUB.log.info(`acc ${id}: bounty hunting ${cur.name} at ${cur.map}${spot && spot.n ? '' : ' (none in sight: AUTO here)'}${g.bountyArrivedAt ? ` · AUTO ${((Date.now() - g.bountyArrivedAt) / 1000).toFixed(1)} s after arriving` : ''}`); g.bountyArrivedAt = 0;

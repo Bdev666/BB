@@ -50,7 +50,7 @@ HUB.backupRespawn = function backupRespawn(id, delay = 150) {
     g.respawnPending = false;
     if (!g.win || g.win.isDestroyed()) return;
     if (g.respawnPausedUntil && Date.now() < g.respawnPausedUntil) return; // death loop pause: let it go to town
-    let r; try { r = await g.win.webContents.executeJavaScript(RESPAWN_HERE_JS, true); } catch { r = null; }
+    let r = await HUB.pageRun(g, RESPAWN_HERE_JS, 'RESPAWN_HERE_JS');
     if (!r) { g.respawnTries = (g.respawnTries || 0) + 1; if (g.respawnTries < 40) HUB.backupRespawn(id, 300); return; } // page busy: look again, do not give up
     if (r.stale) { HUB.log.info(`acc ${id}: death screen left over while alive -> closed it`); HUB.selftest.count(id, 'staleDeathScreen'); if (g.autoAtDeath || g.bossTrip) setTimeout(async () => { if (!(await HUB.liveUi(id)).auto) HUB.gameCommand(id, 'auto', {}); }, 800); }
     if (!r.dead) { if (g.respawnTries) HUB.log.info(`acc ${id}: up again after ${((Date.now() - (g.deadSince || g.lastDeathAt || Date.now())) / 1000).toFixed(1)} s`); g.respawnTries = 0; return; } // up already

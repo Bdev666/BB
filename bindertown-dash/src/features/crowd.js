@@ -15,7 +15,7 @@ async function crowdCheck(id, g) {
   if (!s.crowdSwitch || !g.inGame || g.demo || g.status !== 'online' || !g.win || g.win.isDestroyed() || g.crowdBusy) return;
   if (HUB.driverOf(g)) { g.crowdSince = 0; g.crowdHist = []; return; } // only while the character just farms
   if (!(await HUB.liveUi(id)).auto) { g.crowdSince = 0; g.crowdHist = []; return; } // only while AUTO farms
-  let c; try { c = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { c = null; }
+  let c = await HUB.pageRun(g, CROWD_JS, 'CROWD_JS');
   if (!c || !c.ch || c.ch === PVP_CH) { g.crowdSince = 0; g.crowdHist = []; return; }
   const need = Math.max(1, Number(s.crowdPlayers) || 3);
   // most of the last N minutes, not every check: players walk in and out of the circle all the time, and one
@@ -46,7 +46,7 @@ async function crowdCheck(id, g) {
     await HUB.sendInput(id, { type: 'switchChannel', channel: best });
     // wait for the new channel, then walk back to the same spot and fight there again
     let now = null;
-    for (let i = 0; i < 40; i++) { await HUB.sleep(1000); try { now = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { now = null; } if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
+    for (let i = 0; i < 40; i++) { await HUB.sleep(1000); now = await HUB.pageRun(g, CROWD_JS, 'CROWD_JS'); if (now && now.ch === best && now.map === c.map) break; } // eslint-disable-line no-await-in-loop
     if (!now || now.ch !== best) {
       // not moved: try again in ~2 minutes, not 10 (a log: "did not change" at 12:39, the next try at 12:49, 3 players in the circle all that time)
       g.crowdMovedAt = Date.now() - 8 * 60000; g.crowdFails = (g.crowdFails || 0) + 1;
@@ -56,7 +56,7 @@ async function crowdCheck(id, g) {
     g.crowdFails = 0;
     if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // off while walking back (it would fight on the way)
     for (let i = 0; i < 15; i++) { // eslint-disable-line no-await-in-loop
-      let p; try { p = await g.win.webContents.executeJavaScript(CROWD_JS, true); } catch { p = null; } // eslint-disable-line no-await-in-loop
+      let p = await HUB.pageRun(g, CROWD_JS, 'CROWD_JS'); // eslint-disable-line no-await-in-loop
       if (!p || Math.hypot(p.x - c.x, p.y - c.y) <= 3) break;
       await HUB.sendInput(id, { type: 'moveTo', x: c.x, y: c.y }); // eslint-disable-line no-await-in-loop
       await HUB.sleep(2000); // eslint-disable-line no-await-in-loop

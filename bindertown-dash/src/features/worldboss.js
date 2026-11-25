@@ -61,20 +61,20 @@ HUB.walkToBossThenAuto = async function walkToBossThenAuto(id, kind, again = fal
   const type = HUB.WORLD_TYPES[kind] || '';
   let spot = null;
   if (again) { // got up again: only walk when it woke up out of AUTO's reach (16 tiles) of the boss
-    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; }
+    spot = await HUB.pageRun(g, BOSS_SPOT_JS(type), 'BOSS_SPOT_JS');
     if (!spot || spot.how !== 'boss' || spot.d <= 12) { if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); return; }
     HUB.log.info(`acc ${id}: world boss -> up again ${Math.round(spot.d)} tiles from the boss, walking back`);
   }
   if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // AUTO off while walking (it would stop to fight on the way)
   // in early (before it spawns): wait for the boss to show up, up to ~3 minutes
   for (let i = 0; i < (again ? 3 : 60); i++) {
-    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
+    spot = await HUB.pageRun(g, BOSS_SPOT_JS(type), 'BOSS_SPOT_JS'); // eslint-disable-line no-await-in-loop
     if (spot && spot.how === 'boss') break;
     if (i === 0) HUB.log.info(`acc ${id}: world boss not in sight yet -> waiting for it`);
     await HUB.sleep(3000); // eslint-disable-line no-await-in-loop
   }
   for (let i = 0; i < 15; i++) { // up to ~30 s
-    try { spot = await g.win.webContents.executeJavaScript(BOSS_SPOT_JS(type), true); } catch { spot = null; } // eslint-disable-line no-await-in-loop
+    spot = await HUB.pageRun(g, BOSS_SPOT_JS(type), 'BOSS_SPOT_JS'); // eslint-disable-line no-await-in-loop
     if (!spot || spot.none) { await HUB.sleep(2000); continue; } // eslint-disable-line no-await-in-loop
     if (spot.d <= 5) break;
     await HUB.sendInput(id, { type: 'moveTo', x: spot.x + (spot.how === 'boss' ? 2 : 0), y: spot.y }); // eslint-disable-line no-await-in-loop
