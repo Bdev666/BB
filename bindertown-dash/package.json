@@ -1,7 +1,7 @@
 {
   "name": "bindertown-dash",
   "productName": "BinderDash",
-  "version": "1.6.35",
+  "version": "1.6.36",
   "description": "Fan-made multi-account launcher and dashboard for Binder Town (unofficial)",
   "main": "src/main.js",
   "private": true,

@@ -48,25 +48,36 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
         await HUB.sleep(2500); // the short wait after a warp before the next one
       }
     }
-    // ask for the arena until it is in: right away, then every 5 s while the boss is up (a warp asked while the town was still
-    // loading, or a moment before the start, got lost and the next try came 30 s later: the accounts stood in town), and say
-    // what the game answered when it refused
+    // One ask, then wait for the game's answer (it either moves the account within ~10 s or says why not in a notice). Ask again
+    // only after a refusal, once the wait the game named has passed (a cooldown "N s" in its text), or when 12 s brought neither.
+    // Before the boss starts there is nothing to ask: wait for it to go live, then ask at once.
     let asked = 0; let saidAt = 0;
+    const isLive = () => (HUB.bosses.world.get(kind) || {}).state === 'live';
     const ask = async () => {
       const at = Date.now(); asked++;
       await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
       if (asked === 1) HUB.log.info(`acc ${o.id}: world boss -> asked the game to warp in, from ${HUB.mapOf(g)}`);
-      await HUB.sleep(1500);
-      const nt = g.lastNotice && g.lastNotice.at >= at ? g.lastNotice.text : '';
-      if (nt && Date.now() - saidAt > 20000) { saidAt = Date.now(); HUB.log.info(`acc ${o.id}: world boss warp (try ${asked}) -> the game said: ${nt}`); }
+      for (let k = 0; k < 24; k++) { // up to 12 s for the answer
+        await HUB.sleep(500); // eslint-disable-line no-await-in-loop
+        if (HUB.WORLD_ARENAS.has(HUB.mapOf(g)) || !g.bossTrip) return 0;
+        const nt = g.lastNotice && g.lastNotice.at >= at ? g.lastNotice.text : '';
+        if (nt) {
+          if (Date.now() - saidAt > 20000) { saidAt = Date.now(); HUB.log.info(`acc ${o.id}: world boss warp (ask ${asked}) -> the game said: ${nt}`); }
+          const m = /(\d+)\s*(?:วินาที|วิ|s\b)/i.exec(nt);
+          return m ? Math.min(60, Number(m[1]) + 1) : 4; // the wait it named, else a short one
+        }
+      }
+      return 0;
     };
-    const until = Date.now() + 4 * 60000; let lastAsk = 0;
+    const until = Date.now() + 4 * 60000; let pause = 0; let wasLive = isLive();
     while (Date.now() < until) {
       if (!g.bossTrip) return; // stopped meanwhile
       if (HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { HUB.log.info(`acc ${o.id}: world boss -> in the arena after ${asked} ask(s)`); await HUB.walkToBossThenAuto(o.id, kind); return; }
-      const live = (HUB.bosses.world.get(kind) || {}).state === 'live';
-      if (!g.data.stats.dead && (asked === 0 || (live && Date.now() - lastAsk >= 5000) || Date.now() - lastAsk >= 30000)) { lastAsk = Date.now(); await ask(); } // eslint-disable-line no-await-in-loop
-      await HUB.sleep(1000); // eslint-disable-line no-await-in-loop
+      const live = isLive();
+      if (live && !wasLive) pause = 0; // it just started: ask at once
+      wasLive = live;
+      if (!g.data.stats.dead && Date.now() >= pause && (asked === 0 || live)) pause = Date.now() + 1000 * (await ask()) ; // eslint-disable-line no-await-in-loop
+      await HUB.sleep(500); // eslint-disable-line no-await-in-loop
     }
     missed.push(o.name); g.bossTrip = null;
     HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 4 min (on ${HUB.mapOf(g) || '?'}, ${g.data.stats.dead ? 'DEAD' : 'alive'}, Lv ${g.data.stats.level || '?'}, status ${g.status}, asked ${asked} times)`);
