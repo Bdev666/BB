@@ -38,7 +38,8 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
       if (i && i % 15 === 0) await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
       await HUB.sleep(2000); // eslint-disable-line no-await-in-loop
     }
-    missed.push(o.name); g.bossTrip = null; HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 3 min`);
+    missed.push(o.name); g.bossTrip = null;
+    HUB.log.info(`acc ${o.id}: world boss -> not in the arena after 3 min (on ${HUB.mapOf(g) || '?'}, ${g.data.stats.dead ? 'DEAD' : 'alive'}, Lv ${g.data.stats.level || '?'}, status ${g.status}, asked ${1 + Math.floor(89 / 15)} times)`);
   })).then(() => { if (missed.length) HUB.notify(null, 'worldBoss', `🌋 เข้า World Boss ไม่ได้: ${missed.join(', ')} (เลเวลไม่ถึง / วาร์ปไม่สำเร็จใน 3 นาที)`); }).catch((e) => HUB.log.warn(`world boss go: ${e.message}`));
   return { ok: true, sent: out.length, accounts: out };
 };

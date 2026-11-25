@@ -110,7 +110,7 @@ class AccountData {
         }
         break;
       case 'miss': this.log('hit', `${ev.target} หลบ`, t); break;
-      case 'hurt': this.log('hurt', `โดน ${ev.from} ${fmt(ev.dmg)}`, t); break;
+      case 'hurt': this.lastHurtFrom = ev.from; this.log('hurt', `โดน ${ev.from} ${fmt(ev.dmg)}`, t); break;
       case 'kill':
         this.kills++;
         if (ev.exp > 0) this.expGain += Number(ev.exp); if (ev.job > 0) this.jobGain += Number(ev.job); // a level-up kill reads negative (the bar starts over)
@@ -171,7 +171,7 @@ class AccountData {
         this.log('loot', `🃏 ได้การ์ด ${ev.mob}${ev.level ? ` Lv ${ev.level}` : ''}`, t);
         break;
       case 'levelUp': this.levelUps++; break;
-      case 'death': if (!(this.lastDeathT && t - this.lastDeathT < 1500)) this.deaths++; this.lastDeathT = t; this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
+      case 'death': if (!(this.lastDeathT && t - this.lastDeathT < 1500)) this.deaths++; this.lastDeathT = t; this.lastDeath = { by: ev.by || this.lastHurtFrom || '', t }; this.log('hurt', `ตัวละครตาย${ev.by ? ' · โดย ' + ev.by : ''}`, t); break;
       case 'revive': this.log('other', 'ฟื้นแล้ว', t); break;
       case 'party': this.log('other', ev.text || `${ev.from} ชวน/ขอเข้าปาร์ตี้`, t); break;
       default: break;

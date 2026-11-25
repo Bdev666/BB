@@ -903,6 +903,19 @@ function watchScreen(id, snap) {
   }
 }
 
+// one line per online account every 30 minutes: where it is, what drives it, what it earns, how the page is (a log is read
+// afterwards by someone who was not there: this is the picture of each account at that time)
+function healthTick() {
+  const now = Date.now();
+  for (const [id, g] of HUB.games) {
+    if (!g.inGame || g.demo || g.status !== 'online') continue;
+    try {
+      const st = g.data.stats; const r = g.data.rates(now);
+      const f = HUB.farmSummary(id, st.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === HUB.mapOf(g));
+      HUB.log.info(`acc ${id}: health ${st.job || '?'} Lv${st.level || '?'} on ${HUB.mapOf(g) || '?'} · driver ${HUB.driverOf(g) || 'farm'} · kills ${Math.round(r.killsPerHour || 0)}/h · net ${f ? f.netHr : '-'} G/h · deaths ${f && f.deathsHr != null ? f.deathsHr : '-'}/h · dps ${Math.round(r.dpsNow || 0)} · page ${g.memoryMB || '-'} MB · ping ${(g.data.net && g.data.net.ping) || '-'} ms · alerts [${[...g.alerts].join(',')}]`);
+    } catch { /* a number missing: skip this account this time */ }
+  }
+}
 // ---------- logging of state changes (status, game build / read health) ----------
 function logChanges() {
   for (const [id, g] of HUB.games) {
@@ -916,7 +929,7 @@ function logChanges() {
     if (g.loggedHealth !== key && (h.build || !h.ok)) {
       g.loggedHealth = key;
       if (h.ok) HUB.log.info(`acc ${id}: game build ${h.build || '?'}${h.knownBuild ? '' : ' (not tested yet)'}, data reads fine`);
-      else HUB.log.warn(`acc ${id}: game build ${h.build || '?'} data problems: ${h.problems.join(' | ')}`);
+      else if (!g.healthWarnAt || Date.now() - g.healthWarnAt > 30 * 60000) { g.healthWarnAt = Date.now(); HUB.log.warn(`acc ${id}: game build ${h.build || '?'} data problems: ${h.problems.join(' | ')}`); }
     }
   }
 }
@@ -1353,6 +1366,7 @@ function tick() {
         setTimeout(() => { try { g.win.webContents.reload(); } catch { /* closed */ } }, 800);
         // back in the game: AUTO on again if it was on (the character is where it was: the server kept it there)
         // AUTO back on as soon as the game is up again: look every 4 s from 8 s on, 2 minutes at most
+        setTimeout(() => { try { updateMemory(); HUB.log.info(`acc ${id}: page memory after the restart: ${mb} -> ${g.memoryMB || '?'} MB`); } catch { /* closed */ } }, 20000);
         for (let t = 8000; t <= 120000; t += 4000) {
           setTimeout(async () => { try { if (g.autoBeforeReload && g.inGame && !(await HUB.liveUi(id)).auto) { g.autoBeforeReload = false; await HUB.gameCommand(id, 'auto', {}); HUB.log.info(`acc ${id}: after the RAM reload: AUTO on again`); } } catch { /* page still loading: the next look */ } }, t);
         }
@@ -1865,6 +1879,7 @@ app.whenReady().then(() => {
     ['crowded channel', HUB.crowdTick, 20000],
     ['save the farm ledger', HUB.farmSaveTick, 5 * 60000],
     ['stats line', () => HUB.selftest.statsTick(), 10 * 60000],
+    ['health line per account', healthTick, 30 * 60000, 5 * 60000],
     ['Build Lab calibration from history', HUB.calibFromHistory, 60 * 60000, 8000],
     ['Build Lab calibration from boss fights', HUB.calibFromBossFights, 60 * 60000, 90000],
   ];

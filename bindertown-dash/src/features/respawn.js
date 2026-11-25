@@ -58,7 +58,7 @@ HUB.backupRespawn = function backupRespawn(id, delay = 150) {
     if (!g.respawnTries || (g.respawnTries % 5 === 0 && !r.clicked)) { // at once, then again every ~1.5 s while still down
       await HUB.sendInput(id, { type: 'respawn', here: true });
       g.respawnSends = (g.respawnSends || 0) + 1;
-      if (!g.respawnTries) { HUB.selftest.count(id, 'respawnPress'); HUB.log.info(`acc ${id}: dead -> sent respawn here after ${since} s`); }
+      if (!g.respawnTries) { HUB.selftest.count(id, 'respawnPress'); HUB.log.info(`acc ${id}: dead on ${HUB.mapOf(g) || '?'}${g.data.lastDeath && g.data.lastDeath.by ? ` (last hit by ${g.data.lastDeath.by})` : ''} -> sent respawn here after ${since} s`); }
     }
     if (r.free) g.freeRespawnAt = Date.now();
     if (r.clicked && !g.respawnClicked) { g.respawnClicked = true; HUB.log.info(`acc ${id}: still dead -> pressed the respawn-here button${r.free ? ' (free)' : ''} after ${since} s`); }

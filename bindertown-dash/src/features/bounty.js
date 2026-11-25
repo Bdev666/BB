@@ -89,7 +89,7 @@ async function bountyClaimDone(id, list) {
   for (const b of list || []) {
     if (!b.id || b.claimed || b.prog < b.need) continue;
     HUB.farmDirty(g); await HUB.sendInput(id, { type: 'bountyClaim', id: b.id }); // eslint-disable-line no-await-in-loop
-    n++; HUB.log.info(`acc ${id}: bounty claimed ${b.id} (${b.name || b.map || ''})`);
+    n++; HUB.log.info(`acc ${id}: bounty claimed ${b.id} (${b.name || b.map || (g.bounty && g.bounty.cur && g.bounty.cur.name) || 'name not read'})`);
     await HUB.sleep(500); // eslint-disable-line no-await-in-loop
   }
   if (n) { if (g.bounty) g.bounty.claimedN = (g.bounty.claimedN || 0) + n; HUB.selftest.count(id, 'bountyClaims', n); await HUB.sendInput(id, { type: 'huntQuery' }); }
