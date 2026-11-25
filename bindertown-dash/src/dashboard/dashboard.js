@@ -1297,17 +1297,41 @@ async function openMarketSell(opt = {}) {
   }
 }
 
+// skill spam: which hotbar keys to press over and over, and how often
+function openSpam(a) {
+  const cur = a.spam || { on: false, slots: [], everyMs: 300 };
+  const picks = new Set(cur.slots || []);
+  const chips = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => {
+    const b = el('button', { class: 'ctl spam-key' + (picks.has(n) ? ' on' : ''), title: n === 9 ? 'ช่อง 9 = Ultimate ของคลาส 2' : `ปุ่ม ${n} บนแถบสกิล` }, n === 9 ? '9 (Ult)' : String(n));
+    b.onclick = () => { if (picks.has(n)) picks.delete(n); else picks.add(n); b.classList.toggle('on', picks.has(n)); };
+    return b;
+  });
+  const speed = el('select', {}, ...[[200, 'ถี่มาก (0.2 วิ)'], [300, 'ปกติ (0.3 วิ)'], [500, 'ช้า (0.5 วิ)'], [1000, 'ช้ามาก (1 วิ)']].map(([v, t]) => el('option', { value: String(v), selected: Number(cur.everyMs) === v ? '' : null }, t)));
+  const save = async (on) => { await dash.invoke('spam-set', a.id, { on, slots: [...picks], everyMs: +speed.value }); closeModal(); }; // the button on the account shows the new state
+  openModal(`⚡ สแปมสกิล · ${a.name}`, [
+    el('p', { class: 'hint' }, 'เลือกปุ่มบนแถบสกิลของเกมที่จะกดซ้ำๆ ให้ร่ายทันทีที่คูลดาวน์หมด (AUTO ของเกมยังเลือกเป้าและเดินเอง) · ปุ่มที่ไม่เลือก AUTO ใช้ตามปกติ'),
+    el('div', { class: 'ctl-row' }, ...chips),
+    el('label', {}, 'ความถี่ ', speed),
+    el('p', { class: 'hint' }, 'กดเฉพาะตอน AUTO เปิดและกำลังฟาร์ม/ตีบอส/ทำค่าหัว · หยุดเองตอนตาย พักจอ เดินทาง กลับจุดฟาร์ม หรือมีช่องพิมพ์แชทเปิดอยู่ · ตั้งต่อบัญชี จำไว้หลังปิดโปรแกรม'),
+    el('div', { class: 'ctl-row' },
+      el('button', { class: 'primary', onclick: () => save(true) }, picks.size || cur.on ? '✓ เปิด / บันทึก' : '✓ เปิด'),
+      el('button', { class: 'ctl', onclick: () => save(false) }, '■ ปิด')),
+  ]);
+}
+
 function renderControls(a) {
   const s = (detail && detail.stats) || {};
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver, a.spam]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '▶ การเล่น'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
       el('button', { class: 'ctl', title: 'โหมดพักจอของเกม: จอมืด ประหยัดเครื่อง AUTO ทำงานต่อ (กลับมาได้ที่หน้าเกม กดค้าง 3 วิ)', onclick: () => cmd('sleep') }, s.sleeping ? '☾ พักจออยู่' : '☾ พักจอ'),
       s.dead ? el('button', { class: 'ctl danger', title: 'กดปุ่มฟื้นในหน้าเกม', onclick: () => cmd('respawn') }, '✚ ฟื้นคืนชีพ') : null,
+      el('button', { class: 'ctl' + (a.spam && a.spam.on ? ' on' : ''), title: 'กดปุ่มสกิลที่เลือก (1–9) ซ้ำๆ ให้ร่ายทันทีที่พร้อม ระหว่างที่ AUTO ตีอยู่' + (a.spam && a.spam.on && a.spam.state ? ` · ตอนนี้: ${a.spam.state}` : ''), onclick: () => openSpam(a) },
+        a.spam && a.spam.on ? `⚡ สแปมสกิล ${a.spam.slots.join(' ')}${a.spam.state && a.spam.state !== 'กดอยู่' ? ' · ' + a.spam.state : ''}` : '⚡ สแปมสกิล'),
       a.autoRespawn ? el('span', { class: 'ctl-chip' + (a.autoRespawn.on ? ' on' : ''), title: a.autoRespawn.on ? 'ตัวเลือก "เกิดที่เดิมอัตโนมัติ" ของเกมเปิดอยู่ · ตายตอน AUTO ในแมพฟิลด์ = ลุกที่เดิม' : 'เปิดตัวเลือกของเกมไม่ได้' }, a.autoRespawn.on ? `↺ เกิดที่เดิม: เปิด${a.autoRespawn.count ? ` (${a.autoRespawn.count} ครั้ง)` : ''}` : (a.autoRespawn.why === 'premium' ? '↺ เกิดที่เดิม: ต้อง Premium' : '↺ เกิดที่เดิม: -')) : null,
       el('button', { class: 'ctl' + (a.bounty && a.bounty.on ? ' on' : ''), title: 'ทำค่าหัวรายวันเอง: เดินทางไปแมพของแต่ละใบ (ปุ่มเดินทางของเกม) ยืนข้างมอนแล้วเปิด AUTO ครบ 40 ตัวรับรางวัลแล้วไปใบต่อไป · ข้ามใบที่มอนเลเวลสูงกว่าตัวละคร', onclick: () => dash.invoke('bounty', a.id, !(a.bounty && a.bounty.on)) }, a.bounty && a.bounty.on ? '■ หยุดทำค่าหัว' : '📜 ทำค่าหัวอัตโนมัติ'),
       el('button', { class: 'ctl' + (a.finder && a.finder.on ? ' on' : ''), title: 'ลองฟาร์มจริงแมพที่น่าจะคุ้มสุด 3–4 แมพ (เลือกจาก Build Lab ตามเลเวลและความปลอดภัย) แมพละ 10 นาที แล้วพาไปฟาร์มแมพที่ได้ Silver สุทธิมากสุด · นับ Silver จากมอน + ขาย/หลอม Normal/Magic + ETC ราคา NPC − ยา · ไม่นับราคาตลาด · เดินทางฟรีเท่านั้น · แมพที่เคยวัดแล้วใน 3 วันไม่ต้องลองซ้ำ', onclick: async () => { const on = !(a.finder && a.finder.on); const r = await dash.invoke('farm-find', a.id, on); if (r && !r.ok) showBanner(r.error); else if (on && r) showBanner(`🔎 จะลอง: ${r.trying.join(', ') || '-'}${r.known.length ? ` · ใช้ผลเดิม: ${r.known.join(', ')}` : ''}`); } }, a.finder && a.finder.on ? '■ หยุดหาที่ฟาร์ม' : '🔎 หาที่ฟาร์มคุ้มสุด'),

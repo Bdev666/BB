@@ -104,6 +104,7 @@ function publicState() {
         memoryMB: g.memoryMB || null,
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: HUB.bountyStatus(g),
+        spam: { ...HUB.spamCfg(a.id), state: g.spamState || '' },
         finder: HUB.finderStatus(g),
         driver: (() => { const d = HUB.driverOf(g); return d ? HUB.DRIVE_TH[d] : ''; })(),
         silverUpHr: (() => { const B = g.balHist; if (!B || B.length < 6) return null; const a = B[0]; const b = B[B.length - 1]; return { perHour: Math.round((b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 60), minutes: b[0] - a[0] }; })(),
@@ -1233,6 +1234,7 @@ require('./features/bounty');
 
 require('./features/worldboss');
 require('./features/calibration');
+require('./features/spam');
 
 // ---------- problem report ----------
 function makeReport() {
@@ -1622,6 +1624,7 @@ function registerIpc() {
   handle('game-cmd-all', (cmd, arg) => commandAll(cmd, arg || {}));
   handle('world-boss-go', (kind) => HUB.worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => HUB.bountyStart(id, on !== false));
+  handle('spam-set', (id, cfg) => HUB.spamSet(id, cfg || {}));
   handle('claim-rewards', (id) => HUB.claimRewards(id));
   handle('farm-find', (id, on) => HUB.finderStart(id, !!on));
   handle('farm-go', (id, map) => HUB.farmGo(id, String(map || '')));
@@ -1877,6 +1880,7 @@ app.whenReady().then(() => {
   const SCHEDULE = [
     ['read the game pages', pollSnapshots, 1000],
     ['market watch', HUB.marketWatchTick, 1000],
+    ['skill spam', HUB.spamTick, 100],
     ['demo data', demoTick, 500],
     ['reconnect lost games', reconnectTick, 5000],
     ['boss fight timer', HUB.fightTick, 5000],

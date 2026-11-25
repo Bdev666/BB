@@ -596,3 +596,4 @@ body.sleeping-view .layout, body.sleeping-view .topbar, body.sleeping-view foote
 .lab-real .hint { margin: 4px 0 8px; line-height: 1.6; }
 .lab-adv { margin: 4px 0 10px; } .lab-adv > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
 .lab-realnow b { color: #3ccf91; font-size: 15px; }
+.spam-key{min-width:56px;justify-content:center}
