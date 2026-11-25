@@ -234,8 +234,10 @@ HUB.travelTo = travelTo; // the bounty travels the same way
 async function travelTo(id, g, map) {
   if (HUB.mapOf(g) === map) return { ok: true, here: true };
   if ((await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {}); // the game's travel walks; AUTO would fight on the way
+  await HUB.warpGap(g); // right after another warp (the arena exit) the game would refuse or walk instead
   let r; try { r = await g.win.webContents.executeJavaScript(TRAVEL_JS(map), true); } catch (e) { r = { ok: false, why: e.message }; }
   if (!r || !r.ok) return { ok: false, error: `เดินทางไม่ได้ (${(r && r.why) || '?'})` };
+  HUB.markWarp(g); // a travel may be a warp: the next warp keeps its distance either way
   g.travelling = { map, at: Date.now() }; HUB.farmDirty(g);
   HUB.log.info(`acc ${id}: travel ${HUB.mapOf(g)} -> ${map} (${r.how})`);
   await HUB.answerWarpBox(id, g);

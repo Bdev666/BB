@@ -9,7 +9,7 @@ require(path.join(__dirname, '..', 'src', 'features', 'combat')); // WORLD_ARENA
 require(path.join(__dirname, '..', 'src', 'features', 'spam'));
 require(path.join(__dirname, '..', 'src', 'features', 'worldboss'));
 let n = 0;
-const t = (name, fn) => { fn(); n++; };
+const pending = []; const t = (name, fn) => { const r = fn(); if (r && r.then) pending.push(r); n++; };
 
 // ---- skill spam: presses only while AUTO fights ----
 const acc = (over = {}) => ({ inGame: true, status: 'online', win: { isDestroyed: () => false }, data: { stats: { auto: true, dead: false, sleeping: false } }, ...over });
@@ -69,6 +69,14 @@ t('farm ledger leaves out a minute where Silver fell by 41M', () => {
   g.ledger.m -= 1; HUB.farmBalance(g); // next minute closes this one
   assert.strictEqual((HUB.store.data.farm['2:gullrock_rookery'] || []).length, 0);
 });
+// ---- warps are paced together ----
+t('warp gap: waits until the last warp is old enough, a named cooldown stretches it', async () => {
+  require(path.join(__dirname, '..', 'src', 'features', 'commands'));
+  HUB.sleep = HUB.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const g = { lastWarpAt: Date.now() - 3500 };
+  const t0 = Date.now(); await HUB.warpGap(g, 4000); assert.ok(Date.now() - t0 >= 400 && Date.now() - t0 < 1500);
+  const g2 = { lastWarpAt: Date.now() - 10000 }; const t1 = Date.now(); await HUB.warpGap(g2, 4000); assert.ok(Date.now() - t1 < 100);
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');
@@ -82,4 +90,4 @@ t('store: stats move out of config.json and come back on load', () => {
   assert.deepStrictEqual(st.data.fights, [{ mob: 'x' }]); assert.deepStrictEqual(st.data.calib, { k: 1 });
   fs.rmSync(d, { recursive: true, force: true });
 });
-console.log(`feature tests passed (${n})`);
+Promise.all(pending).then(() => console.log(`feature tests passed (${n})`)).catch((e) => { console.error(e); process.exit(1); });

@@ -4,8 +4,21 @@ const HUB = require('../core/hub');
 // Only what the player presses. Each goes out the way the game's own UI sends it:
 // a click on the game's own button, the game's own window.__game helpers, or the
 // same 'input' message the game client sends.
+// Every warp the game allows is under one cooldown (the world boss warp in, the town warp before it, the warp out of the
+// arena and the one back to the farm map are the same kind), so they are paced together: HUB.warpGap waits until the last
+// one is old enough, and any notice that names a wait ("N s") makes the next one wait that long.
+const WARP_TYPES = new Set(['warpTo', 'worldBossWarp', 'arenaWarp', 'sparringWarp', 'trainingWarp', 'partyGoto']);
+HUB.markWarp = (g) => { g.lastWarpAt = Date.now(); };
+HUB.warpGap = async function warpGap(g, minMs = 4000) {
+  for (let i = 0; i < 120; i++) { // 60 s at most
+    const need = Math.max(minMs, g.warpWaitMs || 0) - (Date.now() - (g.lastWarpAt || 0));
+    if (need <= 0) return;
+    await HUB.sleep(Math.min(500, need));
+  }
+};
 HUB.sendInput = function sendInput(id, obj) {
   const g = HUB.rt(id);
+  if (obj && WARP_TYPES.has(obj.type)) HUB.markWarp(g);
   if (!g.win || g.win.isDestroyed()) return Promise.resolve(false);
   const b64 = HUB.encodeInput(obj).toString('base64');
   return g.win.webContents.executeJavaScript(`window.__bdSend ? window.__bdSend(${JSON.stringify(b64)}) : false`, true).catch(() => false);

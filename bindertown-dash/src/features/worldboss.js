@@ -45,7 +45,6 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
         await HUB.sendInput(o.id, { type: 'warpTo', mapId: town });
         for (let i = 0; i < 25 && HUB.mapOf(g) !== town; i++) await HUB.sleep(1000); // eslint-disable-line no-await-in-loop
         HUB.log.info(`acc ${o.id}: world boss -> ${HUB.mapOf(g) === town ? `warped to ${town} first` : `town warp to ${town} did not show in 25 s, asking for the arena anyway`}`);
-        await HUB.sleep(2500); // the short wait after a warp before the next one
       }
     }
     // One ask, then wait for the game's answer (it either moves the account within ~10 s or says why not in a notice). Ask again
@@ -54,6 +53,7 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
     let asked = 0; let saidAt = 0;
     const isLive = () => (HUB.bosses.world.get(kind) || {}).state === 'live';
     const ask = async () => {
+      await HUB.warpGap(g); // the arena warp is a warp like the town one: after its cooldown
       const at = Date.now(); asked++;
       await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
       if (asked === 1) HUB.log.info(`acc ${o.id}: world boss -> asked the game to warp in, from ${HUB.mapOf(g)}`);
@@ -124,6 +124,7 @@ async function worldBossLeave(kind) {
   for (const [id, g] of HUB.openGames()) {
     const inArena = g.inGame && !g.demo && HUB.WORLD_ARENAS.has(HUB.mapOf(g));
     if (!(g.bossTrip && g.bossTrip.kind === kind) && !inArena) continue;
+    await HUB.warpGap(g); // eslint-disable-line no-await-in-loop
     await HUB.sendInput(id, { type: 'worldBossWarp', enter: false, kind }); // eslint-disable-line no-await-in-loop
     HUB.log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip ? g.bossTrip.from : 'town'})`);
     if (g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from)) g.loopBack = { map: g.bossTrip.from, x: g.bossTrip.x, y: g.bossTrip.y, at: Date.now(), done: false, why: 'boss' };

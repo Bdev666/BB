@@ -633,7 +633,7 @@ function handleEvents(id, events) {
       case 'info':
         if (/^เลเวลอัป/.test(ev.text)) HUB.notify(id, 'levelUp', `🎉 ${ev.text}`);
         // only the server's notices answer a command (not our own level-up lines etc.)
-        if (ev.notice) g.lastNotice = { text: ev.text, at: Date.now() };
+        if (ev.notice) { g.lastNotice = { text: ev.text, at: Date.now() }; const wm = /(?:วาร์ป|warp)[^0-9]{0,40}(\d+)\s*(?:วินาที|วิ|s\b)/i.exec(ev.text || ''); if (wm) g.warpWaitMs = Math.min(60000, (Number(wm[1]) + 1) * 1000); } // a warp cooldown the game named
         break;
       case 'bag':
         for (const it of ev.items || []) {
