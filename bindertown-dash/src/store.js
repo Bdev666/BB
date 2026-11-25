@@ -16,7 +16,7 @@ const DEFAULTS = {
     startWithWindows: false,       // open games without showing their window (lighter on the PC)
     gameUrl: '',             // empty = default server; takes effect after restart
     gpuBoost: true,          // use the graphics card fully (GPU switches at start; takes effect after a restart)
-    lowFpsHidden: true,      // hidden game windows tell the game they are hidden: it draws 4 fps there, the visible one gets the GPU
+    lowFpsHidden: false,     // off: every game runs at full speed even hidden/minimized (the player's choice: 4 fps made a minimized game sluggish)
     autoRam: false,          // restart a game page whose memory passes ramLimitMB: off (it costs farming time); pages are restarted only when frozen or cut off
     ramLimitMB: 2500,
     // notifications
@@ -85,6 +85,7 @@ class Store {
       // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
       this.data.settings.deathLoopGuard = false; // removed: always respawn at once
       // the player's choice (25 Nov): no restart for memory, only for a frozen or cut-off page (once, for everyone)
+      if (!this.data.settings.fullSpeedHidden) { this.data.settings.lowFpsHidden = false; this.data.settings.fullSpeedHidden = true; } // 26 Nov: full speed always
       if (!this.data.settings.ramOff) { this.data.settings.autoRam = false; this.data.settings.ramOff = true; }
       this.data.settings.ram25 = true; // (was: memory restart on for everyone; replaced by ramOff above)
       if (!this.data.settings.hv5m) { // the high-value panel starts at 5M now (the old default was 10M)
