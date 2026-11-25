@@ -1376,6 +1376,9 @@ function tick() {
         g.ramKill = Date.now();
         try { g.win.webContents.forcefullyCrashRenderer(); } catch { /* old Electron: reload below */ }
         setTimeout(() => { try { g.win.webContents.reload(); } catch { /* closed */ } }, 800);
+        // safety: the page must talk to the game again within 90 s, else the normal reconnect takes over (status stays
+        // "online" through a restart on purpose, so nothing else would notice a page that stayed blank)
+        setTimeout(() => { if (!g.lastMsgAt || Date.now() - g.lastMsgAt > 60000) scheduleReload(id, 'หน้าเกมไม่กลับมาหลังคืน RAM', 1000); }, 90000);
         // back in the game: AUTO on again if it was on (the character is where it was: the server kept it there)
         // AUTO back on as soon as the game is up again: look every 4 s from 8 s on, 2 minutes at most
         setTimeout(() => { try { updateMemory(); HUB.log.info(`acc ${id}: page memory after the restart: ${mb} -> ${g.memoryMB || '?'} MB`); } catch { /* closed */ } }, 20000);
