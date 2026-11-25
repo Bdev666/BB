@@ -28,6 +28,14 @@ app.setAppUserModelId('com.fanmade.binderdash');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+// GPU: use the graphics card fully (Settings: "เร่งกราฟิก", on by default; takes effect at the next start). The game draws with
+// WebGL: a driver on Chromium's block list falls back to slow software drawing, rasterizing on the GPU keeps the CPU for the
+// game, and a laptop with two GPUs is asked for the fast one.
+const EARLY = (() => { try { return JSON.parse(HUB_FS().readFileSync(require('path').join(app.getPath('userData'), 'config.json'), 'utf8')).settings || {}; } catch { return {}; } })();
+function HUB_FS() { return require('fs'); }
+if (EARLY.gpuBoost !== false) {
+  for (const sw of ['ignore-gpu-blocklist', 'enable-gpu-rasterization', 'enable-zero-copy', 'force_high_performance_gpu']) app.commandLine.appendSwitch(sw);
+}
 
 HUB.store = undefined;
 HUB.dashboard = null;
@@ -175,6 +183,17 @@ HUB.setAlert = function setAlert(id, key, on, text) {
 };
 
 // ---------- game windows ----------
+const VIS_JS = (hidden) => `(() => { try { const h = ${hidden ? 'true' : 'false'};
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => h });
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (h ? 'hidden' : 'visible') });
+  document.dispatchEvent(new Event('visibilitychange')); return true; } catch (e) { return false; } })()`;
+HUB.syncVisibility = function syncVisibility(g) {
+  if (!g || !g.win || g.win.isDestroyed()) return;
+  const hidden = HUB.store.data.settings.lowFpsHidden !== false && (!g.win.isVisible() || g.win.isMinimized());
+  if (g.pageHidden === hidden) return;
+  g.pageHidden = hidden;
+  g.win.webContents.executeJavaScript(VIS_JS(hidden), true).catch(() => { g.pageHidden = undefined; });
+};
 function windowTitle(id) {
   const a = HUB.account(id);
   const n = HUB.rt(id).data.stats.name;
@@ -245,6 +264,12 @@ function openGame(id, opts = {}) {
   updateSleepBlocker();
 
   win.on('page-title-updated', (e) => { e.preventDefault(); win.setTitle(windowTitle(id)); });
+  // A hidden game still drew at full speed (its timers must keep running, and that also kept the page "visible"): with 3 games
+  // open, two drew for nobody and took the GPU from the one on screen. The page is told it is hidden while its window is
+  // hidden or minimized: the game itself drops to 4 frames a second then (its own rule for a background tab), AUTO goes on.
+  const sync = () => HUB.syncVisibility(g);
+  for (const ev of ['show', 'hide', 'minimize', 'restore']) win.on(ev, sync);
+  win.webContents.on('did-finish-load', () => { g.pageHidden = undefined; setTimeout(sync, 1500); setTimeout(sync, 8000); });
   win.on('close', (e) => {
     if (quitting) return;
     // X on a game window = leave the game (account stays in the list)
@@ -1167,7 +1192,8 @@ function registerIpc() {
     const s = HUB.store.data.settings;
     if (patch.reconnectMinutes !== undefined) s.reconnectMinutes = Math.min(60, Math.max(1, Number(patch.reconnectMinutes) || 3));
     if (patch.startWithWindows !== undefined) { s.startWithWindows = !!patch.startWithWindows; applyStartWithWindows(); }
-    for (const k of ['openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget', 'crowdSwitch', 'stuckFix']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    for (const k of ['gpuBoost', 'lowFpsHidden', 'openDashboardOnStart', 'openAllOnStart', 'autoRam', 'openHidden', 'telegramRemote', 'autoReconnect', 'statsLog', 'deathLoopGuard', 'worldBossAuto', 'worldBossReturn', 'bountyAutoClaim', 'bountyOnlyTarget', 'crowdSwitch', 'stuckFix']) if (patch[k] !== undefined) s[k] = !!patch[k];
+    if (patch.lowFpsHidden !== undefined) for (const [, gg] of HUB.games) { gg.pageHidden = undefined; HUB.syncVisibility(gg); } // applies at once
     if (patch.crowdPlayers !== undefined) s.crowdPlayers = Math.max(1, Math.min(30, Number(patch.crowdPlayers) || 3));
     if (patch.crowdMinutes !== undefined) s.crowdMinutes = Math.max(1, Math.min(30, Number(patch.crowdMinutes) || 2));
     if (patch.autoBuy !== undefined) s.autoBuy = { on: !!patch.autoBuy.on, below: Math.max(1, Math.min(9999, Number(patch.autoBuy.below ?? (s.autoBuy || {}).below) || 50)), rounds: Math.max(1, Math.min(10, Number(patch.autoBuy.rounds) || 3)), keepSilver: Math.max(0, Number(patch.autoBuy.keepSilver ?? (s.autoBuy || {}).keepSilver ?? 5000) || 0) };

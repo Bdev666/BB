@@ -15,6 +15,8 @@ const DEFAULTS = {
     reconnectMinutes: 3,     // ... after being disconnected this long
     startWithWindows: false,       // open games without showing their window (lighter on the PC)
     gameUrl: '',             // empty = default server; takes effect after restart
+    gpuBoost: true,          // use the graphics card fully (GPU switches at start; takes effect after a restart)
+    lowFpsHidden: true,      // hidden game windows tell the game they are hidden: it draws 4 fps there, the visible one gets the GPU
     autoRam: false,          // restart a game page whose memory passes ramLimitMB: off (it costs farming time); pages are restarted only when frozen or cut off
     ramLimitMB: 2500,
     // notifications

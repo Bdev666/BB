@@ -98,6 +98,14 @@
           <button id="clear-cache" class="primary">ล้างแคช</button>
         </div>
         <div class="row">
+          <div><b>เร่งกราฟิก (GPU)</b><p>ใช้การ์ดจอเต็มที่: เปิด GPU แม้ไดรเวอร์อยู่ในรายการเลี่ยงของ Chrome, วาดภาพบน GPU, โน้ตบุ๊ก 2 การ์ดจอเลือกตัวแรง · มีผลหลังเปิดโปรแกรมใหม่ · ถ้าจอเกมกระพริบ/ดำ ให้ปิด</p></div>
+          <label class="switch"><input type="checkbox" data-set="gpuBoost"><i></i></label>
+        </div>
+        <div class="row">
+          <div><b>เกมที่ซ่อนอยู่วาดภาพช้าลง</b><p>หน้าต่างเกมที่ซ่อน/ย่ออยู่ บอกเกมว่าไม่มีใครดู เกมลดเหลือ 4 เฟรม/วิ เอง (AUTO เล่นต่อ) เครื่องเหลือแรงให้เกมที่เปิดดูอยู่ ได้ FPS มากขึ้นตอนคนเยอะ</p></div>
+          <label class="switch"><input type="checkbox" data-set="lowFpsHidden"><i></i></label>
+        </div>
+        <div class="row">
           <div><b>คืน RAM หน้าเกมเอง</b><p>ปิดไว้เป็นค่าเริ่มต้น: รีหน้าเกมเพื่อคืน RAM ทำให้เสียจังหวะฟาร์ม ~30–40 วิ · หน้าเกมที่ค้างหรือหลุดยังต่อใหม่ให้เองเสมอ · ถ้าเปิด: หน้าเกมที่ใช้ RAM เกิน <input type="number" id="ramLimitMB" min="500" max="8000" step="100"> MB จะเริ่มใหม่ให้ ทีละบัญชี ห่างกันอย่างน้อย 2 ชม.</p></div>
           <label class="switch"><input type="checkbox" data-set="autoRam"><i></i></label>
         </div>
