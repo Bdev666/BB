@@ -639,6 +639,8 @@ function pruneUseless(b, p, c2map) {
 const ultOf = (b) => (b && b.c2 ? Object.keys(G.skills).find((k) => G.skills[k].c2 && G.skills[k].c2.ult && G.skills[k].c2.path === b.c2) : undefined);
 const hasUlt = (b) => { const u = ultOf(b); return !!u && (b.skills[u] || 0) > 0; };
 const hotbarSize = (b) => (b && b.c2 ? 8 + (hasUlt(b) ? 1 : 0) : 6);
+// skill ids from ids or shown names (records keep names like "Leap Slam"): a hotbar of names used to match nothing
+const sidsOf = (list) => (Array.isArray(list) ? list : []).map((x) => (G.skills[x] ? x : (Object.keys(G.skills).find((k) => G.skills[k].name === x) || x)));
 // a hotbar of up to 8 skills, with the Ultimate (when learned) always last, in its own slot
 const withUlt = (b, hb) => { const u = ultOf(b); return u && (b.skills[u] || 0) > 0 ? [...hb.filter((x) => x !== u), u] : hb.filter((x) => x !== u); };
 // the game rotates skills in hotbar order: try every order of the slots (6 slots = 720), or pair swaps until
@@ -848,7 +850,8 @@ function describe(b, p) {
     } catch { /* checker changed shape: skip */ }
   }
   // class 1 points: a skill's levels up to its top level; class 2 points: class 2 skills, and levels past the top of a class 1 skill
-  const used = (c2) => Object.entries(b.skills).reduce((t, [sid, l]) => t + (isC2(sid) ? (c2 ? l : 0) : c2 ? Math.max(0, l - maxLv(sid)) : Math.min(l, maxLv(sid))), 0);
+  const nov = (G.jobs.novice || {}).skills || [];
+  const used = (c2) => Object.entries(b.skills).filter(([sid]) => !nov.includes(sid)).reduce((t, [sid, l]) => t + (isC2(sid) ? (c2 ? l : 0) : c2 ? Math.max(0, l - maxLv(sid)) : Math.min(l, maxLv(sid))), 0);
   return {
     points: { c1: used(false), c1Max: c1Budget(p.job, p.jobLevel), c2: used(true), c2Max: b.c2 ? p.c2Points : 0 },
     // every class 2 "+" level this path offers on a class 1 skill: how far this build takes it, and why not further
@@ -1101,7 +1104,7 @@ L.predict = async (p) => {
   const cur = p.current || {};
   const b = { ...baseBuild(q), skills: { ...(cur.skills || {}) }, evo: { ...(cur.evo || {}) }, traits: { ...(cur.traits || {}) }, c2tr: { ...(cur.c2tr || {}) } };
   // the hotbar the character really fights with (when known), else the best one the lab finds
-  const realHb = cur.hotbar && Array.isArray(cur.hotbar) ? [...new Set(cur.hotbar)].filter((sid) => (b.skills[sid] || 0) > 0 && !isPassive(sid)).slice(0, hotbarSize(b)) : [];
+  const realHb = cur.hotbar && Array.isArray(cur.hotbar) ? [...new Set(sidsOf(cur.hotbar))].filter((sid) => (b.skills[sid] || 0) > 0 && !isPassive(sid)).slice(0, hotbarSize(b)) : [];
   let reorder = null;
   if (realHb.length) {
     b.hotbar = realHb;
@@ -1321,7 +1324,8 @@ L.run = async (p) => {
     const q = { ...base, c2: p.current.c2 || '' };
     curP = q;
     const b = { ...baseBuild(q), skills: { ...p.current.skills }, evo: { ...(p.current.evo || {}) }, traits: { ...(p.current.traits || {}) }, c2tr: { ...(p.current.c2tr || {}) } };
-    if (p.current.hotbar && p.current.hotbar.length) b.hotbar = p.current.hotbar.slice(0, hotbarSize(b)); else setHotbar(b);
+    const hb = sidsOf(p.current.hotbar).filter((sid) => (b.skills[sid] || 0) > 0);
+    if (hb.length) b.hotbar = withUlt(b, hb.filter((x) => x !== ultOf(b)).slice(0, 8)); else setHotbar(b);
     current = describe(b, q);
     // a gentle version: the character's own build, a few single points moved (what the real numbers back up)
     const t = tuneFrom(b, q);
