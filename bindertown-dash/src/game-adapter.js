@@ -307,9 +307,14 @@ class BinderTownAdapter {
   // A frame the page sent (only used to time pings)
   outgoing(buf, at = Date.now()) {
     const f = decodeFrame(buf);
-    if (!f || f.type !== 'input' || !f.message || f.message.type !== 'ping') return;
+    if (!f || f.type !== 'input' || !f.message) return null;
+    // what the player's own game asked for: a skill cast (AUTO or a key) / a basic attack, counted per skill
+    if (f.message.type === 'skill' && f.message.skillId) return { cast: String(f.message.skillId) };
+    if (f.message.type === 'attack') return { cast: 'basic' };
+    if (f.message.type !== 'ping') return null;
     this.pings.set(f.message.t, at);
     if (this.pings.size > 20) this.pings.delete(this.pings.keys().next().value);
+    return null;
   }
 
   // A frame the page received -> normalized events

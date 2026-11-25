@@ -34,7 +34,7 @@ function create(deps) {
     if (!ev || !(ev.dmg > 0)) return;
     const now = Date.now();
     let c = combat.get(id);
-    if (!c) { c = { start: now, last: 0, active: 0, skills: {}, mobs: {}, pet: 0, hits: 0 }; combat.set(id, c); }
+    if (!c) { c = { start: now, last: 0, active: 0, skills: {}, mobs: {}, pet: 0, hits: 0, casts: {} }; combat.set(id, c); }
     if (ev.pet) { c.pet += ev.dmg; return; }
     if (c.last && now - c.last <= 3000) c.active += now - c.last;
     c.last = now; c.hits++;
@@ -43,6 +43,13 @@ function create(deps) {
     x.dmg += ev.dmg; x.hits++; if (ev.crit) { x.crits++; x.critDmg += ev.dmg; } if (ev.dmg > x.max) x.max = ev.dmg;
     if (ev.mob) c.mobs[ev.mob] = (c.mobs[ev.mob] || 0) + 1;
   }
+  // casts the player's game sent (per skill): with the hits, the hits per cast (targets x ticks) and the casts per minute
+  // tell a cooldown that is off from a per-hit number that is off (the Build Lab could not tell them apart before)
+  function combatCast(id, sid) {
+    let c = combat.get(id);
+    if (!c) { c = { start: Date.now(), last: 0, active: 0, skills: {}, mobs: {}, pet: 0, hits: 0, casts: {} }; combat.set(id, c); }
+    c.casts[sid] = (c.casts[sid] || 0) + 1;
+  }
   async function combatFlush(id, force = false) {
     const c = combat.get(id);
     if (!c || (!force && (c.hits < 30 || c.active < 20000))) return null;
@@ -50,7 +57,7 @@ function create(deps) {
     const sec = Math.max(1, c.active / 1000);
     const total = Object.values(c.skills).reduce((t, x) => t + x.dmg, 0);
     const mob = Object.entries(c.mobs).sort((a, b) => b[1] - a[1])[0];
-    const rec = { t: new Date().toISOString(), app: version(), acc: id, minutes: Math.round((Date.now() - c.start) / 60000), activeSec: Math.round(sec), hits: c.hits, realDps: Math.round(total / sec), petDmg: c.pet, mobs: c.mobs, mainMob: mob ? mob[0] : null,
+    const rec = { t: new Date().toISOString(), app: version(), acc: id, minutes: Math.round((Date.now() - c.start) / 60000), activeSec: Math.round(sec), hits: c.hits, realDps: Math.round(total / sec), petDmg: c.pet, mobs: c.mobs, mainMob: mob ? mob[0] : null, casts: c.casts || {}, castsPerMin: Object.fromEntries(Object.entries(c.casts || {}).map(([k, n]) => [k, +(n / Math.max(1, (Date.now() - c.start) / 60000)).toFixed(2)])), hitsPerCast: Object.fromEntries(Object.entries(c.casts || {}).filter(([k]) => c.skills[k]).map(([k, n]) => [k, +(c.skills[k].hits / Math.max(1, n)).toFixed(1)])),
       skills: Object.fromEntries(Object.entries(c.skills).map(([k, x]) => [k, { dmg: x.dmg, hits: x.hits, avg: Math.round(x.dmg / x.hits), max: x.max, critRate: +(x.crits / x.hits).toFixed(3), avgCrit: x.crits ? Math.round(x.critDmg / x.crits) : null, avgNonCrit: x.hits > x.crits ? Math.round((x.dmg - x.critDmg) / (x.hits - x.crits)) : null, share: +(x.dmg / (total || 1)).toFixed(3), dps: Math.round(x.dmg / sec) }])) };
     try {
       const me = deps.labMe ? await deps.labMe(id) : null;
@@ -470,7 +477,7 @@ function create(deps) {
     }
     return out;
   }
-  return { runSelfTest, statsTick, statsSummary, farmHistory, calibHistory, count, counters, logProblems, bundle, combatHit, combatFlush };
+  return { runSelfTest, statsTick, statsSummary, farmHistory, calibHistory, count, counters, logProblems, bundle, combatHit, combatCast, combatFlush };
 }
 
 module.exports = { create };

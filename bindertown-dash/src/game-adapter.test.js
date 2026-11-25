@@ -99,6 +99,10 @@ assert.strictEqual(ev[1].channel, 'whisper');
 assert.strictEqual(ev[2].type, 'party');
 assert.deepStrictEqual([ev[3].type, ev[3].by], ['death', 'Frost Wisp']);
 ad.outgoing(frame('input', { type: 'ping', t: 1234.5 }), 1000);
+// the player's own casts: a skill per id, a basic attack as 'basic', a ping is no cast
+assert.deepStrictEqual(ad.outgoing(frame('input', { type: 'skill', skillId: 'ice_lance', x: 1, y: 2 })), { cast: 'ice_lance' });
+assert.deepStrictEqual(ad.outgoing(frame('input', { type: 'attack', x: 1, y: 2 })), { cast: 'basic' });
+assert.strictEqual(ad.outgoing(frame('input', { type: 'ping', t: 99 })), null);
 ev = ad.incoming(frame('server', { type: 'pong', t: 1234.5, online: 7219 }), 1070);
 assert.deepStrictEqual([ev[0].ping, ev[0].online], [70, 7219]);
 

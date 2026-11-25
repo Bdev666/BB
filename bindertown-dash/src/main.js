@@ -351,7 +351,7 @@ function attachWatcher(id, wc) {
       onFrame(id, params.response);
     } else if (method === 'Network.webSocketFrameSent') {
       // only used to time the game's own pings (read-only)
-      if (params.response.opcode === 2) rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64'));
+      if (params.response.opcode === 2) { const o = rt(id).adapter.outgoing(Buffer.from(params.response.payloadData, 'base64')); if (o && o.cast) HUB.selftest.combatCast(id, o.cast); }
     }
   });
   dbg.on('detach', (_e, reason) => {

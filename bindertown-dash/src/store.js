@@ -14,7 +14,7 @@ const DEFAULTS = {
     reconnectMinutes: 3,     // ... after being disconnected this long
     startWithWindows: false,       // open games without showing their window (lighter on the PC)
     gameUrl: '',             // empty = default server; takes effect after restart
-    autoRam: true,           // reload a game page whose memory passes ramLimitMB (the game page leaks ~600 MB/h)
+    autoRam: false,          // restart a game page whose memory passes ramLimitMB: off (it costs farming time); pages are restarted only when frozen or cut off
     ramLimitMB: 2500,
     // notifications
     idleMinutes: 5,          // no hits (or no data) for this long -> warn
@@ -81,7 +81,9 @@ class Store {
       };
       // 0.11: 'valuable drop' alerts start at 1,000,000 Gold (the old 100 / 300 were far too chatty)
       this.data.settings.deathLoopGuard = false; // removed: always respawn at once
-      if (!this.data.settings.ram25) { this.data.settings.autoRam = true; if (!(this.data.settings.ramLimitMB >= 2000)) this.data.settings.ramLimitMB = 2500; this.data.settings.ram25 = true; } // the game page leaks: on for everyone once
+      // the player's choice (25 Nov): no restart for memory, only for a frozen or cut-off page (once, for everyone)
+      if (!this.data.settings.ramOff) { this.data.settings.autoRam = false; this.data.settings.ramOff = true; }
+      this.data.settings.ram25 = true; // (was: memory restart on for everyone; replaced by ramOff above)
       if (!this.data.settings.hv5m) { // the high-value panel starts at 5M now (the old default was 10M)
         if (this.data.settings.highValueGold === 10000000) this.data.settings.highValueGold = 5000000;
         this.data.settings.hv5m = true;
