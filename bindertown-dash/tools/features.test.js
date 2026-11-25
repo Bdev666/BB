@@ -37,4 +37,17 @@ t('boss origin: already in the arena keeps the trip start', () => {
   const g = { bossTrip: { from: 'drowned_forum', x: 30, y: 26 } };
   assert.deepStrictEqual(HUB.bossOrigin(g, 'rootfall_barrow', { x: 0, y: 0 }), { from: 'drowned_forum', x: 30, y: 26 });
 });
+// ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
+t('store: stats move out of config.json and come back on load', () => {
+  const fs = require('fs'); const os = require('os');
+  const { Store } = require(path.join(__dirname, '..', 'src', 'store'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-store-'));
+  fs.writeFileSync(path.join(d, 'config.json'), JSON.stringify({ accounts: [{ id: 1, name: 'a' }], settings: {}, fights: [{ mob: 'x' }], calib: { k: 1 } }));
+  let st = new Store(d); st.save();
+  const cfg = JSON.parse(fs.readFileSync(path.join(d, 'config.json'), 'utf8'));
+  assert.strictEqual(cfg.fights, undefined); assert.strictEqual(cfg.calib, undefined); assert.strictEqual(cfg.accounts.length, 1);
+  st = new Store(d);
+  assert.deepStrictEqual(st.data.fights, [{ mob: 'x' }]); assert.deepStrictEqual(st.data.calib, { k: 1 });
+  fs.rmSync(d, { recursive: true, force: true });
+});
 console.log(`feature tests passed (${n})`);

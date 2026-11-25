@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
+const STATS_KEYS = ['fights', 'calib', 'farm', 'marketHist', 'worldLen'];
 const DEFAULTS = {
   accounts: [{ id: 1, name: 'บัญชี 1' }],
   nextId: 2,
@@ -94,16 +95,32 @@ class Store {
       }
     } catch { /* keep defaults */ }
     if (!Array.isArray(this.data.accounts)) this.data.accounts = structuredClone(DEFAULTS.accounts);
+    // what the app learns while it runs (boss fights, Build Lab calibration, farm ledger, market history, event lengths) lives
+    // in stats.json: config.json stays small (settings + accounts) and is rewritten only with them; an older config that
+    // still holds them hands them over once
+    this.statsFile = path.join(path.dirname(this.file), 'stats.json');
+    for (const f of [this.statsFile, this.statsFile + '.bak']) {
+      let st = null; try { st = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { continue; }
+      if (st && typeof st === 'object') { for (const k of STATS_KEYS) if (st[k] !== undefined) this.data[k] = st[k]; break; }
+    }
   }
   save() {
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      const tmp = this.file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-      try { fs.copyFileSync(this.file, this.file + '.bak'); } catch { /* first save */ }
-      fs.renameSync(tmp, this.file);
+      const cfg = { ...this.data }; const st = {};
+      for (const k of STATS_KEYS) if (cfg[k] !== undefined) { st[k] = cfg[k]; delete cfg[k]; }
+      const write = (file, text) => {
+        const tmp = file + '.tmp';
+        fs.writeFileSync(tmp, text);
+        try { fs.copyFileSync(file, file + '.bak'); } catch { /* first save */ }
+        fs.renameSync(tmp, file);
+      };
+      const cfgText = JSON.stringify(cfg, null, 2);
+      if (cfgText !== this.lastCfg) { write(this.file, cfgText); this.lastCfg = cfgText; }
+      const stText = JSON.stringify(st); // compact: it is the big one
+      if (this.statsFile && stText !== this.lastStats) { write(this.statsFile, stText); this.lastStats = stText; }
     } catch (err) { console.error('settings save failed:', err.message); } // disk full / no rights: keep running
   }
 }
 
-module.exports = { Store };
+module.exports = { Store, STATS_KEYS };
