@@ -37,6 +37,15 @@ t('boss origin: already in the arena keeps the trip start', () => {
   const g = { bossTrip: { from: 'drowned_forum', x: 30, y: 26 } };
   assert.deepStrictEqual(HUB.bossOrigin(g, 'rootfall_barrow', { x: 0, y: 0 }), { from: 'drowned_forum', x: 30, y: 26 });
 });
+// ---- world boss: the town to warp to first ----
+t('town before a world boss: the region town, or the one the game used last time', () => {
+  assert.strictEqual(HUB.townFor('bellglass_cathedral'), 'tidehaven');
+  assert.strictEqual(HUB.townFor('duskgate_pass'), 'ashford');
+  HUB.store.data.bossTowns = { bellglass_cathedral: 'crown_of_tides' };
+  assert.strictEqual(HUB.townFor('bellglass_cathedral'), 'crown_of_tides');
+  assert.strictEqual(HUB.townFor('valebrook'), 'valebrook');
+  assert.ok(HUB.isTown('tidehaven') && !HUB.isTown('drowned_forum'));
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');

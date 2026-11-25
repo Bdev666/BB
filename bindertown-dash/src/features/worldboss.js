@@ -21,10 +21,8 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
     // the place the account really farms: when this trip comes before the way back from the last one (two bosses back to back in
     // a log), the account stands on a map it only passed through; remember the farm spot, not that
     g.bossTrip = { kind, ...HUB.bossOrigin(g, before, me), at: Date.now() };
-    HUB.log.info(`acc ${id}: world boss -> ${HUB.WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `asked the game to warp in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
-    await HUB.sendInput(id, { type: 'worldBossWarp', enter: true, kind }); // eslint-disable-line no-await-in-loop
+    HUB.log.info(`acc ${id}: world boss -> ${HUB.WORLD_ARENAS.has(before) ? 'already in the arena (went in by hand)' : `going in, from ${before}${me.x != null ? ` at ${Math.round(me.x)},${Math.round(me.y)}` : ''}`}`);
     out.push({ id, name, from: before });
-    await HUB.sleep(400); // eslint-disable-line no-await-in-loop
   }
   HUB.log.info(`world boss ${kind}: sent ${out.length} account(s) in (${reason})`);
   // once there: walk up to the boss first (AUTO only fights inside 16 tiles of where it was switched on,
@@ -34,8 +32,25 @@ HUB.worldBossGo = async function worldBossGo(kind, reason = 'ปุ่ม') {
   // each account on its own: as soon as it is in the arena, walk it to the boss (3 minutes at most, asking again
   // every 30 s: a warp asked before the start may only go through when the boss starts)
   const missed = [];
-  Promise.all(out.map(async (o) => {
+  Promise.all(out.map(async (o, n) => {
     const g = HUB.games.get(o.id); if (!g) return;
+    await HUB.sleep(n * 400); // a little apart
+    if (!HUB.WORLD_ARENAS.has(HUB.mapOf(g))) {
+      // the town first, then the arena: the arena warp asked straight from a field map did not always go through (an account
+      // waited 3 minutes and never got in, twice); from a town it does. Warping is free with Premium; without it the
+      // account asks for the arena from where it stands (no Gold spent by itself)
+      const town = HUB.townFor(HUB.mapOf(g));
+      if (town && HUB.mapOf(g) !== town && g.data.stats.premium) {
+        if ((await HUB.liveUi(o.id)).auto) await HUB.gameCommand(o.id, 'auto', {}); // AUTO off: it would walk off in town
+        await HUB.sendInput(o.id, { type: 'warpTo', mapId: town });
+        for (let i = 0; i < 25 && HUB.mapOf(g) !== town; i++) await HUB.sleep(1000); // eslint-disable-line no-await-in-loop
+        HUB.log.info(`acc ${o.id}: world boss -> ${HUB.mapOf(g) === town ? `warped to ${town} first` : `town warp to ${town} did not show in 25 s, asking for the arena anyway`}`);
+        await HUB.sleep(2500); // the short wait after a warp before the next one
+      }
+      if (!g.bossTrip) return; // stopped meanwhile
+      await HUB.sendInput(o.id, { type: 'worldBossWarp', enter: true, kind });
+      HUB.log.info(`acc ${o.id}: world boss -> asked the game to warp in, from ${HUB.mapOf(g)}`);
+    }
     for (let i = 0; i < 90; i++) {
       if (!g.bossTrip) return; // stopped meanwhile
       if (HUB.WORLD_ARENAS.has(HUB.mapOf(g))) { await HUB.walkToBossThenAuto(o.id, kind); return; }
@@ -124,12 +139,24 @@ HUB.bossUp = function bossUp(b) {
 };
 
 // map id -> name, from the same map table the Dashboard uses (one JSON object per line)
-const MAP_NAMES = (() => {
+const MAPS = (() => {
   try {
-    return Object.fromEntries(HUB.fs.readFileSync(HUB.path.join(require('path').join(__dirname, '..'), 'dashboard', 'maps.js'), 'utf8').split('\n')
-      .filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l.trim().replace(/,$/, ''))).map((m) => [m.id, m.name]));
-  } catch { return {}; }
+    const fs = require('fs'); const path = require('path');
+    return fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'maps.js'), 'utf8').split('\n')
+      .filter((l) => l.trim().startsWith('{')).map((l) => JSON.parse(l.trim().replace(/,$/, '')));
+  } catch { return []; }
 })();
+const MAP_NAMES = Object.fromEntries(MAPS.map((m) => [m.id, m.name]));
+// the town to warp to before a world boss: the one the game put this farm map's accounts in after the last boss (learned),
+// else the first town of the map's region
+HUB.townFor = function townFor(map) {
+  const seen = (HUB.store.data.bossTowns || {})[map]; if (seen) return seen;
+  const m = MAPS.find((x) => x.id === map); if (!m) return null;
+  if (m.kind === 'town') return m.id;
+  const t = MAPS.find((x) => x.kind === 'town' && x.region === m.region);
+  return t ? t.id : null;
+};
+HUB.isTown = (map) => !!MAPS.find((x) => x.id === map && x.kind === 'town');
 HUB.mapName = function mapName(id) { return MAP_NAMES[id] || String(id || '?').split('_').map((w) => w && w[0].toUpperCase() + w.slice(1)).join(' '); };
 
 // timers: "about to spawn" heads-up, and spawns we can tell from the clock alone

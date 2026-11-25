@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATS_KEYS = ['fights', 'calib', 'farm', 'marketHist', 'worldLen'];
+const STATS_KEYS = ['fights', 'calib', 'farm', 'marketHist', 'worldLen', 'bossTowns'];
 const DEFAULTS = {
   accounts: [{ id: 1, name: 'บัญชี 1' }],
   nextId: 2,

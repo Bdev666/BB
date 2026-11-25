@@ -170,6 +170,7 @@ async function loopBackCheck(id, g) {
   L.busy = true;
   try {
     if (HUB.mapOf(g) !== L.map) {
+      if (L.why === 'boss' && HUB.isTown && HUB.isTown(HUB.mapOf(g))) { const bt = HUB.store.data.bossTowns || (HUB.store.data.bossTowns = {}); if (bt[L.map] !== HUB.mapOf(g)) { bt[L.map] = HUB.mapOf(g); HUB.store.save(); } }
       HUB.log.info(`acc ${id}: ${L.why === 'boss' ? 'world boss done' : 'death-loop pause over'}, in ${HUB.mapOf(g)} -> back to ${L.map}`);
       const r = await travelTo(id, g, L.map);
       if (!r.ok) { L.done = true; HUB.log.info(`acc ${id}: back to farm: ${r.error}`); return; }
