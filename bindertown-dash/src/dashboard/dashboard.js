@@ -92,16 +92,12 @@ function accountCard(a) {
   a.compat && !a.compat.ok ? el('div', { class: 'acc-alert' }, '⚠ อ่านข้อมูลเกมไม่ครบ (เกมอัปเดต)') : null);
 }
 
-// Gold per hour right under the name, live: the last 10 minutes of the farm Gold the game's sleep screen counts (the average since
-// the game opened for the first minutes); before any, the last hour on this map from the farm book. Deaths/h and who drives follow.
+// Gold per hour right under the name: the figure the game's own sleep screen shows (farm Gold since the game opened, per hour)
 function moneyLine(a, s, open) {
   if (!open) return null;
-  const f = a.farmNow;
-  const gold = typeof s.goldPerHour === 'number' ? s.goldPerHour : f ? f.netHr || 0 : null;
-  return el('div', { class: 'acc-meta acc-money', title: 'Gold ต่อชั่วโมงตอนนี้ (10 นาทีล่าสุด นับแบบหน้าพักจอของเกม: ล้มมอน ขายอัตโนมัติ ลบค่ายา · เงินก้อนเกิน 5 ล้านไม่นับ) · ตัวขับ = ระบบที่คุมตัวละครอยู่' },
-    gold != null ? el('span', { class: gold >= 0 ? 'pos' : 'neg' }, `💰 ${gold >= 0 ? '+' : '-'}${short(Math.abs(gold))}/ชม.`) : el('span', { class: 'hint' }, '💰 กำลังวัด…'),
-    f && f.deathsHr ? el('span', { class: 'neg' }, ` ☠ ${f.deathsHr}/ชม.`) : null,
-    a.driver ? el('span', { class: 'hint' }, ` · ${a.driver}`) : null);
+  const g = s.goldPerHour;
+  return el('div', { class: 'acc-meta acc-money', title: 'Gold ต่อชั่วโมง นับแบบหน้าพักจอของเกม: Gold ที่ได้ตั้งแต่เปิดเกม ÷ เวลา (เงินก้อนเกิน 5 ล้านในครั้งเดียว เช่น ขายตลาด ไม่นับ)' },
+    typeof g === 'number' ? el('span', { class: 'pos' }, `💰 ${short(g)}/ชม.`) : el('span', { class: 'hint' }, '💰 กำลังวัด…'));
 }
 
 function startRename(a, node) {
@@ -775,7 +771,7 @@ function renderNow() {
   if (!state || editing) return;
   if (!state.accounts.some((a) => a.id === selected)) selected = state.accounts.length ? state.accounts[0].id : null;
   // account list: rebuild only when something on it changed
-  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && a.summary.rewards, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary)), Math.round((a.summary.goldPerHour || 0) / 10000), a.driver, a.farmNow && [a.farmNow.netHr, a.farmNow.deathsHr]]])]);
+  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && a.summary.rewards, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary)), Math.round((a.summary.goldPerHour || 0) / 10000)]])]);
   rebuild($('#accounts'), listKey, () => state.accounts.map(accountCard));
   $('#add').disabled = state.accounts.length >= state.maxAccounts;
 
