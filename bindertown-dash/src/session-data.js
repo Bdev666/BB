@@ -44,7 +44,7 @@ class AccountData {
     this.minimap = null;      // data URL of the game's own minimap
     this.startedAt = Date.now();
     this.kills = 0;
-    this.goldFarm = 0; this.goldJumps = 0; this.lastSilver = null;
+    this.goldFarm = 0; this.goldJumps = 0; this.lastSilver = null; this.goldSamples = []; // [t, goldFarm] for the live Gold/hour
     this.expGain = 0; this.jobGain = 0; this.deaths = 0; this.levelUps = 0; this.potionsUsed = 0; this.firstLevel = null;
     this.silverStart = null;
     this.killSilver = 0; // Silver from killing monsters only (spending never counts against it)
@@ -83,6 +83,8 @@ class AccountData {
         if (typeof rest.silver === 'number' && rest.silver > 0) {
           if (this.lastSilver != null) { const d = rest.silver - this.lastSilver; if (Math.abs(d) <= 5000000) this.goldFarm += d; else this.goldJumps++; }
           this.lastSilver = rest.silver;
+          const gs = this.goldSamples; const last = gs[gs.length - 1];
+          if (!last || t - last[0] >= 5000) { gs.push([t, this.goldFarm]); while (gs.length > 2 && t - gs[0][0] > 10 * 60000) gs.shift(); }
         }
         break;
       }
@@ -228,6 +230,18 @@ class AccountData {
     return b;
   }
 
+  // Gold per hour as it is right now: the last 10 minutes of the farm Gold the game's sleep screen counts (sales/mail jumps left out);
+  // with less than a minute of samples, the average since the game opened; null when there is nothing yet
+  goldRate(now = Date.now()) {
+    const gs = this.goldSamples || [];
+    if (gs.length >= 2) {
+      const a = gs[0]; const b = gs[gs.length - 1];
+      if (b[0] - a[0] >= 60000) return ((b[1] - a[1]) / (b[0] - a[0])) * HOUR;
+    }
+    const ms = now - this.startedAt;
+    return this.lastSilver != null && ms >= 120000 ? (this.goldFarm / ms) * HOUR : null;
+  }
+
   rates(now = Date.now()) {
     const hours = Math.max((now - this.startedAt) / HOUR, 1 / 60);
     this.dmgWindow = this.dmgWindow.filter((d) => now - d.t < 60 * 1000);
@@ -237,6 +251,7 @@ class AccountData {
       // the game's sleep-screen summary, since the game opened in BinderDash
       session: { kills: this.kills, deaths: this.deaths, levels: this.levelUps, potions: this.potionsUsed, exp: this.expGain, job: this.jobGain,
         gold: this.lastSilver != null ? this.goldFarm : null, goldJumps: this.goldJumps },
+      goldPerHour: this.goldRate(now),
       ...this.levelEta(),
       expPerHour: this.expTracker.perHour(),
       killsPerHour: this.kills / hours,

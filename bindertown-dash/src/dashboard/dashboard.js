@@ -82,17 +82,26 @@ function accountCard(a) {
     title: 'คลิก = ดูบัญชีนี้ · ดับเบิลคลิก = ไปที่เกม · Ctrl+1–9 เลือกบัญชี',
   },
   el('div', { class: 'acc-top' }, el('span', { class: 'dot ' + a.status }), name),
+  moneyLine(a, s, open),
   el('div', { class: 'acc-meta' },
     el('span', {}, s.level != null ? `Lv.${s.level}` : STATUS_TEXT[a.status] || a.status, a.memoryMB ? ` · ${num(a.memoryMB)} MB` : '', s.ping != null ? ` · ${s.ping} ms` : ''),
     open && s.rewards ? el('span', { class: 'gift', title: 'มีของรอรับ (Pass / จดหมาย)' }, `🎁 ${s.rewards}`) : null,
     open && s.expPerHour ? el('span', { class: 'pos' }, `${short(s.expPerHour)}/ชม.`) : null),
   open && s.maxHp ? [miniBar('hp', pct(s.hp, s.maxHp)), miniBar('sp', pct(s.sp, s.maxSp)), miniBar('exp', expPctOf(s))] : null,
-  // the same picture the log writes every 30 minutes: what it farms now and what it earns there (last hour on this map)
-  open && a.farmNow ? el('div', { class: 'acc-meta acc-health', title: 'ชั่วโมงล่าสุดบนแมพนี้ (เงินสุทธิ = เงินจากมอน + ของขาย NPC − ค่าตาย) · ตัวขับ = ระบบที่คุมตัวละครอยู่' },
-    el('span', {}, `💰 ${short(a.farmNow.netHr || 0)}/ชม.`), a.farmNow.deathsHr ? el('span', { class: 'neg' }, ` ☠ ${a.farmNow.deathsHr}/ชม.`) : null,
-    a.driver ? el('span', { class: 'hint' }, ` · ${a.driver}`) : null) : null,
   a.alerts.length ? el('div', { class: 'acc-alert', title: a.alerts.map((k) => (a.alertTexts || {})[k] || alertText(k)).join('\n') }, '⚠ ' + a.alerts.map((k) => { const t = (a.alertTexts || {})[k]; const c = t && t.replace(/\s*\((ตั้งไว้|ช่องลัด)[^)]*\)/g, ''); return c && c.length <= 40 ? c : alertText(k); }).join(' · ')) : null,
   a.compat && !a.compat.ok ? el('div', { class: 'acc-alert' }, '⚠ อ่านข้อมูลเกมไม่ครบ (เกมอัปเดต)') : null);
+}
+
+// Gold per hour right under the name, live: the last 10 minutes of the farm Gold the game's sleep screen counts (the average since
+// the game opened for the first minutes); before any, the last hour on this map from the farm book. Deaths/h and who drives follow.
+function moneyLine(a, s, open) {
+  if (!open) return null;
+  const f = a.farmNow;
+  const gold = typeof s.goldPerHour === 'number' ? s.goldPerHour : f ? f.netHr || 0 : null;
+  return el('div', { class: 'acc-meta acc-money', title: 'Gold ต่อชั่วโมงตอนนี้ (10 นาทีล่าสุด นับแบบหน้าพักจอของเกม: ล้มมอน ขายอัตโนมัติ ลบค่ายา · เงินก้อนเกิน 5 ล้านไม่นับ) · ตัวขับ = ระบบที่คุมตัวละครอยู่' },
+    gold != null ? el('span', { class: gold >= 0 ? 'pos' : 'neg' }, `💰 ${gold >= 0 ? '+' : '-'}${short(Math.abs(gold))}/ชม.`) : el('span', { class: 'hint' }, '💰 กำลังวัด…'),
+    f && f.deathsHr ? el('span', { class: 'neg' }, ` ☠ ${f.deathsHr}/ชม.`) : null,
+    a.driver ? el('span', { class: 'hint' }, ` · ${a.driver}`) : null);
 }
 
 function startRename(a, node) {
@@ -200,20 +209,6 @@ function renderProfile(a) {
     return el('div', { class: 'buff', title: `${b.name}: ${what}${count ? ` · ซ้อน ${count}` : ''}${left ? ` · เหลือ ${left}` : ''}` },
       el('span', { class: 'bi' }, ic), b.name, count ? el('b', { class: 'bn' }, '×' + count) : null, left ? el('small', {}, left) : null);
   }));
-
-  // what the game's own sleep screen shows, since the game opened (no estimates, nothing added up)
-  const S = r.session || {}; const hrs = Math.max(1 / 60, r.playMs / 3600000);
-  const ph = (v) => (v && r.playMs > 120000 ? ` (${num(Math.round(v / hrs))}/ชม.)` : '');
-  const sg = (v) => (v == null ? '-' : (v >= 0 ? '+' : '') + num(v));
-  const lines = [
-    `สรุปตั้งแต่เปิดเกม · ${dur(r.playMs)}`,
-    `ล้มมอน ${num(S.kills || 0)}${ph(S.kills)} · ตาย ${num(S.deaths || 0)} · เลเวลอัป ${num(S.levels || 0)} · ยาที่ใช้ ${num(S.potions || 0)}`,
-    `EXP +${num(S.exp || 0)}${ph(S.exp)} · Job EXP +${num(S.job || 0)} · Gold ${sg(S.gold)}${S.gold ? ph(S.gold) : ''}`,
-  ];
-  const box = $('#d-tiles');
-  if (!box.classList.contains('sleepsum')) { box.className = 'tiles sleepsum'; box.replaceChildren(el('h4', {}), el('p', {}), el('p', {})); }
-  lines.forEach((t, k) => { if (box.children[k].textContent !== t) box.children[k].textContent = t; });
-  box.title = 'นับแบบหน้าพักจอของเกม: Gold = Silver ในตัวที่เปลี่ยนไประหว่างฟาร์ม (ล้มมอน ขาย/หลอมอัตโนมัติ ลบค่ายา/ค่าเกิด) · เงินก้อนเกิน 5 ล้านในครั้งเดียว (ขายตลาด จดหมาย เทรด) ไม่นับ · ต่อชั่วโมงคิดจากเวลาตั้งแต่เปิดเกม';
 }
 
 function chips(container, list, current, onPick) {
@@ -780,7 +775,7 @@ function renderNow() {
   if (!state || editing) return;
   if (!state.accounts.some((a) => a.id === selected)) selected = state.accounts.length ? state.accounts[0].id : null;
   // account list: rebuild only when something on it changed
-  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && a.summary.rewards, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary))]])]);
+  const listKey = JSON.stringify([selected, state.accounts.map((a) => [a.id, a.name, a.status, a.alerts, a.memoryMB, a.compat && a.compat.ok, a.summary && a.summary.rewards, a.summary && [a.summary.name, a.summary.level, a.summary.ping, Math.round(a.summary.expPerHour || 0), Math.round(pct(a.summary.hp, a.summary.maxHp)), Math.round(pct(a.summary.sp, a.summary.maxSp)), Math.round(expPctOf(a.summary)), Math.round((a.summary.goldPerHour || 0) / 10000), a.driver, a.farmNow && [a.farmNow.netHr, a.farmNow.deathsHr]]])]);
   rebuild($('#accounts'), listKey, () => state.accounts.map(accountCard));
   $('#add').disabled = state.accounts.length >= state.maxAccounts;
 
@@ -938,16 +933,13 @@ if (dash.platform === 'darwin') {
   for (let n = w.nextNode(); n; n = w.nextNode()) if (/Ctrl|พร้อม Windows|มุมขวาล่าง/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/Ctrl\+/g, 'Cmd+').replace(/พร้อม Windows/g, 'ตอนเปิด Mac').replace(/มุมขวาล่าง/g, 'บนแถบเมนูด้านบน');
 }
 
-// fold up / down (remembered): the numbers block and the events (damage) log
+// fold up / down (remembered): the events (damage) log
 {
   const fold = (btn, box, cls, key, on, offTxt, onTxt) => { box.classList.toggle(cls, on); btn.textContent = on ? onTxt : offTxt; try { localStorage.setItem(key, on ? '1' : ''); } catch { /* storage off */ } };
-  const tb = $('#tiles-fold'); const prof = document.querySelector('.profile');
-  const tSet = (on) => fold(tb, prof, 'tiles-min', 'tilesMin', on, '📊 สรุป ▴', '📊 สรุป ▾');
-  tb.addEventListener('click', () => tSet(!prof.classList.contains('tiles-min')));
   const eb = $('#ev-fold'); const logs = document.querySelector('.logs');
   const eSet = (on) => fold(eb, logs, 'ev-min', 'evMin', on, 'ย่อ ▴', 'ขยาย ▾');
   eb.addEventListener('click', () => eSet(!logs.classList.contains('ev-min')));
-  try { tSet(localStorage.getItem('tilesMin') === '1'); eSet(localStorage.getItem('evMin') === '1'); } catch { /* storage off */ }
+  try { eSet(localStorage.getItem('evMin') === '1'); } catch { /* storage off */ }
 }
 
 // ---------- sleep view: every account at a glance, like the game's own sleep screen, live ----------

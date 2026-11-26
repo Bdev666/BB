@@ -13,6 +13,16 @@ ok('farm Gold counts small steps, leaves out jumps over 5M', () => {
   const s = d.rates(t).session;
   assert.strictEqual(s.gold, 100000); assert.strictEqual(s.goldJumps, 1);
 });
+ok('live Gold/hour: last 10 minutes, jumps left out, nothing before there is data', () => {
+  const d = new AccountData(); const t0 = d.startedAt;
+  const self = (silver, sec) => d.ingest({ type: 'self', silver, t: t0 + sec * 1000 });
+  self(1000000, 1); assert.strictEqual(d.goldRate(t0 + 30000), null);
+  for (let m = 1; m <= 12; m++) self(1000000 + m * 100000, m * 60); // +100k a minute = 6M/h
+  self(900000000, 12 * 60 + 5); // a market sale: not farming
+  const r = d.goldRate(t0 + 12 * 60000 + 6000);
+  assert.ok(Math.abs(r - 6000000) < 300000, String(r));
+  assert.strictEqual(d.rates(t0 + 12 * 60000 + 6000).goldPerHour, r);
+});
 ok('one death counted once (the game sends two messages)', () => {
   const d = new AccountData();
   d.ingest({ type: 'death', t: 1000 }); d.ingest({ type: 'death', t: 1500 }); d.ingest({ type: 'death', t: 9000 });

@@ -464,11 +464,9 @@ footer { flex-shrink: 0; padding-top: 4px; background: var(--bg); position: rela
 .gearrow.rich { background: rgba(255, 200, 60, .08); }
 /* fold up / down: the numbers block and the events log */
 .fold-btn { margin-left: auto; }
-.profile.tiles-min #d-tiles { display: none; }
 .logs.ev-min { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
 .logs.ev-min .log:not(.chat) .lines, .logs.ev-min .log:not(.chat) .chips { display: none; }
 .logs.ev-min .log:not(.chat) { flex: none; padding-top: 8px; padding-bottom: 8px; }
-.tiles-head { display: flex; justify-content: flex-end; margin-top: 8px; }
 /* bag: one clear line per row, the grade in colour, each gear piece on tap */
 .bag .item { align-items: flex-start; padding: 7px 0; }
 .bag .item .ic { flex: none; width: 30px; height: 30px; font-size: 16px; }
@@ -491,9 +489,6 @@ footer { flex-shrink: 0; padding-top: 4px; background: var(--bg); position: rela
 @media (min-width: 1700px) { .layout { grid-template-columns: 250px minmax(0, 1fr) 420px; } }
 .bag .item .acts .tiny { padding: 2px 6px; }
 /* sleep-screen style summary (instead of the number tiles) */
-.tiles.sleepsum { display: block; text-align: center; padding: 12px 10px 4px; }
-.tiles.sleepsum h4 { margin: 0 0 8px; font-size: 15px; }
-.tiles.sleepsum p { margin: 4px 0; font-size: 14.5px; line-height: 1.6; }
 
 /* =====================================================================
    2.0 look: calmer surfaces, one button style, gentle motion
@@ -540,7 +535,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
 /* summary strip */
-.tiles.sleepsum { background: rgba(0, 0, 0, .18); border-radius: 12px; border: 1px solid rgba(255, 255, 255, .05); margin-top: 8px; }
 
 /* ---------- sleep view ---------- */
 .sleep { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; padding: 28px 32px 20px; gap: 18px; overflow: auto;
@@ -574,11 +568,8 @@ body.sleeping-view .layout, body.sleeping-view .topbar, body.sleeping-view foote
 /* profile order: who → bars → stats → summary → controls → daily (the summary sits up top, short) */
 .profile { display: flex; flex-direction: column; flex: none; }
 .profile > .profile-head { order: 1; } .profile > .bars { order: 2; } .profile > .statsrow { order: 3; }
-.profile > .tiles-head { order: 4; display: none; } .profile > .tiles { order: 4; }
+.profile > .tiles { order: 4; }
 .profile > .controls { order: 5; margin-top: 10px; } .profile > .daily { order: 6; }
-.tiles.sleepsum { padding: 8px 10px; margin-top: 10px; border-top: 0; }
-.tiles.sleepsum h4 { font-size: 13.5px; margin-bottom: 4px; color: var(--muted); font-weight: 600; }
-.tiles.sleepsum p { font-size: 14px; margin: 2px 0; line-height: 1.5; }
 .statsrow { margin-top: 6px; }
 .ctl-row { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
 .ctl { min-height: 38px !important; }
