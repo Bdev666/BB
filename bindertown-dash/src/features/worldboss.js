@@ -151,6 +151,7 @@ HUB.bossWatchdog = async function bossWatchdog() {
     let why = '';
     if (trip.entered && !inArena && now - trip.at > 60000) why = 'the game took it out of the arena';
     else if (inArena && w && w.state !== 'live' && now - (w.seenAt || now) > 60000 && now - trip.at > 120000) why = 'the event is not live any more';
+    else if (inArena && w && w.state === 'live' && w.endsAt && now > w.endsAt + 180000 && now - (w.seenAt || now) > 120000 && now - trip.at > 120000) why = 'the game stopped reporting the event after its end time';
     else if (now - trip.at > 25 * 60000) why = 'too long';
     if (!why) continue;
     g.leaving = true;
@@ -167,6 +168,7 @@ HUB.onWorldBoss = function onWorldBoss(v) {
   }
   const before = HUB.bosses.world.get(v.kind);
   HUB.bosses.world.set(v.kind, { ...v, seenAt: Date.now(), goneFor: before && before.goneFor });
+  if (!before || before.state !== v.state) HUB.log.info(`world boss ${v.kind}: ${before ? before.state : 'first seen'} -> ${v.state}${v.hpFrac != null ? ` (HP ${Math.round(v.hpFrac * 100)}%)` : ''}${v.endsAt ? `, ends ${new Date(v.endsAt).toISOString().slice(11, 19)}Z` : ''}`); // the state changes are in the log, so a missed end can be told from a missing message
   if (before && before.state !== 'live' && v.state === 'live') {
     HUB.notify(null, 'worldBoss', `🌋 World Boss ${v.name} เริ่มแล้ว · เข้าร่วม ${v.fighters} คน${HUB.store.data.settings.worldBossAuto ? ' · ส่งทุกบัญชีไปตีแล้ว' : ''}`);
     if (HUB.store.data.settings.worldBossAuto && !(before.goneFor && Math.abs((v.startAt || 0) - before.goneFor) < 5 * 60 * 1000)) HUB.worldBossGo(v.kind, 'เริ่มเอง');

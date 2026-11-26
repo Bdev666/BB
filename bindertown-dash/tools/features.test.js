@@ -115,6 +115,17 @@ t('watchdog: leaves an account still fighting a live boss alone', async () => {
   HUB.openGames = () => [[1, g]]; HUB.mapOf = () => 'nacre_lagoon';
   await HUB.bossWatchdog(); assert.ok(g.bossTrip);
 });
+t('watchdog: an event the game stopped reporting past its end time is over', async () => {
+  const g = { inGame: true, demo: false, bossTrip: { kind: 'nacreon', entered: true, at: Date.now() - 20 * 60000, from: 'x', x: 1, y: 2 } };
+  HUB.bosses = { world: new Map([['nacreon', { state: 'live', endsAt: Date.now() - 6 * 60000, seenAt: Date.now() - 5 * 60000 }]]) };
+  HUB.openGames = () => [[1, g]]; HUB.mapOf = () => 'nacre_lagoon';
+  await HUB.bossWatchdog(); assert.strictEqual(g.bossTrip, null);
+  // still reporting (fresh message) -> a clock that is off must not pull the account out
+  const g2 = { inGame: true, demo: false, bossTrip: { kind: 'nacreon', entered: true, at: Date.now() - 20 * 60000, from: 'x' } };
+  HUB.bosses = { world: new Map([['nacreon', { state: 'live', endsAt: Date.now() - 6 * 60000, seenAt: Date.now() - 5000 }]]) };
+  HUB.openGames = () => [[2, g2]];
+  await HUB.bossWatchdog(); assert.ok(g2.bossTrip);
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');
