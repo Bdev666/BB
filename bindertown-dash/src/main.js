@@ -118,8 +118,6 @@ function publicState() {
         premium: HUB.isPremium(a.id, g), premiumMode: a.premium || 'auto', premiumGame: g.data && g.data.stats ? g.data.stats.premium : undefined,
         finder: HUB.finderStatus(g),
         driver: (() => { const d = HUB.driverOf(g); return d ? HUB.DRIVE_TH[d] : ''; })(),
-        silverUpHr: (() => { const B = g.balHist; if (!B || B.length < 6) return null; const a = B[0]; const b = B[B.length - 1]; return { perHour: Math.round((b[1] - a[1]) / Math.max(1, b[0] - a[0]) * 60), minutes: b[0] - a[0] }; })(),
-        farmNow: g.inGame && !g.demo ? (HUB.farmSummary(a.id, g.data.stats.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === HUB.mapOf(g)) || null) : null,
         deaths: HUB.deathCost(a.id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
         alerts: [...g.alerts],
