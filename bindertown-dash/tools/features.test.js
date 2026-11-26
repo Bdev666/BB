@@ -9,7 +9,7 @@ require(path.join(__dirname, '..', 'src', 'features', 'combat')); // WORLD_ARENA
 require(path.join(__dirname, '..', 'src', 'features', 'spam'));
 require(path.join(__dirname, '..', 'src', 'features', 'worldboss'));
 let n = 0;
-const pending = []; const t = (name, fn) => { const r = fn(); if (r && r.then) pending.push(r); n++; };
+let chain = Promise.resolve(); const pending = []; const t = (name, fn) => { n++; chain = chain.then(() => fn()); pending.length = 0; pending.push(chain); }; // one after the other (some share HUB)
 
 // ---- skill spam: presses only while AUTO fights ----
 const acc = (over = {}) => ({ inGame: true, status: 'online', win: { isDestroyed: () => false }, data: { stats: { auto: true, dead: false, sleeping: false } }, ...over });
@@ -76,6 +76,30 @@ t('warp gap: waits until the last warp is old enough, a named cooldown stretches
   const g = { lastWarpAt: Date.now() - 3500 };
   const t0 = Date.now(); await HUB.warpGap(g, 4000); assert.ok(Date.now() - t0 >= 400 && Date.now() - t0 < 1500);
   const g2 = { lastWarpAt: Date.now() - 10000 }; const t1 = Date.now(); await HUB.warpGap(g2, 4000); assert.ok(Date.now() - t1 < 100);
+});
+// ---- turbo refine: next strike right after each result, stops at the target / a refusal / a drop ----
+require(path.join(__dirname, '..', 'src', 'features', 'refine'));
+const turbo = async (replies, opts) => {
+  const g = { inGame: true, demo: false, status: 'online', win: { isDestroyed: () => false }, data: { stats: { silver: 1e9 } } };
+  HUB.games = new Map([[7, g]]); HUB.notify = () => {}; HUB.pushState = () => {};
+  HUB.pageRun = async () => ({ id: 'blacksmith', x: 1, y: 1, me: [1, 1] }); HUB.liveUi = async () => ({ auto: false }); HUB.gameCommand = async () => true; // already next to the smith
+  const sent = []; let i = 0;
+  HUB.sendInput = async (id, o) => { sent.push(o); const r = replies[i++]; if (r) setTimeout(() => HUB.refineResult(g, r), 5); return true; };
+  const t0 = Date.now(); await HUB.refineStart(7, opts);
+  for (let k = 0; k < 400 && g.turbo.running; k++) await new Promise((r) => setTimeout(r, 10));
+  return { g, sent, ms: Date.now() - t0 };
+};
+t('turbo refine: strikes until the target, each right after the last result', async () => {
+  const rs = [3, 4, 5].map((l) => ({ ok: true, itemId: `robe_t10+${l}#u`, level: l, reason: '' }));
+  const { g, sent, ms } = await turbo(rs, { itemId: 'robe_t10+2#u', target: 5 });
+  assert.strictEqual(g.turbo.level, 5, JSON.stringify(g.turbo)); assert.strictEqual(sent.length, 3); assert.strictEqual(sent[1].itemId, 'robe_t10+3#u'); assert.ok(ms < 1500, 'fast: ' + ms);
+  assert.strictEqual(g.turbo.why, 'ถึง +5 แล้ว');
+});
+t('turbo refine: stops on a refusal and on a drop', async () => {
+  let r = await turbo([{ ok: true, itemId: 'a+3#u', level: 3 }, { ok: false, itemId: 'a+3#u', level: 3, reason: 'Gold ไม่พอ' }], { itemId: 'a+2#u', target: 9 });
+  assert.strictEqual(r.g.turbo.why, 'Gold ไม่พอ'); assert.strictEqual(r.g.turbo.n, 2);
+  r = await turbo([{ ok: false, itemId: 'a+4#u', level: 4, reason: '' }], { itemId: 'a+5#u', target: 9, stopOnDrop: true });
+  assert.ok(/ตก/.test(r.g.turbo.why)); assert.strictEqual(r.g.turbo.drop, 1);
 });
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {

@@ -106,6 +106,12 @@ assert.strictEqual(ad.outgoing(frame('input', { type: 'ping', t: 99 })), null);
 ev = ad.incoming(frame('server', { type: 'pong', t: 1234.5, online: 7219 }), 1070);
 assert.deepStrictEqual([ev[0].ping, ev[0].online], [70, 7219]);
 
+// refine results: ok / level / refusal reason
+ev = ad.incoming(frame('server', { type: 'refineResult', ok: true, itemId: 'robe_t10+4#u', level: 4 }), 2000);
+assert.deepStrictEqual([ev[0].type, ev[0].ok, ev[0].level, ev[0].itemId, ev[0].reason], ['refineResult', true, 4, 'robe_t10+4#u', '']);
+ev = ad.incoming(frame('server', { type: 'refineResult', ok: false, itemId: 'x', reason: 'Gold ไม่พอ' }), 2000);
+assert.deepStrictEqual([ev[0].ok, ev[0].level, ev[0].reason], [false, null, 'Gold ไม่พอ']);
+
 // session data turns events into the dashboard's numbers
 const d = new AccountData();
 d.ingest({ type: 'self', silver: 100, xp: 0, level: 1, expPct: 10 });

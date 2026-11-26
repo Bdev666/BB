@@ -611,7 +611,7 @@ function renderControls(a) {
   const live = a.status === 'online';
   const etc = ((detail && detail.bag) || []).filter((it) => it.ids && it.ids.some((x) => /^drop_/.test(x.id)));
   const etcQty = etc.reduce((t, it) => t + it.qty, 0);
-  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver, a.spam, a.premium, a.premiumMode, a.premiumGame]);
+  const key = JSON.stringify([a.id, live, s.auto, s.sleeping, s.dead, etcQty, !!s.premium, gearCount(), tradableGear().length, a.autoRespawn, a.bounty, a.deaths && a.deaths.perHour, a.finder, a.driver, a.spam, a.premium, a.premiumMode, a.premiumGame, a.turbo && [a.turbo.running, a.turbo.level]]);
   rebuild($('#d-controls'), key, () => (live ? [
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '▶ การเล่น'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl' + (s.auto ? ' on' : ''), title: 'เปิด/ปิด AUTO ของเกม (เหมือนกดปุ่ม AUTO ในเกม)', onclick: () => cmd('auto') }, s.auto ? '■ AUTO เปิดอยู่' : '▶ AUTO ปิดอยู่'),
@@ -629,6 +629,7 @@ function renderControls(a) {
       el('button', { class: 'ctl', title: 'รับของในจดหมาย ภารกิจรายวัน/รายสัปดาห์ของ Pass และรางวัล Tier ของ Pass ที่พร้อมรับ (เหมือนกดปุ่มรับในเกม)', onclick: async (e) => { e.target.disabled = true; const r = await dash.invoke('claim-rewards', a.id); showBanner(r && r.ok ? `🎁 รับแล้ว: จดหมาย ${r.mail} · ภารกิจ ${r.daily + r.weekly} · Tier ของ Pass` : (r && r.error) || 'รับของไม่สำเร็จ'); setTimeout(() => { $('#banner').hidden = true; }, 3000); e.target.disabled = false; } }, '🎁 รับของทั้งหมด'))),
     el('div', { class: 'ctl-group' }, el('div', { class: 'ctl-gh' }, '💰 ของและเงิน'), el('div', { class: 'ctl-row' },
       el('button', { class: 'ctl', disabled: canSell() ? null : '', title: canSell() ? 'ซื้อยา HP/MP จากร้าน NPC โดยไม่ต้องเปิดหน้าเกม' : SELL_RULE, onclick: () => openBuy() }, '🧪 ซื้อยา'),
+      el('button', { class: 'ctl' + (a.turbo && a.turbo.running ? ' on' : ''), title: 'ตีบวกชิ้นที่เลือกรัวๆ ทันทีที่เซิร์ฟตอบ จนถึงเป้า', onclick: () => openTurbo(a) }, a.turbo && a.turbo.running ? `🔨 ตีรัว +${a.turbo.level}/${a.turbo.target}` : '🔨 ตีบวกรัว'),
       el('button', { class: 'ctl', disabled: tradableGear().length ? null : '', title: 'ลงขายอุปกรณ์ในตลาดกลาง ดูราคาตลาดตามชนิด+เกรดก่อน', onclick: () => openMarketSell() }, `🏪 ลงขายตลาดกลาง (${tradableGear().length})`),
       el('button', { class: 'ctl', disabled: gearCount() ? null : '', title: 'แยกชิ้นอุปกรณ์ในกระเป๋า (ของที่ล็อกไว้ในเกมจะไม่ถูกย่อย)', onclick: () => openSalvage() }, `🔨 ย่อยของ (${gearCount()})`),
       el('button', { class: 'ctl', disabled: etcQty && canSell() ? null : '', title: canSell() ? 'ขายของดรอปจากมอน (ETC) ทั้งหมดให้ NPC' : SELL_RULE, onclick: () => {

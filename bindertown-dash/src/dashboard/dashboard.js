@@ -693,6 +693,33 @@ async function openSalvage() {
 }
 
 // ---------- sell gear on the central market ----------
+// turbo refine: pick a piece (in the bag or worn), the target level, then strike as fast as the server answers
+async function openTurbo(a) {
+  const bag = ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear).map((x) => ({ id: x.id, name: b.name, where: 'กระเป๋า', locked: x.locked })));
+  const worn = await dash.invoke('refine-worn', a.id).catch(() => []);
+  const all = [...worn.map((w) => ({ id: w.id, name: w.name, where: 'สวมอยู่ · ' + w.slot })), ...bag];
+  const lv = (id) => { const m = /\+(\d+)/.exec(String(id).split('|')[0]); return m ? +m[1] : 0; };
+  const pick = el('select', { style: 'max-width:100%' }, ...all.map((x, i) => el('option', { value: String(i) }, `${x.name} +${lv(x.id)} · ${x.where}${x.locked ? ' 🔒' : ''}`)));
+  const target = el('input', { type: 'number', min: '1', max: '30', value: '15', style: 'width:64px' });
+  const protect = el('input', { type: 'checkbox' }); const drop = el('input', { type: 'checkbox', checked: '' });
+  const keep = el('input', { type: 'number', min: '0', step: '100000', value: '0', style: 'width:120px' });
+  const status = el('div', { class: 'hint' }, '');
+  const go = el('button', { class: 'primary' }, '🔨 เริ่มตีรัว'); const stop = el('button', { class: 'ctl' }, '■ หยุด');
+  const paint = () => { const t = ((state.accounts || []).find((x) => x.id === a.id) || {}).turbo; if (!t) { status.textContent = ''; return; }
+    status.textContent = `${t.running ? '⚡ กำลังตี' : 'จบ'} · +${t.level}/${t.target} · ${t.n} ครั้ง (สำเร็จ ${t.ok} · พลาด ${t.fail} · ตก ${t.drop}) · ${t.sec} วิ${t.why ? ' · ' + t.why : ''}`; go.disabled = !!t.running; stop.disabled = !t.running; };
+  go.onclick = async () => { const x = all[+pick.value]; if (!x) return; const r = await dash.invoke('refine-start', a.id, { itemId: x.id, target: +target.value, protect: protect.checked, stopOnDrop: drop.checked, keepSilver: +keep.value || 0 }); if (!r.ok) status.textContent = '✖ ' + r.error; };
+  stop.onclick = () => dash.invoke('refine-stop', a.id);
+  const timer = setInterval(() => { if ($('#modal').hidden) { clearInterval(timer); return; } paint(); }, 500);
+  openModal(`🔨 ตีบวกรัว · ${a.name}`, [
+    el('p', { class: 'hint' }, 'ส่งคำสั่งตีบวกของเกมชิ้นเดิมซ้ำทันทีที่เซิร์ฟตอบผลครั้งก่อน (ปุ่มตีอัตโนมัติของเกมหน่วงทุกครั้ง) · ใช้ Gold และวัตถุดิบเท่ากับกดปุ่มเอง · หยุดเมื่อถึงเป้า เกมปฏิเสธ (Gold/วัตถุดิบหมด) หรือกดหยุด'),
+    all.length ? el('label', {}, 'ชิ้นที่ตี ', pick) : el('p', {}, 'ไม่พบอุปกรณ์'),
+    el('div', { class: 'ctl-row' }, el('label', {}, 'ตีถึง + ', target), el('label', {}, el('span', {}, ' ใช้ตัวกันลดขั้น '), protect), el('label', {}, el('span', {}, ' หยุดเมื่อตก '), drop)),
+    el('label', {}, 'หยุดเมื่อ Silver เหลือ ≤ ', keep, ' (0 = ไม่เช็ค)'),
+    el('div', { class: 'ctl-row' }, go, stop), status,
+  ]);
+  paint();
+}
+
 function tradableGear() {
   return ((detail && detail.bag) || []).flatMap((b) => (b.ids || []).filter((x) => x.gear && !x.locked && !x.bound).map((x) => ({ ...x, name: b.name })));
 }

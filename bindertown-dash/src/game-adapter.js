@@ -402,6 +402,7 @@ class BinderTownAdapter {
         if (text) out.push({ type: 'chat', channel: 'system', from: '', text, backlog: false, t: at });
         break;
       }
+      case 'refineResult': out.push({ type: 'refineResult', ok: !!e.ok, itemId: String(e.itemId || ''), level: typeof e.level === 'number' ? e.level : null, reason: e.reason ? String(e.reason) : '', t: at }); break;
       case 'humanCheck': out.push({ type: 'humanCheck', why: String(e.why || ''), t: at }); break;
       case 'humanResult': out.push({ type: 'humanResult', ok: !!e.ok, t: at }); break;
       case 'notice': if (e.text) out.push({ type: 'info', notice: true, text: String(e.text), t: at }); break;
@@ -655,4 +656,4 @@ class BinderTownAdapter {
   }
 }
 
-module.exports = { MARKET_FILTER, rarityOf, baseOf, isSupply, KNOWN_TYPES, KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };
+module.exports = { pretty, MARKET_FILTER, rarityOf, baseOf, isSupply, KNOWN_TYPES, KNOWN_BUILDS, POTIONS, encodeInput, marketPrice, decodeFrame, serverEvents, unpackEvent, BinderTownAdapter, SNAPSHOT_JS, pretty, dropPrice };

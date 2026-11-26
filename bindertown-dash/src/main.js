@@ -10,7 +10,7 @@ HUB.path = require('path');
 const { Store } = require('./store');
 HUB.telegram = require('./telegram');
 const icons = require('./icons');
-const __m1 = require('./game-adapter'); const BinderTownAdapter = __m1.BinderTownAdapter; const SNAPSHOT_JS = __m1.SNAPSHOT_JS; HUB.encodeInput = __m1.encodeInput; HUB.POTIONS = __m1.POTIONS; const KNOWN_BUILDS = __m1.KNOWN_BUILDS; HUB.MARKET_FILTER = __m1.MARKET_FILTER; HUB.rarityOf = __m1.rarityOf; HUB.baseOf = __m1.baseOf; HUB.pretty = __m1.pretty;
+const __m1 = require('./game-adapter'); const BinderTownAdapter = __m1.BinderTownAdapter; const SNAPSHOT_JS = __m1.SNAPSHOT_JS; HUB.encodeInput = __m1.encodeInput; HUB.itemLabel = __m1.pretty; HUB.POTIONS = __m1.POTIONS; const KNOWN_BUILDS = __m1.KNOWN_BUILDS; HUB.MARKET_FILTER = __m1.MARKET_FILTER; HUB.rarityOf = __m1.rarityOf; HUB.baseOf = __m1.baseOf; HUB.pretty = __m1.pretty;
 const { AccountData } = require('./session-data');
 const { DemoFeed } = require('./demo');
 const APP_ICON = HUB.path.join(__dirname, 'assets', 'icon.png');
@@ -114,6 +114,7 @@ function publicState() {
         compat: g.inGame && !g.demo ? g.adapter.health() : null,
         bounty: HUB.bountyStatus(g),
         spam: { ...HUB.spamCfg(a.id), state: g.spamState || '' },
+        turbo: HUB.refineView(g),
         premium: HUB.isPremium(a.id, g), premiumMode: a.premium || 'auto', premiumGame: g.data && g.data.stats ? g.data.stats.premium : undefined,
         finder: HUB.finderStatus(g),
         driver: (() => { const d = HUB.driverOf(g); return d ? HUB.DRIVE_TH[d] : ''; })(),
@@ -498,6 +499,7 @@ function handleEvents(id, events) {
       case 'kill':
         g.lastHitAt = Date.now();
         // a real-DPS measurement is running: keep this character's own hits
+        if (ev.type === 'refineResult') HUB.refineResult(g, ev);
         if (ev.type === 'hit') { HUB.fightHit(g, ev); HUB.selftest.combatHit(id, ev); HUB.abHit(g, ev); }
         if (ev.type === 'kill' && g.ab && g.ab.phase) HUB.abBucket(g).kills++;
         if (ev.type === 'kill' && g.fight && ev.target === HUB.pretty(g.fight.mob)) HUB.fightEnd(g, true);
@@ -865,6 +867,7 @@ require('./features/bounty');
 require('./features/worldboss');
 require('./features/calibration');
 require('./features/spam');
+require('./features/refine');
 
 // ---------- problem report ----------
 function makeReport() {
@@ -1265,6 +1268,9 @@ function registerIpc() {
   handle('world-boss-go', (kind) => HUB.worldBossGo(String(kind || ''), 'ปุ่ม'));
   handle('bounty', (id, on) => HUB.bountyStart(id, on !== false));
   handle('spam-set', (id, cfg) => HUB.spamSet(id, cfg || {}));
+  handle('refine-start', (id, o) => HUB.refineStart(id, o || {}));
+  handle('refine-stop', (id) => HUB.refineStop(id));
+  handle('refine-worn', (id) => { const g = HUB.games.get(id); return g && g.adapter ? Object.entries((g.adapter.loadout && g.adapter.loadout.equip) || {}).map(([slot, ref]) => ({ slot, id: ref, name: HUB.itemLabel ? HUB.itemLabel(ref) : HUB.baseOf(ref) })) : []; });
   handle('spam-slots', (id) => HUB.spamSlots(id));
   handle('claim-rewards', (id) => HUB.claimRewards(id));
   handle('farm-find', (id, on) => HUB.finderStart(id, !!on));
