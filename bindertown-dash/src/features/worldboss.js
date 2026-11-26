@@ -247,16 +247,17 @@ HUB.bossTick = function bossTick() {
   }
 };
 
+const r5 = (ms) => Math.round(ms / 5000) * 5000; // countdowns in 5 s steps: the state only changes when the display would
 HUB.bossView = function bossView() {
   const now = Date.now();
   return {
     field: [...HUB.bosses.field.values()]
       .filter((b) => !b.closed)
-      .map((b) => ({ name: b.name, map: b.map, up: !b.until || b.until <= now, inMs: b.until ? Math.max(0, b.until - now) : 0, killer: b.killer }))
+      .map((b) => ({ name: b.name, map: b.map, up: !b.until || b.until <= now, inMs: b.until ? r5(Math.max(0, b.until - now)) : 0, killer: b.killer }))
       .sort((a, b) => (a.up === b.up ? a.inMs - b.inMs : a.up ? -1 : 1)),
     world: [...HUB.bosses.world.values()].map((w) => ({
       name: w.name, kind: w.kind, state: w.state, fighters: w.fighters, hpFrac: w.hpFrac,
-      inMs: w.state === 'live' ? 0 : Math.max(0, (w.nextAt || w.startAt) - now), endsInMs: w.endsAt ? Math.max(0, w.endsAt - now) : 0,
+      inMs: w.state === 'live' ? 0 : r5(Math.max(0, (w.nextAt || w.startAt) - now)), endsInMs: w.endsAt ? r5(Math.max(0, w.endsAt - now)) : 0,
     })),
   };
 };

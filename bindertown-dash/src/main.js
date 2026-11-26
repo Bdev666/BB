@@ -122,7 +122,6 @@ function publicState() {
         farmNow: g.inGame && !g.demo ? (HUB.farmSummary(a.id, g.data.stats.level || 0, Math.floor(now / 60000) - 60).find((x) => x.map === HUB.mapOf(g)) || null) : null,
         deaths: HUB.deathCost(a.id, g),
         autoRespawn: g.autoRespawn ? { on: !!g.autoRespawn.on, why: g.autoRespawn.why || '', count: g.autoRespawns || 0 } : null,
-        lastMsgAgo: g.lastMsgAt ? Math.round((now - g.lastMsgAt) / 1000) : null,
         alerts: [...g.alerts],
         alertTexts: Object.fromEntries(g.alertTexts || []), // what each alert says, in Thai with the item's real name
       };
@@ -133,18 +132,23 @@ function publicState() {
 HUB.visible = (w) => !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized();
 let pushTimer = null;
 let sleepMode = false; let sleepShown = [];
+// The dashboard gets the whole state; it is built and sent only when someone can see it, at most 4 times a second while the window
+// has focus, once a second when it is just visible behind something, and never when what would be sent is what it already has.
+let lastSent = '';
 HUB.pushState = function pushState() {
   if (pushTimer) return;
+  const focused = !!(HUB.dashboard && !HUB.dashboard.isDestroyed() && HUB.dashboard.isFocused());
   pushTimer = setTimeout(() => {
     pushTimer = null;
     updateTray();
     logChanges();
-    // nobody looking: don't build or send anything
     const targets = [HUB.dashboard, settingsWin].filter(HUB.visible);
-    if (!targets.length) return;
-    const st = publicState();
+    if (!targets.length) { lastSent = ''; return; }
+    const st = publicState(); const json = JSON.stringify(st);
+    if (json === lastSent) return;
+    lastSent = json;
     for (const w of targets) w.webContents.send('dash:state', st);
-  }, 250);
+  }, focused ? 250 : 1000);
 };
 
 // ---------- notifications ----------
@@ -283,6 +287,18 @@ function openGame(id, opts = {}) {
     if (choice === 1) { e.preventDefault(); win.hide(); HUB.pushState(); }
     else if (choice === 2) e.preventDefault();
   });
+  // A frozen game page never answers a page script: every caller used to wait for ever (and the one-by-one page read stopped
+  // for all accounts behind it). Every script now gives up after 10 s (the page keeps whatever it was doing); callers already
+  // treat a failed script as "no answer".
+  { const wc = win.webContents; const run = wc.executeJavaScript.bind(wc);
+    wc.executeJavaScript = (code, gesture) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const n = (win.__jsTimeouts = (win.__jsTimeouts || 0) + 1);
+        if (n <= 3 || n % 50 === 0) HUB.log.warn(`acc ${id}: a page script got no answer in 10 s (${n}x) - the game page is busy or frozen`);
+        reject(new Error('page script timed out'));
+      }, 10000);
+      run(code, gesture).then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+    }); }
   win.on('closed', () => {
     HUB.games.set(id, { ...blankRuntime(), accId: id }); // accId too: without it a boss fight was logged for "acc undefined"
     updateSleepBlocker();
@@ -411,18 +427,19 @@ async function pollSnapshots() {
   if (process.env.BD_NO_SNAPSHOT) return; // diagnostics only: measure a game page with nothing read from it
   const looking = HUB.visible(HUB.dashboard);
   const now = Date.now();
-  for (const [id, g] of HUB.openGames()) {
-    if (g.snapshotBusy || g.status === 'maintenance' || g.status === 'crashed') continue;
+  // all accounts at once: one slow page no longer holds up the others (each read has its own 10 s limit)
+  await Promise.all(HUB.openGames().map(async ([id, g]) => {
+    if (g.snapshotBusy || g.status === 'maintenance' || g.status === 'crashed') return;
     // dashboard closed: every 3 s is plenty for alerts
     // every second only for the account open in the Dashboard; the others (and all when nobody looks) every 3 s:
     // each read runs inside the game page, so fewer reads = smoother games
-    if ((!looking || sleepMode || id !== watchedId) && g.lastSnapAt && now - g.lastSnapAt < 3000) continue;
+    if ((!looking || sleepMode || id !== watchedId) && g.lastSnapAt && now - g.lastSnapAt < 3000) return;
     g.lastSnapAt = now;
     g.snapshotBusy = true;
     try {
       const wantMini = looking && id === watchedId;
       const snap = await g.win.webContents.executeJavaScript(`window.__bdWantMini=${wantMini};` + SNAPSHOT_JS, true);
-      if (!g.win || g.win.isDestroyed()) continue;
+      if (!g.win || g.win.isDestroyed()) return;
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
       if (g.inGame && !g.demo) HUB.farmBalance(g);
@@ -442,7 +459,7 @@ async function pollSnapshots() {
     } catch { /* page reloading */ } finally {
       g.snapshotBusy = false;
     }
-  }
+  }));
   HUB.pushState();
 }
 
@@ -780,13 +797,13 @@ function onWorldEvent(ev) {
   }
   HUB.pushState();
 }
-HUB.eventsView = HUB.eventsView = function eventsView() {
-  const now = Date.now();
+HUB.eventsView = function eventsView() {
+  const now = Date.now(); const r5 = (ms) => Math.round(ms / 5000) * 5000; // 5 s steps: the state only changes when the display would
   return [...worldEvents.values()].flatMap((e) => [
-    e.active && (!e.active.endsAt || e.active.endsAt > now) ? { name: e.active.name, perks: e.active.perks, endsInMs: e.active.endsAt ? e.active.endsAt - now : 0, live: true } : null,
-    e.next && e.next.startsAt > now ? { name: e.next.name, perks: [], startsInMs: e.next.startsAt - now, live: false } : null,
+    e.active && (!e.active.endsAt || e.active.endsAt > now) ? { name: e.active.name, perks: e.active.perks, endsInMs: e.active.endsAt ? r5(e.active.endsAt - now) : 0, live: true } : null,
+    e.next && e.next.startsAt > now ? { name: e.next.name, perks: [], startsInMs: r5(e.next.startsAt - now), live: false } : null,
   ]).filter(Boolean);
-};;
+};
 
 // gear that may go on the market: not locked, not bound
 require('./features/market-listings');
@@ -1547,8 +1564,11 @@ app.whenReady().then(() => {
   ];
   const failed = new Map();
   for (const [name, fn, every, first] of SCHEDULE) {
+    let running = 0; // when 0: free; else when the last run started (an async run that is still going is not started again)
     const run = () => {
-      try { const r = fn(); if (r && typeof r.catch === 'function') r.catch((e) => report(e)); } catch (e) { report(e); }
+      if (running && Date.now() - running < 120000) return; // still busy: stacking runs on a slow page was what made things lag
+      running = Date.now();
+      try { const r = fn(); if (r && typeof r.then === 'function') r.then(() => { running = 0; }, (e) => { running = 0; report(e); }); else running = 0; } catch (e) { running = 0; report(e); }
       function report(e) { const n = (failed.get(name) || 0) + 1; failed.set(name, n); if (n <= 3 || n % 100 === 0) HUB.log.warn(`timer "${name}" failed (${n}x): ${e && e.message}`); }
     };
     if (first) setTimeout(run, first);
