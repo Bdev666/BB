@@ -101,6 +101,20 @@ t('turbo refine: stops on a refusal and on a drop', async () => {
   r = await turbo([{ ok: false, itemId: 'a+4#u', level: 4, reason: '' }], { itemId: 'a+5#u', target: 9, stopOnDrop: true });
   assert.ok(/ตก/.test(r.g.turbo.why)); assert.strictEqual(r.g.turbo.drop, 1);
 });
+// ---- world boss watchdog: the end message was missed, the account is stuck as "boss" ----
+t('watchdog: an account that was in the arena and is out gets its way back', async () => {
+  HUB.WORLD_ARENAS = new Set(['rootfall_barrow', 'nacre_lagoon']);
+  const g = { inGame: true, demo: false, bossTrip: { kind: 'nacreon', entered: true, at: Date.now() - 10 * 60000, from: 'bellglass_cathedral', x: 43, y: 98 } };
+  HUB.bosses = { world: new Map([['nacreon', { state: 'live', seenAt: Date.now() }]]) };
+  HUB.openGames = () => [[1, g]]; HUB.mapOf = () => 'crown_of_tides'; HUB.warpGap = async () => {}; HUB.sendInput = async () => true; HUB.liveUi = async () => ({ auto: true }); HUB.gameCommand = async () => true;
+  await HUB.bossWatchdog();
+  assert.strictEqual(g.bossTrip, null); assert.deepStrictEqual([g.loopBack.map, g.loopBack.why, g.loopBack.done], ['bellglass_cathedral', 'boss', false]);
+});
+t('watchdog: leaves an account still fighting a live boss alone', async () => {
+  const g = { inGame: true, demo: false, bossTrip: { kind: 'nacreon', entered: true, at: Date.now() - 3 * 60000, from: 'x' } };
+  HUB.openGames = () => [[1, g]]; HUB.mapOf = () => 'nacre_lagoon';
+  await HUB.bossWatchdog(); assert.ok(g.bossTrip);
+});
 // ---- settings and learned data are saved apart (config.json small, stats.json the rest); an old config hands them over ----
 t('store: stats move out of config.json and come back on load', () => {
   const fs = require('fs'); const os = require('os');

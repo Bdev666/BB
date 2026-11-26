@@ -95,6 +95,7 @@ const BOSS_SPOT_JS = (type) => `(() => { try { const g = window.__game; const st
   return { x: Math.round(x), y: Math.round(y), how, d: Math.hypot(x - me.x, y - me.y), me: [Math.round(me.x), Math.round(me.y)] }; } catch (e) { return null; } })()`;
 HUB.walkToBossThenAuto = async function walkToBossThenAuto(id, kind, again = false) {
   const g = HUB.games.get(id); if (!g || !g.win || g.win.isDestroyed()) return;
+  if (g.bossTrip) g.bossTrip.entered = true; // it got into the arena: from now on "not in the arena" means it was taken out
   const type = HUB.WORLD_TYPES[kind] || '';
   let spot = null;
   if (again) { // got up again: only walk when it woke up out of AUTO's reach (16 tiles) of the boss
@@ -120,19 +121,42 @@ HUB.walkToBossThenAuto = async function walkToBossThenAuto(id, kind, again = fal
   HUB.log.info(`acc ${id}: world boss -> walked to the ${spot && spot.how ? spot.how : 'arena'}${spot && spot.d != null ? ` (${Math.round(spot.d)} tiles left)` : ''}, AUTO on`);
   if (!(await HUB.liveUi(id)).auto) await HUB.gameCommand(id, 'auto', {});
 };
+// one account's way out of a world boss: leave the arena (when still in it), remember the farm spot, AUTO on again
+async function leaveBoss(id, g, kind, why) {
+  const inArena = g.inGame && !g.demo && HUB.WORLD_ARENAS.has(HUB.mapOf(g));
+  if (inArena) { await HUB.warpGap(g); await HUB.sendInput(id, { type: 'worldBossWarp', enter: false, kind }); }
+  HUB.log.info(`acc ${id}: world boss over (${why}) -> ${inArena ? 'left the arena' : 'already out'} (back toward ${g.bossTrip ? g.bossTrip.from : 'town'})`);
+  if (g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from)) g.loopBack = { map: g.bossTrip.from, x: g.bossTrip.x, y: g.bossTrip.y, at: Date.now(), done: false, why: 'boss' };
+  g.bossTrip = null;
+  setTimeout(async () => { if (!(await HUB.liveUi(id)).auto) HUB.gameCommand(id, 'auto', {}); }, 8000);
+}
 async function worldBossLeave(kind) {
   for (const [id, g] of HUB.openGames()) {
     const inArena = g.inGame && !g.demo && HUB.WORLD_ARENAS.has(HUB.mapOf(g));
     if (!(g.bossTrip && g.bossTrip.kind === kind) && !inArena) continue;
-    await HUB.warpGap(g); // eslint-disable-line no-await-in-loop
-    await HUB.sendInput(id, { type: 'worldBossWarp', enter: false, kind }); // eslint-disable-line no-await-in-loop
-    HUB.log.info(`acc ${id}: world boss over -> left the arena (back toward ${g.bossTrip ? g.bossTrip.from : 'town'})`);
-    if (g.bossTrip && g.bossTrip.from && !HUB.WORLD_ARENAS.has(g.bossTrip.from)) g.loopBack = { map: g.bossTrip.from, x: g.bossTrip.x, y: g.bossTrip.y, at: Date.now(), done: false, why: 'boss' };
-    g.bossTrip = null;
-    setTimeout(async () => { if (!(await HUB.liveUi(id)).auto) HUB.gameCommand(id, 'auto', {}); }, 8000);
+    await leaveBoss(id, g, kind, 'event ended'); // eslint-disable-line no-await-in-loop
     await HUB.sleep(400); // eslint-disable-line no-await-in-loop
   }
 }
+// The end of the event is seen from the game's boss message; when that message is missed (a log: a boss ended at 22:37, the
+// accounts stood in town 40 minutes with the driver still "world boss", AUTO off and no way back), the accounts' own state
+// says it: they were in the arena and are not any more, or the event is not live and has not been for a while, or it is just
+// far too long. Checked every 15 s.
+HUB.bossWatchdog = async function bossWatchdog() {
+  const now = Date.now();
+  for (const [id, g] of HUB.openGames()) {
+    const trip = g.bossTrip; if (!trip || !g.inGame || g.demo || g.leaving) continue;
+    const inArena = HUB.WORLD_ARENAS.has(HUB.mapOf(g));
+    const w = HUB.bosses.world.get(trip.kind);
+    let why = '';
+    if (trip.entered && !inArena && now - trip.at > 60000) why = 'the game took it out of the arena';
+    else if (inArena && w && w.state !== 'live' && now - (w.seenAt || now) > 60000 && now - trip.at > 120000) why = 'the event is not live any more';
+    else if (now - trip.at > 25 * 60000) why = 'too long';
+    if (!why) continue;
+    g.leaving = true;
+    try { await leaveBoss(id, g, trip.kind, why + ' (watchdog)'); } finally { g.leaving = false; } // eslint-disable-line no-await-in-loop
+  }
+};
 
 HUB.onWorldBoss = function onWorldBoss(v) {
   // the event's real length (start -> end) for the Build Lab

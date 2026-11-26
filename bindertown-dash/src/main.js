@@ -1533,6 +1533,7 @@ app.whenReady().then(() => {
     ['boss fight timer', HUB.fightTick, 5000],
     ['alerts, idle, RAM', tick, 15000],
     ['boss clocks', HUB.bossTick, 15000],
+    ['world boss watchdog', HUB.bossWatchdog, 15000],
     ['market listings', HUB.marketTick, 15000],
     ['respawn in place', HUB.autoRespawnTick, 15000],
     ['farm: ledger, stuck AUTO, way back, finder', HUB.farmTick, 15000],
