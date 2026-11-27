@@ -286,15 +286,15 @@ function openGame(id, opts = {}) {
     else if (choice === 2) e.preventDefault();
   });
   // A frozen game page never answers a page script: every caller used to wait for ever (and the one-by-one page read stopped
-  // for all accounts behind it). Every script now gives up after 10 s (the page keeps whatever it was doing); callers already
+  // for all accounts behind it). Every script now gives up after 60 s (the page read after 10 s; scripts that walk or wait inside the page can take a while); callers already
   // treat a failed script as "no answer".
   { const wc = win.webContents; const run = wc.executeJavaScript.bind(wc);
-    wc.executeJavaScript = (code, gesture) => new Promise((resolve, reject) => {
+    wc.executeJavaScript = (code, gesture, limitMs = 60000) => new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const n = (win.__jsTimeouts = (win.__jsTimeouts || 0) + 1);
-        if (n <= 3 || n % 50 === 0) HUB.log.warn(`acc ${id}: a page script got no answer in 10 s (${n}x) - the game page is busy or frozen`);
+        if (n <= 3 || n % 50 === 0) HUB.log.warn(`acc ${id}: a page script got no answer in ${Math.round(limitMs / 1000)} s (${n}x) - the game page is busy or frozen`);
         reject(new Error('page script timed out'));
-      }, 10000);
+      }, limitMs);
       run(code, gesture).then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
     }); }
   win.on('closed', () => {
@@ -436,7 +436,7 @@ async function pollSnapshots() {
     g.snapshotBusy = true;
     try {
       const wantMini = looking && id === watchedId;
-      const snap = await g.win.webContents.executeJavaScript(`window.__bdWantMini=${wantMini};` + SNAPSHOT_JS, true);
+      const snap = await g.win.webContents.executeJavaScript(`window.__bdWantMini=${wantMini};` + SNAPSHOT_JS, true, 10000);
       if (!g.win || g.win.isDestroyed()) return;
       const prevName = g.data.stats.name;
       handleEvents(id, g.adapter.snapshot(snap));
